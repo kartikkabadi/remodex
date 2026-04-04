@@ -36,6 +36,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
+        service.setCurrentTrustedMacDeviceId(macDeviceID)
         service.relaySessionId = "saved-session"
         service.relayUrl = relayURL
         service.relayMacDeviceId = macDeviceID
@@ -63,6 +64,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
+        service.setCurrentTrustedMacDeviceId(macDeviceID)
         service.trustedSessionResolverOverride = {
             throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
         }
@@ -130,10 +132,10 @@ final class ContentViewModelReconnectTests: XCTestCase {
 
         XCTAssertEqual(reconnectURL, "\(relayURL)/resolved-current-session")
         XCTAssertEqual(service.normalizedCurrentTrustedMacDeviceId, currentMacDeviceID)
-        XCTAssertEqual(service.normalizedRelayMacDeviceId, currentMacDeviceID)
+        XCTAssertNil(service.normalizedRelayMacDeviceId)
     }
 
-    func testForegroundReconnectKeepsRetryIntentArmedAfterRetryableFailures() async {
+    func testForegroundReconnectStopsAfterRetryLimitWithRetryableFailures() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         var attempts = 0
@@ -151,9 +153,9 @@ final class ContentViewModelReconnectTests: XCTestCase {
         await viewModel.attemptAutoReconnectOnForegroundIfNeeded(codex: service)
 
         XCTAssertEqual(attempts, 2)
-        XCTAssertTrue(service.shouldAutoReconnectOnForeground)
-        XCTAssertNil(service.lastErrorMessage)
-        XCTAssertEqual(service.connectionRecoveryState, .retrying(attempt: 2, message: "Reconnecting..."))
+        XCTAssertFalse(service.shouldAutoReconnectOnForeground)
+        XCTAssertEqual(service.lastErrorMessage, "Could not reconnect. Tap Reconnect to try again.")
+        XCTAssertEqual(service.connectionRecoveryState, .idle)
     }
 
     func testManualReconnectCancelsStuckTrustedSessionResolve() async {
@@ -171,6 +173,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
+        service.setCurrentTrustedMacDeviceId(macDeviceID)
         service.relaySessionId = "saved-session"
         service.relayUrl = relayURL
         service.relayMacDeviceId = macDeviceID
@@ -378,6 +381,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
+        service.setCurrentTrustedMacDeviceId(macDeviceID)
         service.relayUrl = relayURL
         service.relayMacDeviceId = macDeviceID
         service.lastErrorMessage = "old error"
@@ -473,7 +477,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
         }
         viewModel.connectOverride = { codex, _ in
             codex.messagesByThread = [
-                "thread-target-new": [makeMessage(threadID: "thread-target-new", text: "target-new")]
+                "thread-target-new": [self.makeMessage(threadID: "thread-target-new", text: "target-new")]
             ]
             await codex.disconnect()
             throw CodexServiceError.disconnected

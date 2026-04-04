@@ -759,6 +759,23 @@ final class CodexService {
 
         setCurrentTrustedMacDeviceId(bootstrapDeviceId)
     }
+
+    deinit {
+        MainActor.assumeIsolated {
+            trustedSessionResolveTask?.cancel()
+            messagePersistenceDebounceTask?.cancel()
+            coalescedRevertRefreshTask?.cancel()
+            threadListSyncTask?.cancel()
+            activeThreadSyncTask?.cancel()
+            runningThreadWatchSyncTask?.cancel()
+            postConnectSyncTask?.cancel()
+            gptAccountLoginSyncTask?.cancel()
+
+            notificationObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+            notificationObserverTokens.removeAll()
+            notificationCenterDelegateProxy = nil
+        }
+    }
 }
 
 private extension String {

@@ -23,7 +23,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testRememberRelayPairingForcesFreshQRBootstrapEvenForTrustedMac() {
-        let service = CodexService()
+        let service = makeService()
         let macDeviceID = "mac-\(UUID().uuidString)"
         let originalPublicKey = Data(repeating: 1, count: 32).base64EncodedString()
         let freshQRPublicKey = Data(repeating: 2, count: 32).base64EncodedString()
@@ -52,7 +52,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testRememberRelayPairingShowsHandshakeStateForBrandNewMac() {
-        let service = CodexService()
+        let service = makeService()
         let freshQRPublicKey = Data(repeating: 4, count: 32).base64EncodedString()
 
         service.rememberRelayPairing(
@@ -72,7 +72,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testResetSecureTransportStatePreservesRePairRequiredState() {
-        let service = CodexService()
+        let service = makeService()
         service.relaySessionId = "session-\(UUID().uuidString)"
         service.relayUrl = "ws://relay.local/relay"
         service.secureConnectionState = .rePairRequired
@@ -85,7 +85,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testApplyingResolvedTrustedSessionResetsReplayCursorWhenLiveSessionChanges() {
-        let service = CodexService()
+        let service = makeService()
         let macDeviceID = "mac-\(UUID().uuidString)"
 
         service.relaySessionId = "stale-session"
@@ -113,7 +113,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testApplyingResolvedTrustedSessionKeepsReplayCursorWhenLiveSessionIsUnchanged() {
-        let service = CodexService()
+        let service = makeService()
         let macDeviceID = "mac-\(UUID().uuidString)"
 
         service.relaySessionId = "same-session"
@@ -141,7 +141,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testTrustMacPromotesCurrentTrustedMacDeviceId() {
-        let service = CodexService()
+        let service = makeService()
         let macDeviceID = "mac-\(UUID().uuidString)"
 
         service.trustMac(
@@ -176,7 +176,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
         )
         SecureStore.writeString(macDeviceID, for: CodexSecureKeys.relayMacDeviceId)
 
-        let service = CodexService()
+        let service = makeService()
 
         XCTAssertEqual(service.normalizedCurrentTrustedMacDeviceId, macDeviceID)
         XCTAssertEqual(
@@ -202,7 +202,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
         )
         SecureStore.writeString("mac-missing", for: CodexSecureKeys.lastTrustedMacDeviceId)
 
-        let service = CodexService()
+        let service = makeService()
 
         XCTAssertNil(service.normalizedCurrentTrustedMacDeviceId)
         XCTAssertNil(SecureStore.readString(for: CodexSecureKeys.currentTrustedMacDeviceId))
@@ -226,7 +226,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
         )
         SecureStore.writeString(macDeviceID, for: CodexSecureKeys.lastTrustedMacDeviceId)
 
-        let service = CodexService()
+        let service = makeService()
 
         XCTAssertEqual(service.normalizedCurrentTrustedMacDeviceId, macDeviceID)
         XCTAssertEqual(
@@ -236,7 +236,7 @@ final class CodexSecurePairingStateTests: XCTestCase {
     }
 
     func testClearSavedRelaySessionFallsBackToCurrentTrustedMacState() {
-        let service = CodexService()
+        let service = makeService()
         let macDeviceID = "mac-\(UUID().uuidString)"
         let publicKey = Data(repeating: 15, count: 32).base64EncodedString()
 
@@ -311,8 +311,18 @@ final class CodexSecurePairingStateTests: XCTestCase {
         SecureStore.deleteValue(for: CodexSecureKeys.lastTrustedMacDeviceId)
     }
 
-    private func makeService(defaults: UserDefaults) -> CodexService {
-        let service = CodexService(defaults: defaults)
+    private func makeService(defaults: UserDefaults? = nil) -> CodexService {
+        let resolvedDefaults: UserDefaults
+        if let defaults {
+            resolvedDefaults = defaults
+        } else {
+            let suiteName = "CodexSecurePairingStateTests.\(UUID().uuidString)"
+            let isolatedDefaults = UserDefaults(suiteName: suiteName) ?? .standard
+            isolatedDefaults.removePersistentDomain(forName: suiteName)
+            resolvedDefaults = isolatedDefaults
+        }
+
+        let service = CodexService(defaults: resolvedDefaults)
         Self.retainedServices.append(service)
         return service
     }
