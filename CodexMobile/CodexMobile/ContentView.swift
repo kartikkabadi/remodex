@@ -820,6 +820,9 @@ struct ContentView: View {
             closeSidebar()
         }
 
+        if !navigationPath.isEmpty {
+            navigationPath = NavigationPath()
+        }
         selectedThread = thread
         preferredSplitCompactColumn = .detail
         codex.activeThreadId = thread.id

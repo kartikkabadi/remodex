@@ -8,6 +8,7 @@ import StoreKit
 import UIKit
 
 struct SettingsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage("codex.appFontStyle") private var appFontStyleRawValue = AppFont.defaultStoredStyleRawValue
 
     var body: some View {
@@ -25,6 +26,9 @@ struct SettingsView: View {
                 SettingsConnectionCard()
             }
             .padding()
+            // Keep settings readable in the iPad detail column instead of stretching cards edge-to-edge.
+            .frame(maxWidth: settingsContentMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .font(AppFont.body())
         .navigationTitle("Settings")
@@ -35,6 +39,10 @@ struct SettingsView: View {
             get: { AppFont.Style(rawValue: appFontStyleRawValue) ?? AppFont.defaultStyle },
             set: { appFontStyleRawValue = $0.rawValue }
         )
+    }
+
+    private var settingsContentMaxWidth: CGFloat? {
+        PadPresentationStyle.usesPadPresentation(horizontalSizeClass: horizontalSizeClass) ? 760 : nil
     }
 }
 
