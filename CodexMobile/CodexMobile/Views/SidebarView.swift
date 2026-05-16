@@ -1,12 +1,12 @@
 // FILE: SidebarView.swift
 // Purpose: Orchestrates the sidebar experience with modular presentation components.
-//          Top: brand toolbar + search field + Remodex title block + connection chip.
-//          Body: project / chat list. Bottom: SidebarBottomActionBar with the
-//          primary Chat FAB (glass on iOS 26, accent pill on iOS 18).
+//          Top: brand toolbar. Body: native scroll with search + project / chat list.
+//          Bottom: SidebarBottomActionBar with the primary Chat FAB (glass on
+//          iOS 26, accent pill on iOS 18).
 // Layer: View
 // Exports: SidebarView
-// Depends on: CodexService, SidebarHeaderView, SidebarTitleBlock,
-//             SidebarThreadListView, SidebarBottomActionBar, SidebarSearchField
+// Depends on: CodexService, SidebarHeaderView, SidebarThreadListView,
+//             SidebarBottomActionBar, SidebarSearchField
 
 import SwiftUI
 
@@ -44,31 +44,6 @@ struct SidebarView: View {
                 onClose: onClose,
                 overflowActions: overflowMenuActions
             )
-
-            SidebarTitleBlock(
-                computerName: codex.trustedPairPresentation?.name,
-                isConnected: codex.isConnected
-            )
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-
-            // Sits under the Remodex title + computer chip. Keep it above the
-            // list (not inside `safeAreaBar`) so `@FocusState` flips reliably
-            // and the trailing X dismiss button appears on focus.
-            SidebarSearchField(text: $searchText, isActive: $isSearchActive)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-
-            if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
-                isLoadingThreads: codex.isLoadingThreads,
-                threadCount: codex.threads.count
-            ) {
-                SidebarThreadsInlineLoadingView()
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(.opacity)
-            }
 
             threadListWithBottomBar
         }
@@ -442,10 +417,30 @@ struct SidebarView: View {
     // iOS 26 bar while dropping taps from the Terminal pill inside the drawer.
     @ViewBuilder
     private var threadListWithBottomBar: some View {
-        threadList
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                bottomActionBar
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                SidebarSearchField(text: $searchText, isActive: $isSearchActive)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
+                    isLoadingThreads: codex.isLoadingThreads,
+                    threadCount: codex.threads.count
+                ) {
+                    SidebarThreadsInlineLoadingView()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
+                }
+
+                threadList
             }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomActionBar
+        }
     }
 
     private var threadList: some View {

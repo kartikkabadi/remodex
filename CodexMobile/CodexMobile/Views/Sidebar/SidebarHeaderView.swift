@@ -1,5 +1,5 @@
 // FILE: SidebarHeaderView.swift
-// Purpose: Top sidebar row with logo, detached utility shortcut (settings),
+// Purpose: Top sidebar row with logo/title, detached utility shortcut (settings),
 //          overflow creation menu, and the hamburger close affordance. All
 //          icon buttons route through `SidebarToolbarIconButton` so they
 //          share one visual treatment.
@@ -28,6 +28,11 @@ struct SidebarHeaderView: View {
         AdaptiveGlassContainer(spacing: 10) {
             HStack(spacing: 10) {
                 appLogo
+                Text("Remodex")
+                    .font(AppFont.system(size: 28, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
 
                 Spacer(minLength: 0)
 

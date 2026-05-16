@@ -38,7 +38,7 @@ struct SidebarThreadRowView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 6)
         .contextMenu { contextMenuContent }
         .threadRenamePrompt(state: $renamePrompt) { newName in
             onRename?(newName)
