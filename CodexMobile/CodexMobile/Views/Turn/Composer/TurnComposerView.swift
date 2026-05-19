@@ -2,7 +2,7 @@
 // Purpose: Renders the turn composer input, queued-draft actions, attachments, and send/stop controls.
 // Layer: View Component (orchestrator)
 // Exports: TurnComposerView, TurnComposerInputChangeHandler
-// Depends on: SwiftUI, AdaptiveGlassModifier, ComposerAttachmentsPreview, FileAutocompletePanel, SkillAutocompletePanel, SlashCommandAutocompletePanel, ComposerBottomBar, QueuedDraftsPanel, FileMentionChip, TurnComposerInputTextView, TurnComposerSecondaryBar
+// Depends on: SwiftUI, AdaptiveGlassModifier, ComposerAttachmentsPreview, FileAutocompletePanel, SkillAutocompletePanel, SlashCommandAutocompletePanel, ComposerBottomBar, QueuedDraftsPanel, TurnMentionChips, TurnComposerInputTextView, TurnComposerSecondaryBar
 
 import SwiftUI
 import UIKit
@@ -105,6 +105,9 @@ struct TurnComposerView: View {
     let onSteerQueuedDraft: (String) -> Void
     let onRemoveQueuedDraft: (String) -> Void
     let onSend: () -> Void
+    // Call sites can hide the lower runtime/git/access row for constrained
+    // surfaces, but project-backed new-chat drafts keep it visible.
+    var showsSecondaryBar: Bool = true
 
     @State private var composerInputHeight: CGFloat = 32
 
@@ -125,6 +128,40 @@ struct TurnComposerView: View {
                     onSteerQueuedDraft: onSteerQueuedDraft,
                     onRemoveQueuedDraft: onRemoveQueuedDraft
                 )
+
+                if showsSecondaryBar && hasWorkingDirectory {
+                    TurnComposerSecondaryBar(
+                        isInputFocused: isInputFocused.wrappedValue,
+                        isEmptyThread: isEmptyThread,
+                        hasWorkingDirectory: hasWorkingDirectory,
+                        isWorktreeProject: isWorktreeProject,
+                        selectedAccessMode: selectedAccessMode,
+                        contextWindowUsage: contextWindowUsage,
+                        rateLimitBuckets: rateLimitBuckets,
+                        isLoadingRateLimits: isLoadingRateLimits,
+                        rateLimitsErrorMessage: rateLimitsErrorMessage,
+                        shouldAutoRefreshUsageStatus: shouldAutoRefreshUsageStatus,
+                        showsGitBranchSelector: showsGitBranchSelector,
+                        isGitBranchSelectorEnabled: isGitBranchSelectorEnabled,
+                        availableGitBranchTargets: availableGitBranchTargets,
+                        gitBranchesCheckedOutElsewhere: gitBranchesCheckedOutElsewhere,
+                        gitWorktreePathsByBranch: gitWorktreePathsByBranch,
+                        selectedGitBaseBranch: selectedGitBaseBranch,
+                        currentGitBranch: currentGitBranch,
+                        gitDefaultBranch: gitDefaultBranch,
+                        isLoadingGitBranchTargets: isLoadingGitBranchTargets,
+                        isSwitchingGitBranch: isSwitchingGitBranch,
+                        isCreatingGitWorktree: isCreatingGitWorktree,
+                        onSelectGitBranch: onSelectGitBranch,
+                        onCreateGitBranch: onCreateGitBranch,
+                        onSelectGitBaseBranch: onSelectGitBaseBranch,
+                        onRefreshGitBranches: onRefreshGitBranches,
+                        onRefreshUsageStatus: onRefreshUsageStatus,
+                        onSelectAccessMode: onSelectAccessMode,
+                        canHandOffToWorktree: canHandOffToWorktree,
+                        onTapCreateWorktree: onTapCreateWorktree
+                    )
+                }
 
                 VStack(spacing: 0) {
                     TurnComposerAccessorySection(
@@ -169,10 +206,15 @@ struct TurnComposerView: View {
                         isInputFocused.wrappedValue = true
                     }
                     .onChange(of: input) { _, newValue in
-                        onInputChanged(newValue)
+                        // Defer the observable-model mutation out of the .onChange action
+                        // to avoid AttributeGraph cycles when the parent re-renders.
+                        DispatchQueue.main.async {
+                            onInputChanged(newValue)
+                        }
                     }
 
                     ComposerBottomBar(
+                        hasWorkingDirectory: hasWorkingDirectory,
                         orderedModelOptions: orderedModelOptions,
                         selectedModelID: selectedModelID,
                         selectedModelTitle: selectedModelTitle,
@@ -191,6 +233,14 @@ struct TurnComposerView: View {
                         isThreadRunning: isThreadRunning,
                         showsSendButton: showsSendButton,
                         voiceButtonPresentation: voiceButtonPresentation,
+                        selectedAccessMode: selectedAccessMode,
+                        contextWindowUsage: contextWindowUsage,
+                        rateLimitBuckets: rateLimitBuckets,
+                        isLoadingRateLimits: isLoadingRateLimits,
+                        rateLimitsErrorMessage: rateLimitsErrorMessage,
+                        shouldAutoRefreshUsageStatus: shouldAutoRefreshUsageStatus,
+                        onRefreshUsageStatus: onRefreshUsageStatus,
+                        onSelectAccessMode: onSelectAccessMode,
                         onTapAddImage: onTapAddImage,
                         onTapTakePhoto: onTapTakePhoto,
                         onTapVoice: onTapVoice,
@@ -234,46 +284,12 @@ struct TurnComposerView: View {
                         .offset(y: -8)
                 }
                 .zIndex(2)
-
-                // Kept as a separate component so the lower meta bar can evolve without reopening this file.
-                TurnComposerSecondaryBar(
-                    isInputFocused: isInputFocused.wrappedValue,
-                    isEmptyThread: isEmptyThread,
-                    hasWorkingDirectory: hasWorkingDirectory,
-                    isWorktreeProject: isWorktreeProject,
-                    selectedAccessMode: selectedAccessMode,
-                    contextWindowUsage: contextWindowUsage,
-                    rateLimitBuckets: rateLimitBuckets,
-                    isLoadingRateLimits: isLoadingRateLimits,
-                    rateLimitsErrorMessage: rateLimitsErrorMessage,
-                    shouldAutoRefreshUsageStatus: shouldAutoRefreshUsageStatus,
-                    showsGitBranchSelector: showsGitBranchSelector,
-                    isGitBranchSelectorEnabled: isGitBranchSelectorEnabled,
-                    availableGitBranchTargets: availableGitBranchTargets,
-                    gitBranchesCheckedOutElsewhere: gitBranchesCheckedOutElsewhere,
-                    gitWorktreePathsByBranch: gitWorktreePathsByBranch,
-                    selectedGitBaseBranch: selectedGitBaseBranch,
-                    currentGitBranch: currentGitBranch,
-                    gitDefaultBranch: gitDefaultBranch,
-                    isLoadingGitBranchTargets: isLoadingGitBranchTargets,
-                    isSwitchingGitBranch: isSwitchingGitBranch,
-                    isCreatingGitWorktree: isCreatingGitWorktree,
-                    onSelectGitBranch: onSelectGitBranch,
-                    onCreateGitBranch: onCreateGitBranch,
-                    onSelectGitBaseBranch: onSelectGitBaseBranch,
-                    onRefreshGitBranches: onRefreshGitBranches,
-                    onRefreshUsageStatus: onRefreshUsageStatus,
-                    onSelectAccessMode: onSelectAccessMode,
-                    canHandOffToWorktree: canHandOffToWorktree,
-                    onTapCreateWorktree: onTapCreateWorktree
-                )
             }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeInOut(duration: 0.18), value: isInputFocused.wrappedValue)
     }
 
     private var placeholderText: String {
@@ -412,87 +428,14 @@ private struct TurnComposerAccessorySection: View {
                 .padding(.bottom, 8)
             }
 
-            if state.showsMentionedFiles {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(state.composerMentionedFiles) { file in
-                            FileMentionChip(fileName: file.fileName) {
-                                onRemoveMentionedFile(file.id)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-            }
-
-            if state.showsMentionedSkills {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(state.composerMentionedSkills) { skill in
-                            SkillMentionChip(skillName: skill.name) {
-                                onRemoveMentionedSkill(skill.id)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-
-            if state.showsMentionedPlugins {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(state.composerMentionedPlugins) { plugin in
-                            PluginMentionChip(pluginName: plugin.displayName ?? plugin.name) {
-                                onRemoveMentionedPlugin(plugin.id)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-
-            if state.showsSubagentsSelection {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ComposerActionChip(
-                            title: "Subagents",
-                            symbolName: "point.3.connected.trianglepath.dotted",
-                            tintColor: .teal,
-                            removeAccessibilityLabel: "Remove subagents"
-                        ) {
-                            onRemoveComposerSubagentsSelection()
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-
-            if let reviewTarget = state.reviewTarget {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ComposerActionChip(
-                            title: "Code Review: \(reviewTarget.title)",
-                            symbolName: "checklist",
-                            tintColor: .teal,
-                            removeAccessibilityLabel: "Remove code review"
-                        ) {
-                            onRemoveComposerReviewSelection()
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-
+            TurnComposerMentionChipSections(
+                state: state,
+                onRemoveMentionedFile: onRemoveMentionedFile,
+                onRemoveMentionedSkill: onRemoveMentionedSkill,
+                onRemoveMentionedPlugin: onRemoveMentionedPlugin,
+                onRemoveComposerReviewSelection: onRemoveComposerReviewSelection,
+                onRemoveComposerSubagentsSelection: onRemoveComposerSubagentsSelection
+            )
         }
     }
 }

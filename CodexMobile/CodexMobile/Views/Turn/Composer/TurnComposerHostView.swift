@@ -38,6 +38,9 @@ struct TurnComposerHostView: View {
     let onTapVoice: () -> Void
     let onCancelVoiceRecording: () -> Void
     let onSend: () -> Void
+    // Pass-through for the New Chat draft surface; defaults to true so every
+    // existing call site keeps its meta bar.
+    var showsSecondaryBar: Bool = true
 
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
@@ -102,6 +105,8 @@ struct TurnComposerHostView: View {
         let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex)
         let selectedModelID = codex.visibleSelectedModelIDForComposer()
         let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer()
+        let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
+            && !SidebarThreadGrouping.isRootlessChatThread(thread)
 
         TurnComposerView(
             input: $viewModel.input,
@@ -118,7 +123,7 @@ struct TurnComposerHostView: View {
             activeTurnID: activeTurnID,
             isThreadRunning: isThreadRunning,
             isEmptyThread: isEmptyThread,
-            hasWorkingDirectory: thread.gitWorkingDirectory != nil,
+            hasWorkingDirectory: hasComposerWorkingDirectory,
             isWorktreeProject: isWorktreeProject,
             orderedModelOptions: orderedModelOptions,
             selectedModelID: selectedModelID,
@@ -294,7 +299,8 @@ struct TurnComposerHostView: View {
             onRemoveQueuedDraft: { draftID in
                 viewModel.removeQueuedDraft(id: draftID, codex: codex, threadID: thread.id)
             },
-            onSend: onSend
+            onSend: onSend,
+            showsSecondaryBar: showsSecondaryBar
         )
     }
 }

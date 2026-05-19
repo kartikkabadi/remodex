@@ -30,6 +30,7 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
     let onClose: () -> Void
     let onOpenSettings: () -> Void
     let onOpenTerminal: () -> Void
+    let onOpenNewChatDraft: (NewChatDraftSource, String?) -> Void
     let onNewChatCreationStateChange: (Bool) -> Void
     let onOpenThread: (CodexThread) -> Void
     // Centered connect/reconnect card shown when the relay is offline and the
@@ -54,6 +55,8 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
     @State private var lastGroupedThreadsFingerprint: Int = 0
     @State private var lastBadgeFingerprint: Int = 0
     @State private var projectlessChatRootPaths: [String] = []
+    @AppStorage(SidebarProjectExpansionState.collapsedProjectGroupIDsStorageKey)
+    private var collapsedProjectGroupIDsStorage = ""
 
     var body: some View {
         // The header is hosted via `adaptiveTopBar` — `safeAreaBar(edge:.top)`
@@ -229,15 +232,19 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
         }
     }
 
-    // Routes the primary Chat button through the active sidebar scope.
+    // Opens a draft composer first; the real thread is created only after the first send.
+    // Seeds the draft with the latest used project so the pill under the prompt has a sensible
+    // default the user can still change via the picker.
     private func handleNewChatButtonTap() {
-        switch selectedContentScope {
-        case .projects:
-            // Shows a native sheet so folder names and full paths stay readable on small screens.
-            activeSidebarSheet = .newChatProjectPicker
-        case .chats:
-            handleNewChatTap(preferredProjectPath: nil)
-        }
+        prepareSidebarForChatNavigation()
+        onOpenNewChatDraft(.generalChat, defaultNewChatProjectPath)
+    }
+
+    // Bottom Chat pill is the fast rootless draft entry: no project preselection,
+    // no picker pill, and the real Codex-style cwd is minted on first send.
+    private func handleRootlessChatDraftTap() {
+        prepareSidebarForChatNavigation()
+        onOpenNewChatDraft(.generalChat, nil)
     }
 
     // Starts a chat without a working directory (cwd == nil) directly from the sidebar row.
@@ -455,6 +462,10 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
         )
     }
 
+    private var defaultNewChatProjectPath: String? {
+        newChatProjectChoices.first?.projectPath
+    }
+
     // Keeps the chooser in sync with the same project buckets shown in the sidebar.
     private var newChatProjectChoices: [SidebarProjectChoice] {
         SidebarThreadGrouping.makeProjectChoices(
@@ -469,6 +480,27 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
             return .projects
         case .chats:
             return .chats
+        }
+    }
+
+    private var visibleProjectGroupIDs: Set<String> {
+        SidebarProjectExpansionState.projectGroupIDs(in: groupedThreads)
+    }
+
+    private func areAllProjectFoldersCollapsed(_ projectGroupIDs: Set<String>) -> Bool {
+        let collapsedIDs = SidebarProjectExpansionState.decodePersistedGroupIDs(
+            collapsedProjectGroupIDsStorage
+        )
+        return !projectGroupIDs.isEmpty && projectGroupIDs.isSubset(of: collapsedIDs)
+    }
+
+    private func toggleAllProjectFolders(_ projectGroupIDs: Set<String>) {
+        guard !projectGroupIDs.isEmpty else { return }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            collapsedProjectGroupIDsStorage = areAllProjectFoldersCollapsed(projectGroupIDs)
+                ? ""
+                : SidebarProjectExpansionState.encodePersistedGroupIDs(projectGroupIDs)
         }
     }
 
@@ -527,19 +559,9 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
                         .padding(.top, 12)
                         .padding(.bottom, 12)
 
-                    SidebarContentScopePicker(selection: $selectedContentScope)
+                    sidebarScopeRow
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
-
-                    if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
-                        isLoadingThreads: codex.isLoadingThreads,
-                        threadCount: codex.threads.count
-                    ) {
-                        SidebarThreadsInlineLoadingView()
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 8)
-                            .transition(.opacity)
-                    }
 
                     threadList
                 }
@@ -600,7 +622,9 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
             runBadgeStateByThreadID: cachedRunBadges,
             onSelectThread: selectThread,
             onCreateThreadInProjectGroup: { group in
-                handleNewChatTap(preferredProjectPath: group.projectPath)
+                prepareSidebarForChatNavigation()
+                let source: NewChatDraftSource = group.kind == .chat ? .generalChat : .folderChat
+                onOpenNewChatDraft(source, group.projectPath)
             },
             onArchiveProjectGroup: { group in
                 projectGroupPendingArchive = group
@@ -638,11 +662,41 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
         }
     }
 
+    // Keeps transient sync feedback inside the scope row so list fetches do not
+    // add a separate row and shift the chat list vertically.
+    private var sidebarScopeRow: some View {
+        let projectGroupIDs = visibleProjectGroupIDs
+        let shouldShowToggle = selectedContentScope == .projects && !projectGroupIDs.isEmpty
+        let areAllCollapsed = areAllProjectFoldersCollapsed(projectGroupIDs)
+        let shouldShowSyncStatus = SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
+            isLoadingThreads: codex.isLoadingThreads,
+            threadCount: codex.threads.count
+        )
+
+        return HStack(spacing: 12) {
+            if shouldShowSyncStatus {
+                SidebarThreadsInlineLoadingView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            } else {
+                SidebarContentScopePicker(selection: $selectedContentScope)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            if shouldShowToggle && !shouldShowSyncStatus {
+                SidebarFolderExpansionToggleButton(
+                    areAllFoldersCollapsed: areAllCollapsed,
+                    action: { toggleAllProjectFolders(projectGroupIDs) }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+    }
+
     private var bottomActionBar: some View {
         SidebarBottomActionBar(
             isChatEnabled: canCreateThread,
             isCreatingThread: isCreatingThread,
-            onTapChat: handleNewChatButtonTap,
+            onTapChat: handleRootlessChatDraftTap,
             onTapTerminal: openTerminal
         )
     }
@@ -745,14 +799,22 @@ private struct SidebarThreadsInlineLoadingView: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
+                .scaleEffect(0.76)
+                .frame(width: 12, height: 12)
             Text("Syncing chats")
-                .font(AppFont.caption())
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+                .font(AppFont.callout(weight: .medium))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .adaptiveGlass(
+            .regular,
+            isInteractive: false,
+            fallbackMaterial: .ultraThinMaterial,
+            in: Capsule(style: .continuous)
+        )
+        .accessibilityLabel("Syncing chats")
     }
 }
 
