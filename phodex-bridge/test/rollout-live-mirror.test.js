@@ -367,6 +367,51 @@ test("phone-origin rollouts do not emit mirrored updates", async (t) => {
   assert.deepEqual(outbound, []);
 });
 
+test("telegram-origin active runs mirror final assistant text", async (t) => {
+  const { homeDir, rolloutPath } = createTemporaryRolloutHome({
+    threadId: "thread-telegram",
+    originator: "remodex_telegram",
+    source: "vscode",
+    lines: [],
+  });
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = homeDir;
+  t.after(() => {
+    restoreCodexHome(previousCodexHome);
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  const outbound = [];
+  const controller = createRolloutLiveMirrorController({
+    sendApplicationResponse(message) {
+      outbound.push(JSON.parse(message));
+    },
+    pollIntervalMs: 5,
+    idleTimeoutMs: 100,
+  });
+  t.after(() => controller.stopAll());
+
+  controller.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: {
+      threadId: "thread-telegram",
+    },
+  }));
+  await wait(20);
+
+  appendRolloutLines(rolloutPath, [
+    taskStarted("turn-telegram"),
+    agentMessage("TELEGRAM_REPLY"),
+    taskComplete("turn-telegram"),
+  ]);
+  await wait(30);
+
+  const agentMessageEvent = outbound.find((message) => message.method === "codex/event/agent_message");
+  assert.equal(agentMessageEvent?.params?.threadId, "thread-telegram");
+  assert.equal(agentMessageEvent?.params?.turnId, "turn-telegram");
+  assert.equal(agentMessageEvent?.params?.message, "TELEGRAM_REPLY");
+});
+
 test("desktop-origin idle watchers stream new rollout growth after the phone reopens the thread", async (t) => {
   const { homeDir, rolloutPath } = createTemporaryRolloutHome({
     threadId: "thread-grow",
@@ -453,6 +498,17 @@ function taskStarted(turnId) {
       type: "task_started",
       turn_id: turnId,
       model_context_window: 258400,
+    },
+  });
+}
+
+function taskComplete(turnId) {
+  return JSON.stringify({
+    timestamp: "2026-03-15T19:47:41.000Z",
+    type: "event_msg",
+    payload: {
+      type: "task_complete",
+      turn_id: turnId,
     },
   });
 }

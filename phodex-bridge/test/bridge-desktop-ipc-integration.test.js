@@ -23,6 +23,7 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
   let ipcServerSocket = null;
   let bridge = null;
   let fakeCodex = null;
+  const originalExitCode = process.exitCode;
 
   await new Promise((resolve) => relayServer.once("listening", resolve));
   relayServer.on("connection", (socket) => {
@@ -77,6 +78,7 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
     ipcServer.close();
     ipcServerSocket?.destroy();
     fs.rmSync(tempDir, { recursive: true, force: true });
+    process.exitCode = originalExitCode;
   });
 
   bridge = startBridge({

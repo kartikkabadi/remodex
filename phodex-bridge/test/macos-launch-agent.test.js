@@ -186,6 +186,11 @@ test("startMacOSBridgeService kickstarts the launch agent after bootstrap", () =
       REMODEX_DEVICE_STATE_DIR: rootDir,
       REMODEX_RELAY: "ws://127.0.0.1:9000/relay",
       UID: String(TEST_UID),
+      REMODEX_TELEGRAM_ENABLED: "1",
+      REMODEX_TELEGRAM_BOT_TOKEN: "123456:secret-token",
+      REMODEX_TELEGRAM_POLL_INTERVAL_MS: "2500",
+      REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED: "1",
+      REMODEX_TELEGRAM_PRO_ENTITLED: "true",
     };
 
     startMacOSBridgeService({
@@ -211,7 +216,18 @@ test("startMacOSBridgeService kickstarts the launch agent after bootstrap", () =
         ["launchctl", "kickstart", "-k", `gui/${TEST_UID}/com.remodex.bridge`],
       ]
     );
-    assert.equal(readDaemonConfig({ env })?.extraRelaySessions, undefined);
+    const daemonConfig = readDaemonConfig({ env });
+    assert.equal(daemonConfig?.extraRelaySessions, undefined);
+    assert.equal(daemonConfig?.telegramEnabled, true);
+    assert.equal(daemonConfig?.telegramBotToken, "123456:secret-token");
+    assert.equal(daemonConfig?.telegramPollIntervalMs, 2500);
+    assert.equal(daemonConfig?.telegramProEntitlementRequired, true);
+    assert.equal(daemonConfig?.telegramProEntitled, true);
+    const plist = fs.readFileSync(
+      path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist"),
+      "utf8"
+    );
+    assert.doesNotMatch(plist, /secret-token/);
   });
 });
 
@@ -364,8 +380,18 @@ test("mergeBridgeStatusForDaemon stops preserving startup errors once Codex has 
 
 test("getMacOSBridgeServiceStatus reports launchd + runtime metadata together", () => {
   withTempDaemonEnv(({ rootDir }) => {
-    writeDaemonConfig({ relayUrl: "ws://127.0.0.1:9000/relay" });
-    writePairingSession({ sessionId: "session-2" });
+    writeDaemonConfig({
+      relayUrl: "ws://127.0.0.1:9000/relay",
+      telegramEnabled: true,
+      telegramBotToken: "123456:secret-token",
+    });
+    writePairingSession({
+      pairingCode: "PAIR123",
+      pairingPayload: {
+        relay: "ws://127.0.0.1:9000/relay",
+        sessionId: "session-2",
+      },
+    });
     writeBridgeStatus({ state: "running", connectionStatus: "connected", pid: 55 });
 
     const plistPath = path.join(rootDir, "LaunchAgents", "com.remodex.bridge.plist");
@@ -383,8 +409,11 @@ test("getMacOSBridgeServiceStatus reports launchd + runtime metadata together", 
     assert.equal(status.launchdLoaded, true);
     assert.equal(status.launchdPid, 55);
     assert.equal(status.daemonConfig?.relayUrl, "ws://127.0.0.1:9000/relay");
+    assert.equal(status.daemonConfig?.telegramBotToken, "<redacted>");
     assert.equal(status.bridgeStatus?.connectionStatus, "connected");
-    assert.equal(status.pairingSession?.pairingPayload?.sessionId, "session-2");
+    assert.equal(status.pairingSession?.pairingCode, "<redacted>");
+    assert.equal(status.pairingSession?.pairingPayload?.sessionId, "<redacted>");
+    assert.equal(status.pairingSession?.pairingPayload?.relay, "ws://127.0.0.1:9000/relay");
   });
 });
 

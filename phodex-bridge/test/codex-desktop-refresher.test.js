@@ -125,6 +125,79 @@ test("readBridgeConfig keeps safe defaults and explicit overrides", () => {
       },
     },
   });
+  const telegramConfig = readBridgeConfig({
+    env: {
+      REMODEX_TELEGRAM_ENABLED: "1",
+      REMODEX_TELEGRAM_BOT_TOKEN: "123456:secret-token",
+      REMODEX_TELEGRAM_BOT_USERNAME: "@RemodexBot",
+      REMODEX_TELEGRAM_POLL_INTERVAL_MS: "2500",
+      REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED: "1",
+      REMODEX_TELEGRAM_PRO_ENTITLED: "true",
+    },
+    platform: "darwin",
+    runtimeRoot: "/tmp/remodex-package",
+    fsImpl: {
+      existsSync: () => false,
+      readFileSync: () => {
+        throw new Error("unexpected read");
+      },
+    },
+  });
+  const persistedTelegramConfig = readBridgeConfig({
+    env: {
+      REMODEX_DEVICE_STATE_DIR: "/tmp/remodex-state",
+    },
+    platform: "darwin",
+    runtimeRoot: "/tmp/remodex-package",
+    fsImpl: {
+      existsSync(targetPath) {
+        return targetPath === "/tmp/remodex-state/daemon-config.json";
+      },
+      readFileSync(targetPath) {
+        if (targetPath === "/tmp/remodex-state/daemon-config.json") {
+          return JSON.stringify({
+            telegramEnabled: true,
+            telegramBotToken: "123456:persisted-token",
+            telegramBotUsername: "PersistedRemodexBot",
+            telegramPollIntervalMs: 3000,
+            telegramProEntitlementRequired: true,
+            telegramProEntitled: true,
+          });
+        }
+        throw new Error("unexpected read");
+      },
+    },
+  });
+  const explicitTelegramOffConfig = readBridgeConfig({
+    env: {
+      REMODEX_DEVICE_STATE_DIR: "/tmp/remodex-state",
+      REMODEX_TELEGRAM_ENABLED: "false",
+      REMODEX_TELEGRAM_BOT_TOKEN: "123456:env-token",
+      REMODEX_TELEGRAM_POLL_INTERVAL_MS: "750",
+      REMODEX_TELEGRAM_REQUIRE_PRO: "false",
+      REMODEX_TELEGRAM_PRO_ENTITLED: "false",
+    },
+    platform: "darwin",
+    runtimeRoot: "/tmp/remodex-package",
+    fsImpl: {
+      existsSync(targetPath) {
+        return targetPath === "/tmp/remodex-state/daemon-config.json";
+      },
+      readFileSync(targetPath) {
+        if (targetPath === "/tmp/remodex-state/daemon-config.json") {
+          return JSON.stringify({
+            telegramEnabled: true,
+            telegramBotToken: "123456:persisted-token",
+            telegramBotUsername: "PersistedRemodexBot",
+            telegramPollIntervalMs: 3000,
+            telegramProEntitlementRequired: true,
+            telegramProEntitled: true,
+          });
+        }
+        throw new Error("unexpected read");
+      },
+    },
+  });
   assert.equal(macConfig.refreshEnabled, false);
   assert.equal(macConfig.keepMacAwakeEnabled, false);
   assert.equal(macConfig.relayUrl, "");
@@ -137,6 +210,24 @@ test("readBridgeConfig keeps safe defaults and explicit overrides", () => {
   assert.equal(explicitOnConfig.desktopIpcSocketPath, "/tmp/remodex-ipc.sock");
   assert.equal(explicitOffConfig.refreshEnabled, false);
   assert.equal(explicitOffConfig.keepMacAwakeEnabled, false);
+  assert.equal(telegramConfig.telegramEnabled, true);
+  assert.equal(telegramConfig.telegramBotToken, "123456:secret-token");
+  assert.equal(telegramConfig.telegramBotUsername, "@RemodexBot");
+  assert.equal(telegramConfig.telegramPollIntervalMs, 2500);
+  assert.equal(telegramConfig.telegramProEntitlementRequired, true);
+  assert.equal(telegramConfig.telegramProEntitled, true);
+  assert.equal(persistedTelegramConfig.telegramEnabled, true);
+  assert.equal(persistedTelegramConfig.telegramBotToken, "123456:persisted-token");
+  assert.equal(persistedTelegramConfig.telegramBotUsername, "PersistedRemodexBot");
+  assert.equal(persistedTelegramConfig.telegramPollIntervalMs, 3000);
+  assert.equal(persistedTelegramConfig.telegramProEntitlementRequired, true);
+  assert.equal(persistedTelegramConfig.telegramProEntitled, true);
+  assert.equal(explicitTelegramOffConfig.telegramEnabled, false);
+  assert.equal(explicitTelegramOffConfig.telegramBotToken, "123456:env-token");
+  assert.equal(explicitTelegramOffConfig.telegramBotUsername, "PersistedRemodexBot");
+  assert.equal(explicitTelegramOffConfig.telegramPollIntervalMs, 750);
+  assert.equal(explicitTelegramOffConfig.telegramProEntitlementRequired, false);
+  assert.equal(explicitTelegramOffConfig.telegramProEntitled, false);
 });
 
 test("readBridgeConfig uses only the packaged relay default outside a source checkout", () => {

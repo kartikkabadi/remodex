@@ -550,5 +550,6 @@ function sleep(ms) {
 }
 
 module.exports = {
+  handleDesktopMethod,
   handleDesktopRequest,
 };

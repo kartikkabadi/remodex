@@ -20,6 +20,26 @@ const {
   sanitizeLiveGeneratedImageMessageForRelay,
   sanitizeThreadHistoryImagesForRelay,
 } = require("../src/bridge");
+const {
+  buildTelegramApprovalResponseResult,
+  buildTelegramCheckpointRestoreApplyParams,
+  buildTelegramCollaborationModePayload,
+  buildTelegramCodexInputRequest,
+  buildTelegramManualCheckpointRef,
+  buildTelegramReviewStartParams,
+  buildTelegramRuntimeRequestAttempts,
+  buildTelegramThreadForkParams,
+  buildTelegramThreadResumeParams,
+  buildTelegramThreadStartParams,
+  extractTelegramTitleSeedText,
+  filterTelegramThreads,
+  isTelegramMissingRolloutError,
+  normalizeTelegramCreatedThread,
+  normalizeTelegramForkedThread,
+  normalizeTelegramWorktreeThreadResult,
+  summarizeTelegramDiff,
+  summarizeTelegramThreadActivity,
+} = require("../src/telegram-bridge-protocol");
 
 function expectedGeneratedImagePath(threadId, fileName) {
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
@@ -34,6 +54,642 @@ test("hasRelayConnectionGoneStale returns true once the relay silence crosses th
     }),
     true
   );
+});
+
+test("buildTelegramCodexInputRequest starts idle active-thread input", () => {
+  assert.deepEqual(
+    buildTelegramCodexInputRequest({
+      threadId: "thread-idle",
+      text: "Ship the Telegram slice",
+      threadPayload: {
+        thread: {
+          id: "thread-idle",
+          turns: [{ id: "turn-old", status: "completed" }],
+        },
+      },
+    }),
+    {
+      method: "turn/start",
+      params: {
+        threadId: "thread-idle",
+        model: "gpt-5.5",
+        effort: "medium",
+        input: [{ type: "text", text: "Ship the Telegram slice" }],
+      },
+    }
+  );
+});
+
+test("buildTelegramCodexInputRequest includes Telegram image input attachments", () => {
+  assert.deepEqual(
+    buildTelegramCodexInputRequest({
+      threadId: "thread-image",
+      text: "What changed in this screenshot?",
+      attachments: [
+        {
+          type: "input_image",
+          image_url: "data:image/png;base64,AAAA",
+          detail: "high",
+        },
+        {
+          type: "input_image",
+          image_url: { url: "data:image/jpeg;base64,BBBB" },
+        },
+      ],
+      threadPayload: {
+        thread: {
+          id: "thread-image",
+          turns: [],
+        },
+      },
+    }),
+    {
+      method: "turn/start",
+      params: {
+        threadId: "thread-image",
+        model: "gpt-5.5",
+        effort: "medium",
+        input: [
+          { type: "text", text: "What changed in this screenshot?" },
+          { type: "input_image", image_url: "data:image/png;base64,AAAA", detail: "high" },
+          { type: "input_image", image_url: "data:image/jpeg;base64,BBBB" },
+        ],
+      },
+    }
+  );
+});
+
+test("buildTelegramCodexInputRequest applies Telegram runtime preferences for idle turns", () => {
+  assert.deepEqual(
+    buildTelegramCodexInputRequest({
+      threadId: "thread-runtime",
+      text: "Use the selected runtime",
+      runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high", serviceTier: "fast" },
+      threadPayload: {
+        thread: {
+          id: "thread-runtime",
+          turns: [],
+        },
+      },
+    }),
+    {
+      method: "turn/start",
+      params: {
+        threadId: "thread-runtime",
+        model: "gpt-5.4-mini",
+        effort: "high",
+        serviceTier: "fast",
+        input: [{ type: "text", text: "Use the selected runtime" }],
+      },
+    }
+  );
+});
+
+test("buildTelegramCodexInputRequest can start a native plan-mode turn", () => {
+  assert.deepEqual(
+    buildTelegramCollaborationModePayload({
+      mode: "plan",
+      runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high" },
+    }),
+    {
+      mode: "plan",
+      settings: {
+        model: "gpt-5.4-mini",
+        reasoning_effort: "high",
+        developer_instructions: null,
+      },
+    }
+  );
+  assert.deepEqual(
+    buildTelegramCodexInputRequest({
+      threadId: "thread-plan",
+      text: "Plan the Telegram hardening work",
+      collaborationMode: "plan",
+      runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high" },
+      threadPayload: {
+        thread: {
+          id: "thread-plan",
+          turns: [],
+        },
+      },
+    }),
+    {
+      method: "turn/start",
+      params: {
+        threadId: "thread-plan",
+        model: "gpt-5.4-mini",
+        effort: "high",
+        input: [{ type: "text", text: "Plan the Telegram hardening work" }],
+        collaborationMode: {
+          mode: "plan",
+          settings: {
+            model: "gpt-5.4-mini",
+            reasoning_effort: "high",
+            developer_instructions: null,
+          },
+        },
+      },
+    }
+  );
+});
+
+test("buildTelegram thread runtime params mirror Remodex app defaults", () => {
+  assert.deepEqual(
+    buildTelegramThreadStartParams({ cwd: "/Users/me/work/app" }),
+    {
+      model: "gpt-5.5",
+      cwd: "/Users/me/work/app",
+    }
+  );
+  assert.deepEqual(
+    buildTelegramThreadResumeParams({ threadId: "thread-1", cwd: "/Users/me/work/app" }),
+    {
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      cwd: "/Users/me/work/app",
+      excludeTurns: true,
+    }
+  );
+  assert.deepEqual(
+    buildTelegramThreadResumeParams({ threadId: "thread-1", excludeTurns: false }),
+    {
+      threadId: "thread-1",
+      model: "gpt-5.5",
+    }
+  );
+});
+
+test("buildTelegram thread runtime params accept Telegram runtime preferences", () => {
+  assert.deepEqual(
+    buildTelegramThreadStartParams({
+      cwd: "/Users/me/work/app",
+      runtimePreferences: { model: "gpt-5.3-codex-spark", reasoningEffort: "low", serviceTier: "fast" },
+    }),
+    {
+      model: "gpt-5.3-codex-spark",
+      serviceTier: "fast",
+      cwd: "/Users/me/work/app",
+    }
+  );
+  assert.deepEqual(
+    buildTelegramThreadResumeParams({
+      threadId: "thread-1",
+      runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high", serviceTier: "fast" },
+    }),
+    {
+      threadId: "thread-1",
+      model: "gpt-5.4-mini",
+      serviceTier: "fast",
+      excludeTurns: true,
+    }
+  );
+});
+
+test("buildTelegramThreadForkParams uses native thread/fork minimal payload", () => {
+  assert.deepEqual(
+    buildTelegramThreadForkParams({ threadId: "thread-1" }),
+    {
+      threadId: "thread-1",
+      excludeTurns: true,
+    }
+  );
+  assert.deepEqual(
+    buildTelegramThreadForkParams({ threadId: "thread-1", excludeTurns: false }),
+    {
+      threadId: "thread-1",
+    }
+  );
+});
+
+test("summarizeTelegramDiff returns file-level stats without patch contents", () => {
+  assert.deepEqual(
+    summarizeTelegramDiff({
+      patch: [
+        "diff --git a/src/app.js b/src/app.js",
+        "index 111..222 100644",
+        "--- a/src/app.js",
+        "+++ b/src/app.js",
+        "@@ -1,2 +1,3 @@",
+        "-old",
+        "+new",
+        "+next",
+        " context",
+        "diff --git a/.env.local b/.env.local",
+        "index 333..444 100644",
+        "--- a/.env.local",
+        "+++ b/.env.local",
+        "@@ -1 +1 @@",
+        "-TOKEN=old",
+        "+TOKEN=new",
+        "diff --git a/assets/icon.png b/assets/icon.png",
+        "Binary files a/assets/icon.png and b/assets/icon.png differ",
+      ].join("\n"),
+    }),
+    {
+      changedFiles: 3,
+      additions: 3,
+      deletions: 2,
+      files: [
+        { path: "src/app.js", additions: 2, deletions: 1, binary: false },
+        { path: ".env.local", additions: 1, deletions: 1, binary: false },
+        { path: "assets/icon.png", additions: 0, deletions: 0, binary: true },
+      ],
+    }
+  );
+});
+
+test("summarizeTelegramThreadActivity returns compact recent user and assistant messages", () => {
+  const activity = summarizeTelegramThreadActivity({
+    data: [
+      {
+        id: "turn-new",
+        items: [
+          {
+            id: "user-new",
+            type: "user_message",
+            text: "Inspect this screenshot data:image/png;base64,AAAA and use Bearer super-secret-token",
+          },
+          {
+            id: "assistant-new",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "I found the issue in the Telegram adapter." }],
+          },
+          {
+            id: "tool-call",
+            type: "tool_call",
+            name: "exec_command",
+            arguments: { cmd: "cat .env" },
+          },
+          {
+            id: "tool-output",
+            type: "tool_call_output",
+            output: "TOKEN=should-not-render",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(activity, {
+    entries: [
+      {
+        role: "user",
+        text: "Inspect this screenshot [attachment] and use Bearer [redacted]",
+        turnId: "turn-new",
+      },
+      {
+        role: "assistant",
+        text: "I found the issue in the Telegram adapter.",
+        turnId: "turn-new",
+      },
+      {
+        role: "tool",
+        text: "Ran exec_command",
+        turnId: "turn-new",
+      },
+    ],
+    omittedEntryCount: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(activity), /TOKEN=should-not-render|super-secret-token|base64,AAAA|cat \.env/);
+});
+
+test("extractTelegramTitleSeedText reads the first user message for Telegram title generation", () => {
+  assert.equal(
+    extractTelegramTitleSeedText({
+      data: [
+        {
+          items: [
+            { role: "assistant", text: "Sure." },
+            { role: "user", text: "Please make the Telegram title generation flow less awkward." },
+          ],
+        },
+      ],
+    }),
+    "Please make the Telegram title generation flow less awkward."
+  );
+  assert.equal(extractTelegramTitleSeedText({ data: [{ items: [{ role: "assistant", text: "Done." }] }] }), "");
+});
+
+test("buildTelegramManualCheckpointRef stays inside the Remodex checkpoint namespace", () => {
+  assert.equal(
+    buildTelegramManualCheckpointRef("thread/with spaces", () => 1234, () => "safe_1"),
+    "refs/remodex/checkpoints/dGhyZWFkL3dpdGggc3BhY2Vz/telegram-manual/1234-safe_1"
+  );
+  assert.throws(
+    () => buildTelegramManualCheckpointRef(""),
+    /thread id is required/
+  );
+});
+
+test("buildTelegramCheckpointRestoreApplyParams requires explicit destructive restore confirmation", () => {
+  assert.deepEqual(
+    buildTelegramCheckpointRestoreApplyParams({
+      threadId: "thread-1",
+      cwd: "/Users/me/work/app",
+      checkpointRef: "refs/remodex/checkpoints/thread/telegram-manual/1",
+      expectedTargetCommit: "abcdef1234567890",
+    }),
+    {
+      threadId: "thread-1",
+      cwd: "/Users/me/work/app",
+      targetCheckpointRef: "refs/remodex/checkpoints/thread/telegram-manual/1",
+      expectedTargetCommit: "abcdef1234567890",
+      confirmDestructiveRestore: true,
+    }
+  );
+  assert.throws(
+    () => buildTelegramCheckpointRestoreApplyParams({ checkpointRef: "refs/remodex/checkpoints/thread/telegram-manual/1" }),
+    /thread id is required/
+  );
+  assert.throws(
+    () => buildTelegramCheckpointRestoreApplyParams({ threadId: "thread-1" }),
+    /checkpoint ref is required/
+  );
+});
+
+test("buildTelegramRuntimeRequestAttempts retries app-style runtime compatibility envelopes", () => {
+  assert.deepEqual(
+    buildTelegramRuntimeRequestAttempts({ threadId: "thread-1" }),
+    [
+      {
+        threadId: "thread-1",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          networkAccess: true,
+        },
+        approvalPolicy: "on-request",
+      },
+      {
+        threadId: "thread-1",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          networkAccess: true,
+        },
+        approvalPolicy: "onRequest",
+      },
+      {
+        threadId: "thread-1",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+      },
+      {
+        threadId: "thread-1",
+        sandbox: "workspace-write",
+        approvalPolicy: "onRequest",
+      },
+      { threadId: "thread-1" },
+    ]
+  );
+});
+
+test("buildTelegramRuntimeRequestAttempts can fall back when plan mode is unsupported", () => {
+  const attempts = buildTelegramRuntimeRequestAttempts({
+    threadId: "thread-plan",
+    input: [{ type: "text", text: "Plan this" }],
+    collaborationMode: { mode: "plan", settings: { model: "gpt-5.5" } },
+  }, {
+    allowCollaborationModeFallback: true,
+  });
+
+  assert.equal(attempts.length, 8);
+  assert.equal(attempts[0].collaborationMode.mode, "plan");
+  assert.equal(attempts[4].collaborationMode.mode, "plan");
+  assert.equal(attempts[5].collaborationMode, undefined);
+  assert.equal(attempts[5].threadId, "thread-plan");
+  assert.equal(attempts[7].collaborationMode, undefined);
+});
+
+test("buildTelegramRuntimeRequestAttempts can fall back when service tier is unsupported", () => {
+  const attempts = buildTelegramRuntimeRequestAttempts({
+    threadId: "thread-fast",
+    input: [{ type: "text", text: "Fast please" }],
+    serviceTier: "fast",
+  });
+
+  assert.equal(attempts.length, 10);
+  assert.equal(attempts[0].serviceTier, "fast");
+  assert.equal(attempts[4].serviceTier, "fast");
+  assert.equal(attempts[5].serviceTier, undefined);
+  assert.equal(attempts[9].serviceTier, undefined);
+});
+
+test("buildTelegramRuntimeRequestAttempts maps Telegram full access to native runtime access mode", () => {
+  assert.deepEqual(
+    buildTelegramRuntimeRequestAttempts({ threadId: "thread-full" }, { accessMode: "full-access" }),
+    [
+      {
+        threadId: "thread-full",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
+      },
+      {
+        threadId: "thread-full",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
+      },
+      {
+        threadId: "thread-full",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+      },
+      {
+        threadId: "thread-full",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+      },
+      { threadId: "thread-full" },
+    ]
+  );
+});
+
+test("buildTelegramReviewStartParams mirrors native inline review target payloads", () => {
+  assert.deepEqual(
+    buildTelegramReviewStartParams({ threadId: "thread-review", target: "uncommittedChanges" }),
+    {
+      threadId: "thread-review",
+      delivery: "inline",
+      target: { type: "uncommittedChanges" },
+    }
+  );
+  assert.deepEqual(
+    buildTelegramReviewStartParams({ threadId: "thread-review", target: "baseBranch", baseBranch: "main" }),
+    {
+      threadId: "thread-review",
+      delivery: "inline",
+      target: { type: "baseBranch", branch: "main" },
+    }
+  );
+  assert.throws(
+    () => buildTelegramReviewStartParams({ threadId: "thread-review", target: "baseBranch" }),
+    /base branch is required/
+  );
+});
+
+test("isTelegramMissingRolloutError recognizes fresh Telegram thread resume gaps", () => {
+  assert.equal(
+    isTelegramMissingRolloutError(new Error("no rollout found for thread id thread-new")),
+    true
+  );
+  assert.equal(
+    isTelegramMissingRolloutError(new Error("thread not found: thread-new")),
+    false
+  );
+});
+
+test("buildTelegramCodexInputRequest steers running active-thread input", () => {
+  assert.deepEqual(
+    buildTelegramCodexInputRequest({
+      threadId: "thread-running",
+      text: "Add a Telegram button for this",
+      threadPayload: {
+        conversation: {
+          id: "thread-running",
+          turns: [
+            { id: "turn-done", status: "completed" },
+            { turn_id: "turn-running", state: "in_progress" },
+          ],
+        },
+      },
+    }),
+    {
+      method: "turn/steer",
+      params: {
+        threadId: "thread-running",
+        expectedTurnId: "turn-running",
+        input: [{ type: "text", text: "Add a Telegram button for this" }],
+      },
+    }
+  );
+});
+
+test("buildTelegramApprovalResponseResult mirrors native approval result shapes", () => {
+  assert.deepEqual(
+    buildTelegramApprovalResponseResult({
+      method: "item/commandExecution/requestApproval",
+      decision: "accept",
+    }),
+    { decision: "accept" }
+  );
+  assert.deepEqual(
+    buildTelegramApprovalResponseResult({
+      method: "item/fileChange/requestApproval",
+      decision: "decline",
+    }),
+    { decision: "decline" }
+  );
+  assert.deepEqual(
+    buildTelegramApprovalResponseResult({
+      method: "item/permissions/requestApproval",
+      params: { permissions: { network: { enabled: true } } },
+      decision: "accept",
+    }),
+    {
+      permissions: { network: { enabled: true } },
+      scope: "turn",
+    }
+  );
+  assert.deepEqual(
+    buildTelegramApprovalResponseResult({
+      method: "item/permissions/requestApproval",
+      params: { permissions: { network: { enabled: true } } },
+      decision: "decline",
+    }),
+    {
+      permissions: {},
+      scope: "turn",
+    }
+  );
+});
+
+test("normalizeTelegramCreatedThread preserves cwd fallback for Telegram new-thread flow", () => {
+  assert.deepEqual(
+    normalizeTelegramCreatedThread({
+      thread: {
+        id: "thread-new",
+        title: "Fresh",
+      },
+    }, { cwd: "/Users/me/work/app" }),
+    {
+      thread: {
+        id: "thread-new",
+        title: "Fresh",
+        cwd: "/Users/me/work/app",
+      },
+      threadId: "thread-new",
+    }
+  );
+  assert.throws(
+    () => normalizeTelegramCreatedThread({ thread: { title: "Missing id" } }),
+    /thread\/start response missing thread/
+  );
+});
+
+test("normalizeTelegramForkedThread marks fork origin and preserves cwd fallback", () => {
+  assert.deepEqual(
+    normalizeTelegramForkedThread({
+      thread: {
+        id: "fork-1",
+        title: "Fork",
+      },
+    }, {
+      sourceThreadId: "source-1",
+      cwd: "/Users/me/work/app",
+    }),
+    {
+      thread: {
+        id: "fork-1",
+        title: "Fork",
+        cwd: "/Users/me/work/app",
+        forkedFromThreadId: "source-1",
+      },
+      threadId: "fork-1",
+    }
+  );
+});
+
+test("normalizeTelegramWorktreeThreadResult keeps worktree metadata and normalized thread id", () => {
+  assert.deepEqual(
+    normalizeTelegramWorktreeThreadResult({
+      worktree: {
+        branch: "remodex/telegram-worktree",
+        worktreePath: "/Users/me/.codex/worktrees/remodex/abc/app",
+        alreadyExisted: true,
+      },
+      thread: {
+        title: "Worktree thread",
+        thread_id: "thread-worktree",
+      },
+    }),
+    {
+      worktree: {
+        branch: "remodex/telegram-worktree",
+        worktreePath: "/Users/me/.codex/worktrees/remodex/abc/app",
+        alreadyExisted: true,
+      },
+      thread: {
+        title: "Worktree thread",
+        thread_id: "thread-worktree",
+        id: "thread-worktree",
+        threadId: "thread-worktree",
+      },
+      threadId: "thread-worktree",
+    }
+  );
+});
+
+test("filterTelegramThreads narrows thread choices by title id and cwd", () => {
+  const threads = [
+    { id: "thread-telegram", title: "Telegram hardening", cwd: "/Users/me/remodex" },
+    { id: "thread-ios", title: "Native Remodex App", cwd: "/Users/me/mobile" },
+    { thread_id: "thread-docs", name: "Docs cleanup", project_path: "/Users/me/kartik-hermes" },
+  ];
+
+  assert.deepEqual(filterTelegramThreads(threads, "telegram"), [threads[0]]);
+  assert.deepEqual(filterTelegramThreads(threads, "THREAD-IOS"), [threads[1]]);
+  assert.deepEqual(filterTelegramThreads(threads, "kartik"), [threads[2]]);
+  assert.equal(filterTelegramThreads(threads, "missing").length, 0);
+  assert.equal(filterTelegramThreads(threads, ""), threads);
 });
 
 test("normalizeRelayBoundJsonRpcMessage rewrites payload-only responses to result", () => {

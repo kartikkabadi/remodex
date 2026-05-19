@@ -214,12 +214,40 @@ function getMacOSBridgeServiceStatus({
     installed: fsImpl.existsSync(resolveLaunchAgentPlistPath({ env })),
     launchdLoaded: launchd.loaded,
     launchdPid: launchd.pid,
-    daemonConfig: readDaemonConfig({ env, fsImpl }),
+    daemonConfig: redactDaemonConfigForStatus(readDaemonConfig({ env, fsImpl })),
     bridgeStatus: readBridgeStatus({ env, fsImpl }),
-    pairingSession: readPairingSession({ env, fsImpl }),
+    pairingSession: redactPairingSessionForStatus(readPairingSession({ env, fsImpl })),
     stdoutLogPath: resolveBridgeStdoutLogPath({ env }),
     stderrLogPath: resolveBridgeStderrLogPath({ env }),
   };
+}
+
+function redactDaemonConfigForStatus(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return config;
+  }
+  const redacted = { ...config };
+  if (typeof redacted.telegramBotToken === "string" && redacted.telegramBotToken.trim()) {
+    redacted.telegramBotToken = "<redacted>";
+  }
+  return redacted;
+}
+
+function redactPairingSessionForStatus(pairingSession) {
+  if (!pairingSession || typeof pairingSession !== "object" || Array.isArray(pairingSession)) {
+    return pairingSession;
+  }
+  const redacted = { ...pairingSession };
+  if (typeof redacted.pairingCode === "string" && redacted.pairingCode.trim()) {
+    redacted.pairingCode = "<redacted>";
+  }
+  if (redacted.pairingPayload && typeof redacted.pairingPayload === "object" && !Array.isArray(redacted.pairingPayload)) {
+    redacted.pairingPayload = { ...redacted.pairingPayload };
+    if (typeof redacted.pairingPayload.sessionId === "string" && redacted.pairingPayload.sessionId.trim()) {
+      redacted.pairingPayload.sessionId = "<redacted>";
+    }
+  }
+  return redacted;
 }
 
 function printMacOSBridgeServiceStatus(options = {}) {

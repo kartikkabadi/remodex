@@ -318,4 +318,5 @@ async function resolveVoiceAuth(sendCodexRequest) {
 module.exports = {
   createVoiceHandler,
   resolveVoiceAuth,
+  transcribeVoice,
 };

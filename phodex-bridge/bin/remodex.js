@@ -15,6 +15,12 @@ const {
   startBridge,
   startMacOSBridgeService,
   stopMacOSBridgeService,
+  assertTelegramAccessAllowed,
+  createTelegramLinkCode,
+  describeTelegramAccess,
+  readTelegramSessionState,
+  renderTelegramLinkInstructions,
+  unlinkTelegramChat,
   resetBridgePairing,
   openLastActiveThread,
   watchThreadRollout,
@@ -31,6 +37,12 @@ const defaultDeps = {
   startBridge,
   startMacOSBridgeService,
   stopMacOSBridgeService,
+  assertTelegramAccessAllowed,
+  createTelegramLinkCode,
+  describeTelegramAccess,
+  readTelegramSessionState,
+  renderTelegramLinkInstructions,
+  unlinkTelegramChat,
   resetBridgePairing,
   openLastActiveThread,
   watchThreadRollout,
@@ -67,7 +79,7 @@ async function main({
   exitImpl = process.exit,
   deps = defaultDeps,
 } = {}) {
-  const { command, jsonOutput, watchThreadId } = parseCliArgs(argv.slice(2));
+  const { command, jsonOutput, subcommand, subcommandValue, watchThreadId } = parseCliArgs(argv.slice(2));
 
   if (isVersionCommand(command)) {
     emitVersion({ jsonOutput, consoleImpl });
@@ -184,6 +196,18 @@ async function main({
     return;
   }
 
+  if (command === "telegram") {
+    handleTelegramCommand({
+      subcommand,
+      subcommandValue,
+      jsonOutput,
+      consoleImpl,
+      exitImpl,
+      deps,
+    });
+    return;
+  }
+
   if (command === "reset-pairing") {
     try {
       if (platform === "darwin") {
@@ -252,9 +276,99 @@ async function main({
   consoleImpl.error(`Unknown command: ${command}`);
   consoleImpl.error(
     "Usage: remodex up | remodex run | remodex start | remodex restart | remodex stop | remodex status | "
-    + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | "
-    + "append --json to start/restart/stop/status/reset-pairing/resume for machine-readable output"
+    + "remodex telegram link|status|unlink [chatId] | remodex reset-pairing | remodex resume | "
+    + "remodex watch [threadId] | remodex --version | append --json for machine-readable output"
   );
+  exitImpl(1);
+}
+
+function handleTelegramCommand({
+  subcommand = "status",
+  subcommandValue = "",
+  jsonOutput = false,
+  consoleImpl = console,
+  exitImpl = process.exit,
+  deps = defaultDeps,
+} = {}) {
+  const config = typeof deps.readBridgeConfig === "function"
+    ? deps.readBridgeConfig()
+    : {};
+  const describeTelegramAccessImpl = typeof deps.describeTelegramAccess === "function"
+    ? deps.describeTelegramAccess
+    : defaultDeps.describeTelegramAccess;
+  const access = describeTelegramAccessImpl(config);
+
+  if (subcommand === "link") {
+    if (typeof deps.assertTelegramAccessAllowed === "function") {
+      deps.assertTelegramAccessAllowed(config);
+    }
+    const state = deps.createTelegramLinkCode();
+    const pendingLinkCode = state.pendingLinkCode;
+    const payload = {
+      ok: true,
+      currentVersion: version,
+      telegram: {
+        pendingLinkCode,
+      },
+    };
+    emitResult({
+      payload,
+      message: deps.renderTelegramLinkInstructions({
+        code: pendingLinkCode.code,
+        expiresAt: pendingLinkCode.expiresAt,
+      }),
+      jsonOutput,
+      consoleImpl,
+    });
+    return;
+  }
+
+  if (subcommand === "status") {
+    const state = deps.readTelegramSessionState();
+    const accessLabel = access.allowed ? "available" : access.status || "blocked";
+    emitResult({
+      payload: {
+        ok: true,
+        currentVersion: version,
+        telegram: {
+          linkedChatCount: state.linkedChats.length,
+          linkedChats: state.linkedChats.map((chat) => ({
+            chatId: chat.chatId,
+            chatTitle: chat.chatTitle,
+            linkedAt: chat.linkedAt,
+          })),
+          hasPendingLinkCode: Boolean(state.pendingLinkCode),
+          pendingLinkCodeExpiresAt: state.pendingLinkCode?.expiresAt ?? null,
+          access,
+        },
+      },
+      message: `[remodex] Telegram linked chats: ${state.linkedChats.length}; access: ${accessLabel}`,
+      jsonOutput,
+      consoleImpl,
+    });
+    return;
+  }
+
+  if (subcommand === "unlink") {
+    const state = deps.unlinkTelegramChat({ chatId: subcommandValue });
+    emitResult({
+      payload: {
+        ok: true,
+        currentVersion: version,
+        telegram: {
+          linkedChatCount: state.linkedChats.length,
+        },
+      },
+      message: subcommandValue
+        ? `[remodex] Unlinked Telegram chat: ${subcommandValue}`
+        : "[remodex] Unlinked all Telegram chats.",
+      jsonOutput,
+      consoleImpl,
+    });
+    return;
+  }
+
+  consoleImpl.error("[remodex] Unknown telegram command. Usage: remodex telegram link|status|unlink [chatId]");
   exitImpl(1);
 }
 
@@ -274,6 +388,8 @@ function parseCliArgs(rawArgs) {
   return {
     command: positionals[0] || "up",
     jsonOutput,
+    subcommand: positionals[1] || "status",
+    subcommandValue: positionals[2] || "",
     watchThreadId: positionals[1] || "",
   };
 }

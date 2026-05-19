@@ -50,3 +50,17 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 cd phodex-bridge
 npm start
 ```
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local markdown files under `.scratch/<feature-slug>/`. See `Docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default Matt Pocock skills triage vocabulary. See `Docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: read root `CONTEXT.md` and `docs/adr/` when present. See `Docs/agents/domain.md`.

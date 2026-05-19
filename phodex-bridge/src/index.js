@@ -7,6 +7,16 @@
 const { startBridge } = require("./bridge");
 const { readBridgeDeviceState, resetBridgeDeviceState } = require("./secure-device-state");
 const { openLastActiveThread } = require("./session-state");
+const {
+  createTelegramLinkCode,
+  readTelegramSessionState,
+  unlinkTelegramChat,
+} = require("./telegram-session-state");
+const {
+  assertTelegramAccessAllowed,
+  describeTelegramAccess,
+} = require("./telegram-access");
+const { renderTelegramLinkInstructions } = require("./telegram-renderer");
 const { watchThreadRollout } = require("./rollout-watch");
 const { readBridgeConfig } = require("./codex-desktop-refresher");
 const {
@@ -21,9 +31,14 @@ const {
 
 module.exports = {
   getMacOSBridgeServiceStatus,
+  assertTelegramAccessAllowed,
+  createTelegramLinkCode,
+  describeTelegramAccess,
   printMacOSBridgePairingQr,
   printMacOSBridgeServiceStatus,
   readBridgeConfig,
+  readTelegramSessionState,
+  renderTelegramLinkInstructions,
   readBridgeDeviceState,
   resetMacOSBridgePairing,
   startBridge,
@@ -31,6 +46,7 @@ module.exports = {
   startMacOSBridgeService,
   stopMacOSBridgeService,
   resetBridgePairing: resetBridgeDeviceState,
+  unlinkTelegramChat,
   openLastActiveThread,
   watchThreadRollout,
 };

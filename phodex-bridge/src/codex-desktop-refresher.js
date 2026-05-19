@@ -554,9 +554,29 @@ function readBridgeConfig({
   );
   const explicitRefreshEnabled = readOptionalBooleanEnv(["REMODEX_REFRESH_ENABLED"], env);
   const explicitKeepMacAwakeEnabled = readOptionalBooleanEnv(["REMODEX_KEEP_MAC_AWAKE"], env);
+  const explicitTelegramEnabled = readOptionalBooleanEnv(["REMODEX_TELEGRAM_ENABLED"], env);
+  const explicitTelegramProEntitlementRequired = readOptionalBooleanEnv([
+    "REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED",
+    "REMODEX_TELEGRAM_REQUIRE_PRO",
+  ], env);
+  const explicitTelegramProEntitled = readOptionalBooleanEnv([
+    "REMODEX_TELEGRAM_PRO_ENTITLED",
+  ], env);
   const persistedKeepMacAwakeEnabled = typeof daemonConfig.keepMacAwakeEnabled === "boolean"
     ? daemonConfig.keepMacAwakeEnabled
     : null;
+  const persistedTelegramEnabled = typeof daemonConfig.telegramEnabled === "boolean"
+    ? daemonConfig.telegramEnabled
+    : null;
+  const persistedTelegramProEntitlementRequired = typeof daemonConfig.telegramProEntitlementRequired === "boolean"
+    ? daemonConfig.telegramProEntitlementRequired
+    : null;
+  const persistedTelegramProEntitled = typeof daemonConfig.telegramProEntitled === "boolean"
+    ? daemonConfig.telegramProEntitled
+    : null;
+  const persistedTelegramPollIntervalMs = Number.isFinite(daemonConfig.telegramPollIntervalMs)
+    ? String(daemonConfig.telegramPollIntervalMs)
+    : "1000";
   // Desktop refresh is opt-in for now because Codex.app still lacks true live updates.
   const defaultRefreshEnabled = false;
   return {
@@ -581,6 +601,33 @@ function readBridgeConfig({
       ? (persistedKeepMacAwakeEnabled == null ? false : persistedKeepMacAwakeEnabled)
       : explicitKeepMacAwakeEnabled,
     codexEndpoint,
+    telegramEnabled: explicitTelegramEnabled == null
+      ? (persistedTelegramEnabled == null ? false : persistedTelegramEnabled)
+      : explicitTelegramEnabled,
+    telegramProEntitlementRequired: explicitTelegramProEntitlementRequired == null
+      ? (persistedTelegramProEntitlementRequired == null ? false : persistedTelegramProEntitlementRequired)
+      : explicitTelegramProEntitlementRequired,
+    telegramProEntitled: explicitTelegramProEntitled == null
+      ? (persistedTelegramProEntitled == null ? false : persistedTelegramProEntitled)
+      : explicitTelegramProEntitled,
+    telegramBotToken: readFirstDefinedEnv(
+      ["REMODEX_TELEGRAM_BOT_TOKEN"],
+      readString(daemonConfig.telegramBotToken),
+      env
+    ),
+    telegramBotUsername: readFirstDefinedEnv(
+      ["REMODEX_TELEGRAM_BOT_USERNAME"],
+      readString(daemonConfig.telegramBotUsername),
+      env
+    ),
+    telegramPollIntervalMs: parseIntegerEnv(
+      readFirstDefinedEnv(
+        ["REMODEX_TELEGRAM_POLL_INTERVAL_MS"],
+        persistedTelegramPollIntervalMs,
+        env
+      ),
+      1000
+    ),
     desktopIpcSocketPath: readFirstDefinedEnv(["REMODEX_DESKTOP_IPC_SOCKET"], "", env),
     refreshCommand,
     codexBundleId: readFirstDefinedEnv(["REMODEX_CODEX_BUNDLE_ID"], DEFAULT_BUNDLE_ID, env),

@@ -23,19 +23,47 @@ const { createCodexTransport } = require("./codex-transport");
 const {
   createThreadRolloutActivityWatcher,
   findRecentRolloutFileForContextRead,
+  readLatestContextWindowUsage,
   resolveSessionsRoot,
 } = require("./rollout-watch");
 const { printQR } = require("./qr");
-const { rememberActiveThread } = require("./session-state");
-const { handleDesktopRequest } = require("./desktop-handler");
+const { readLastActiveThread, rememberActiveThread } = require("./session-state");
+const { handleDesktopMethod, handleDesktopRequest } = require("./desktop-handler");
 const { readDaemonConfig, writeDaemonConfig } = require("./daemon-state");
-const { handleGitRequest } = require("./git-handler");
+const {
+  gitBranchesWithStatus,
+  gitCheckout,
+  gitCreateBranch,
+  gitCreateWorktree,
+  gitDiff,
+  gitGenerateCommitMessage,
+  gitGeneratePullRequestDraft,
+  gitInit,
+  gitLog,
+  gitPull,
+  gitRemoteUrl,
+  gitResetToRemote,
+  gitRunStackedAction,
+  gitStash,
+  gitStashPop,
+  gitStatus,
+  handleGitRequest,
+  threadGenerateTitle,
+  threadNameSet,
+} = require("./git-handler");
 const { handleThreadContextRequest } = require("./thread-context-handler");
-const { handleWorkspaceRequest } = require("./workspace-handler");
-const { handleProjectRequest } = require("./project-handler");
-const { handlePetRequest } = require("./pet-handler");
+const { handleWorkspaceMethod, handleWorkspaceRequest } = require("./workspace-handler");
+const {
+  handleProjectRequest,
+  projectCreateDirectory,
+  projectListDirectory,
+  projectQuickLocations,
+  projectSearchDirectories,
+  projectValidatePath,
+} = require("./project-handler");
+const { handlePetMethod, handlePetRequest } = require("./pet-handler");
 const { createNotificationsHandler } = require("./notifications-handler");
-const { createVoiceHandler, resolveVoiceAuth } = require("./voice-handler");
+const { createVoiceHandler, resolveVoiceAuth, transcribeVoice } = require("./voice-handler");
 const {
   composeSanitizedAuthStatusFromSettledResults,
 } = require("./account-status");
@@ -53,6 +81,35 @@ const { createRolloutLiveMirrorController } = require("./rollout-live-mirror");
 const {
   createDesktopIpcActionFollower,
 } = require("./desktop-ipc-action-follower");
+const { createTelegramAdapterFromBridgeConfig } = require("./telegram-adapter");
+const { buildTelegramFeedbackMailtoUrl } = require("./telegram-feedback");
+const { normalizeTelegramAccessMode } = require("./telegram-runtime-preferences");
+const {
+  buildTelegramApprovalResponseResult,
+  buildTelegramCheckpointRestoreApplyParams,
+  buildTelegramCodexInputRequest,
+  buildTelegramManualCheckpointRef,
+  buildTelegramReviewStartParams,
+  buildTelegramRuntimeRequestAttempts,
+  buildTelegramThreadForkParams,
+  buildTelegramThreadResumeParams,
+  buildTelegramThreadStartParams,
+  extractTelegramTitleSeedText,
+  filterTelegramThreads,
+  findActiveTurnId,
+  findTelegramThreadById,
+  isTelegramMissingRolloutError,
+  normalizeTelegramCreatedThread,
+  normalizeTelegramForkedThread,
+  normalizeTelegramThreadsList,
+  normalizeTelegramWorktreeThreadResult,
+  readTelegramThreadCwd,
+  readThreadFromPayload,
+  shouldRetryTelegramRuntimeRequest,
+  shouldRetryTelegramRuntimeWithoutField,
+  summarizeTelegramDiff,
+  summarizeTelegramThreadActivity,
+} = require("./telegram-bridge-protocol");
 const { version: bridgePackageVersion = "" } = require("../package.json");
 const {
   MINIMUM_SUPPORTED_IOS_APP_VERSION,
@@ -162,6 +219,7 @@ function startBridge({
   let lastConnectionStatus = null;
   let codexLaunchState = config.codexEndpoint ? "connected" : "starting";
   let codexHandshakeState = config.codexEndpoint ? "warm" : "cold";
+  let bridgeManagedInitializePromise = null;
   const forwardedInitializeRequestIds = new Set();
   const bridgeManagedCodexRequestWaiters = new Map();
   const forwardedRequestMethodsById = new Map();
@@ -207,12 +265,13 @@ function startBridge({
   // already provides the authoritative live stream for resumed threads.
   const rolloutLiveMirror = !config.codexEndpoint
     ? createRolloutLiveMirrorController({
-      sendApplicationResponse,
+      sendApplicationResponse: sendRolloutMirrorApplicationResponse,
     })
     : null;
+  let telegramAdapter = null;
   const desktopIpcActionFollower = !config.codexEndpoint
     ? createDesktopIpcActionFollower({
-      sendApplicationResponse,
+      sendApplicationResponse: sendApplicationResponseWithTelegram,
       socketPath: config.desktopIpcSocketPath || undefined,
     })
     : null;
@@ -232,6 +291,11 @@ function startBridge({
   const bridgeStatusPublisher = createBridgeStatusPublisher({
     onBridgeStatus,
     getCodexLaunchState: () => codexLaunchState,
+  });
+  telegramAdapter = createTelegramAdapterFromBridgeConfig({
+    config,
+    controlSurface: createTelegramControlSurface(),
+    logger: console,
   });
   bridgeStatusPublisher.startHeartbeat({
     shouldPublish: () => !isShuttingDown,
@@ -463,6 +527,7 @@ function startBridge({
     if (handleBridgeManagedCodexResponse(message)) {
       return;
     }
+    notifyTelegramServerRequest(message);
     updatePendingAuthLoginFromCodexMessage(message);
     trackCodexHandshakeState(message);
     desktopRefresher.handleOutbound(message);
@@ -473,6 +538,35 @@ function startBridge({
       sendRelayWireMessage
     );
   });
+
+  function sendApplicationResponseWithTelegram(rawMessage) {
+    notifyTelegramServerRequest(rawMessage);
+    sendApplicationResponse(rawMessage);
+  }
+
+  function sendRolloutMirrorApplicationResponse(rawMessage) {
+    notifyTelegramServerRequest(rawMessage, { rolloutMirror: true });
+    sendApplicationResponse(rawMessage);
+  }
+
+  function notifyTelegramServerRequest(rawMessage, { rolloutMirror = false } = {}) {
+    if (rolloutMirror && isTelegramRedundantRolloutLifecycle(rawMessage)) {
+      return;
+    }
+    const notification = telegramAdapter?.sendServerRequest?.(rawMessage);
+    if (!notification || typeof notification.catch !== "function") {
+      return;
+    }
+    notification.catch((error) => {
+      console.warn(`[remodex] Telegram request notification failed: ${error.message}`);
+    });
+  }
+
+  function isTelegramRedundantRolloutLifecycle(rawMessage) {
+    const message = safeParseJSON(rawMessage);
+    const method = normalizeNonEmptyString(message?.method);
+    return method === "turn/started" || method === "turn/completed";
+  }
 
   codex.onClose(() => {
     const wasShuttingDown = isShuttingDown;
@@ -498,6 +592,7 @@ function startBridge({
     stopContextUsageWatcher();
     rolloutLiveMirror?.stopAll();
     desktopIpcActionFollower?.stopAll();
+    telegramAdapter?.stop?.();
     desktopRefresher.handleTransportReset();
     failBridgeManagedCodexRequests(new Error("Codex transport closed before the bridge request completed."));
     forwardedRequestMethodsById.clear();
@@ -506,12 +601,15 @@ function startBridge({
     }
   });
 
+  telegramAdapter?.start();
+
   process.on("SIGINT", () => shutdown(codex, () => socket, () => {
     isShuttingDown = true;
     bridgeWakeAssertion.stop();
     clearReconnectTimer();
     clearRelayWatchdog();
     bridgeStatusPublisher.stopHeartbeat();
+    telegramAdapter?.stop?.();
   }));
   process.on("SIGTERM", () => shutdown(codex, () => socket, () => {
     isShuttingDown = true;
@@ -519,6 +617,7 @@ function startBridge({
     clearReconnectTimer();
     clearRelayWatchdog();
     bridgeStatusPublisher.stopHeartbeat();
+    telegramAdapter?.stop?.();
   }));
 
   // Routes decrypted app payloads through the same bridge handlers as before.
@@ -772,6 +871,54 @@ function startBridge({
     return {
       success: true,
       openedOnMac: true,
+    };
+  }
+
+  async function cancelPendingAuthLoginOnMac() {
+    const loginId = readString(pendingAuthLogin.loginId);
+    if (!loginId) {
+      return {
+        success: false,
+        cancelled: false,
+        reason: "no_pending_login",
+      };
+    }
+
+    await sendCodexRequest("account/login/cancel", { loginId });
+    clearPendingAuthLogin();
+    return {
+      success: true,
+      cancelled: true,
+    };
+  }
+
+  async function logoutAccountOnMac() {
+    await sendCodexRequest("account/logout", {});
+    clearPendingAuthLogin();
+    return {
+      success: true,
+      signedOut: true,
+    };
+  }
+
+  async function openFeedbackEmailOnMac({ message = "", threadId = "" } = {}) {
+    if (process.platform !== "darwin") {
+      const error = new Error("Opening Remodex feedback on the bridge is only supported on macOS.");
+      error.errorCode = "unsupported_platform";
+      throw error;
+    }
+
+    const mailtoUrl = buildTelegramFeedbackMailtoUrl({
+      message,
+      threadId,
+      bridgeStatus: bridgeStatusPublisher.latest(),
+      bridgeVersion: bridgePackageVersion,
+    });
+    await execFileAsync("open", [mailtoUrl], { timeout: 15_000 });
+    return {
+      success: true,
+      openedOnMac: true,
+      mailtoUrl,
     };
   }
 
@@ -1128,7 +1275,74 @@ function startBridge({
 
   // Runs bridge-private JSON-RPC calls against the local app-server so token-bearing responses
   // can power bridge features like transcription without ever reaching the phone.
-  function sendCodexRequest(method, params) {
+  async function ensureBridgeManagedCodexInitialized() {
+    if (codexHandshakeState === "warm") {
+      return;
+    }
+    if (bridgeManagedInitializePromise) {
+      await bridgeManagedInitializePromise;
+      return;
+    }
+
+    bridgeManagedInitializePromise = (async () => {
+      try {
+        await sendCodexRequest("initialize", buildBridgeManagedInitializeParams(true), { skipInitialize: true });
+      } catch (error) {
+        if (isAlreadyInitializedCodexError(error)) {
+          codexHandshakeState = "warm";
+          return;
+        }
+        if (!shouldRetryBridgeManagedInitializeWithoutCapabilities(error)) {
+          throw error;
+        }
+        await sendCodexRequest("initialize", buildBridgeManagedInitializeParams(false), { skipInitialize: true });
+      }
+      codexHandshakeState = "warm";
+      codex.send(JSON.stringify({ method: "initialized" }));
+    })();
+
+    try {
+      await bridgeManagedInitializePromise;
+    } finally {
+      bridgeManagedInitializePromise = null;
+    }
+  }
+
+  function buildBridgeManagedInitializeParams(includeExperimentalApi) {
+    const params = {
+      clientInfo: {
+        name: "remodex_telegram",
+        title: "Remodex Telegram",
+        version: bridgePackageVersion,
+      },
+    };
+    if (includeExperimentalApi) {
+      params.capabilities = { experimentalApi: true };
+    }
+    return params;
+  }
+
+  function shouldRetryBridgeManagedInitializeWithoutCapabilities(error) {
+    const message = normalizeErrorMessage(error);
+    return message.includes("capabilities")
+      || message.includes("experimentalapi")
+      || message.includes("invalid params")
+      || message.includes("invalid request");
+  }
+
+  function isAlreadyInitializedCodexError(error) {
+    return normalizeErrorMessage(error).includes("already initialized");
+  }
+
+  function normalizeErrorMessage(error) {
+    return typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  }
+
+  async function sendCodexRequest(method, params, options = {}) {
+    if (!options.skipInitialize && method !== "initialize") {
+      await ensureBridgeManagedCodexInitialized();
+    }
+
     const requestId = `bridge-managed-${randomBytes(12).toString("hex")}`;
     const payload = JSON.stringify({
       id: requestId,
@@ -1206,6 +1420,7 @@ function startBridge({
   }
 
   function failBridgeManagedCodexRequests(error) {
+    bridgeManagedInitializePromise = null;
     for (const waiter of bridgeManagedCodexRequestWaiters.values()) {
       clearTimeout(waiter.timeout);
       waiter.reject(error);
@@ -1260,6 +1475,866 @@ function startBridge({
     return readBridgePreferences();
   }
 
+  function createTelegramControlSurface() {
+    return {
+      readStatus: async () => ({
+        bridgeStatus: {
+          ...bridgeStatusPublisher.latest(),
+          bridgeVersion: normalizeVersionString(bridgePackageVersion) || bridgePackageVersion,
+        },
+      }),
+      readAccountStatus: async () => readSanitizedAuthStatus(),
+      readRateLimits: async () => readTelegramRateLimits(),
+      readUsageStatus: async ({ threadId } = {}) => readTelegramUsageStatus({ threadId }),
+      readVersionStatus: async () => readBridgePackageVersionStatus(),
+      openLoginOnMac: async () => openPendingAuthLoginOnMac({}),
+      cancelLoginOnMac: async () => cancelPendingAuthLoginOnMac(),
+      logoutOnMac: async () => logoutAccountOnMac(),
+      openFeedbackOnMac: async ({ message, threadId } = {}) => openFeedbackEmailOnMac({ message, threadId }),
+      readLastActiveThread: async () => readLastActiveThread(),
+      readContextWindow: async ({ threadId } = {}) => readTelegramContextWindow(threadId),
+      readThreadActivity: async ({ threadId, limit } = {}) => readTelegramThreadActivity(threadId, limit),
+      captureWorkspaceCheckpoint: async ({ threadId, cwd } = {}) => captureTelegramWorkspaceCheckpoint({ threadId, cwd }),
+      previewWorkspaceCheckpointRestore: async ({ threadId, cwd, checkpointRef } = {}) => previewTelegramWorkspaceCheckpointRestore({ threadId, cwd, checkpointRef }),
+      applyWorkspaceCheckpointRestore: async ({
+        threadId,
+        cwd,
+        checkpointRef,
+        expectedTargetCommit,
+      } = {}) => applyTelegramWorkspaceCheckpointRestore({
+        threadId,
+        cwd,
+        checkpointRef,
+        expectedTargetCommit,
+      }),
+      compactThread: async ({ threadId } = {}) => compactTelegramThread(threadId),
+      listSkills: async ({ threadId, cwd, query } = {}) => listTelegramSkills({ threadId, cwd, query }),
+      listPlugins: async ({ threadId, cwd, query } = {}) => listTelegramPlugins({ threadId, cwd, query }),
+      readPreferences: async () => readBridgePreferences(),
+      updatePreferences: async (preferences = {}) => updateBridgePreferences(preferences),
+      readPets: async () => handlePetMethod("pet/list", { metadataOnly: true }),
+      listThreads: async ({ query } = {}) => listTelegramThreads({ query }),
+      listArchivedThreads: async ({ query } = {}) => listTelegramThreads({ query, archived: true }),
+      archiveThread: async ({ threadId } = {}) => archiveTelegramThread(threadId),
+      unarchiveThread: async ({ threadId } = {}) => unarchiveTelegramThread(threadId),
+      renameThread: async ({ threadId, title } = {}) => renameTelegramThread({ threadId, title }),
+      generateThreadTitle: async ({
+        threadId,
+        cwd,
+        message,
+        runtimePreferences,
+      } = {}) => generateTelegramThreadTitle({ threadId, cwd, message, runtimePreferences }),
+      readGitStatus: async ({ threadId, cwd } = {}) => gitStatus(await resolveTelegramThreadCwd(threadId, cwd)),
+      initGit: async ({ threadId, cwd } = {}) => gitInit(await resolveTelegramThreadCwd(threadId, cwd)),
+      readGitDiffSummary: async ({ threadId, cwd } = {}) => summarizeTelegramDiff(await gitDiff(await resolveTelegramThreadCwd(threadId, cwd))),
+      readGitLog: async ({ threadId, cwd } = {}) => gitLog(await resolveTelegramThreadCwd(threadId, cwd)),
+      readGitRemote: async ({ threadId, cwd } = {}) => gitRemoteUrl(await resolveTelegramThreadCwd(threadId, cwd)),
+      readGitBranches: async ({ threadId, cwd } = {}) => gitBranchesWithStatus(await resolveTelegramThreadCwd(threadId, cwd)),
+      generateCommitDraft: async ({
+        threadId,
+        cwd,
+        runtimePreferences,
+      } = {}) => generateTelegramCommitDraft({ threadId, cwd, runtimePreferences }),
+      generatePullRequestDraft: async ({
+        threadId,
+        cwd,
+        runtimePreferences,
+      } = {}) => generateTelegramPullRequestDraft({ threadId, cwd, runtimePreferences }),
+      startReview: async ({
+        threadId,
+        runtimePreferences,
+        target,
+        baseBranch,
+      } = {}) => startTelegramReview({ threadId, runtimePreferences, target, baseBranch }),
+      listProjects: async ({ query } = {}) => listTelegramProjects(query),
+      listProjectDirectory: async ({ path } = {}) => listTelegramProjectDirectory(path),
+      createProjectDirectory: async ({ parentPath, name } = {}) => createTelegramProjectDirectory({ parentPath, name }),
+      createBranch: async ({ threadId, cwd, name } = {}) => gitCreateBranch(await resolveTelegramThreadCwd(threadId, cwd), { name }),
+      createWorktreeThread: async ({
+        threadId,
+        cwd,
+        branch,
+        runtimePreferences,
+      } = {}) => createTelegramWorktreeThread({ threadId, cwd, branch, runtimePreferences }),
+      checkoutBranch: async ({ threadId, cwd, branch } = {}) => gitCheckout(await resolveTelegramThreadCwd(threadId, cwd), { branch }),
+      pullGit: async ({ threadId, cwd } = {}) => gitPull(await resolveTelegramThreadCwd(threadId, cwd)),
+      resetGitToRemote: async ({ threadId, cwd } = {}) => gitResetToRemote(await resolveTelegramThreadCwd(threadId, cwd), { confirm: "discard_runtime_changes" }),
+      stashGit: async ({ threadId, cwd } = {}) => gitStash(await resolveTelegramThreadCwd(threadId, cwd)),
+      popGitStash: async ({ threadId, cwd } = {}) => gitStashPop(await resolveTelegramThreadCwd(threadId, cwd)),
+      openThreadOnMac: async ({ threadId } = {}) => openTelegramThreadOnMac(threadId),
+      wakeMac: async () => handleDesktopMethod("desktop/wakeDisplay", {}),
+      runGitAction: async ({ threadId, cwd, action, message } = {}) => gitRunStackedAction(await resolveTelegramThreadCwd(threadId, cwd), {
+        action,
+        message,
+        commitMessage: message,
+      }),
+      createThread: async ({
+        sourceThreadId,
+        sourceCwd,
+        cwd,
+        runtimePreferences,
+      } = {}) => createTelegramThread({ sourceThreadId, sourceCwd, cwd, runtimePreferences }),
+      forkThread: async ({
+        threadId,
+        cwd,
+        runtimePreferences,
+      } = {}) => forkTelegramThread({ threadId, cwd, runtimePreferences }),
+      stopThread: async (threadId) => stopTelegramThread(threadId),
+      continueThread: async ({
+        threadId,
+        text,
+        attachments,
+        runtimePreferences,
+        collaborationMode,
+      } = {}) => continueTelegramThread({ threadId, text, attachments, runtimePreferences, collaborationMode }),
+      transcribeVoice: async ({ audioData, mimeType, durationMs } = {}) => transcribeTelegramVoice({ audioData, mimeType, durationMs }),
+      resolveApproval: async (payload, decision) => resolveTelegramApproval(payload, decision),
+      resolveUserInput: async (payload) => resolveTelegramUserInput(payload),
+    };
+  }
+
+  async function archiveTelegramThread(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before archiving.");
+    }
+    await sendCodexRequest("thread/archive", { threadId: normalizedThreadId });
+    return { threadId: normalizedThreadId };
+  }
+
+  async function unarchiveTelegramThread(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Choose an archived Telegram thread before restoring.");
+    }
+    await sendCodexRequest("thread/unarchive", { threadId: normalizedThreadId });
+    return { threadId: normalizedThreadId };
+  }
+
+  async function readTelegramContextWindow(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before running this command.");
+    }
+    const result = readLatestContextWindowUsage({ threadId: normalizedThreadId });
+    return {
+      threadId: normalizedThreadId,
+      usage: result?.usage ?? null,
+    };
+  }
+
+  async function readTelegramThreadActivity(threadId, limit) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before running this command.");
+    }
+    const normalizedLimit = normalizeTelegramActivityLimit(limit);
+    const result = await sendCodexRequest("thread/turns/list", {
+      threadId: normalizedThreadId,
+      limit: normalizedLimit,
+      sortDirection: "desc",
+    });
+    return summarizeTelegramThreadActivity(result, {
+      maxTurns: normalizedLimit,
+      maxEntries: Math.min(20, normalizedLimit * 3),
+    });
+  }
+
+  async function listTelegramSkills({ threadId, cwd, query } = {}) {
+    const resolvedCwd = await resolveTelegramThreadCwd(threadId, cwd);
+    const params = { cwds: [resolvedCwd] };
+    const payload = await sendCodexRequest("skills/list", params)
+      .catch((error) => {
+        if (!shouldRetryDiscoveryListWithCwdFallback(error)) {
+          throw error;
+        }
+        return sendCodexRequest("skills/list", { cwd: resolvedCwd });
+      });
+    return {
+      ...payload,
+      query: normalizeNonEmptyString(query),
+    };
+  }
+
+  async function listTelegramPlugins({ threadId, cwd, query } = {}) {
+    const resolvedCwd = await resolveTelegramThreadCwd(threadId, cwd);
+    const payload = await sendCodexRequest("plugin/list", { cwds: [resolvedCwd] });
+    return {
+      ...payload,
+      query: normalizeNonEmptyString(query),
+    };
+  }
+
+  function shouldRetryDiscoveryListWithCwdFallback(error) {
+    const code = Number(error?.code);
+    if (code === -32600 || code === -32602) {
+      return true;
+    }
+    const message = normalizeNonEmptyString(error?.message).toLowerCase();
+    return message.includes("cwds") || message.includes("invalid params");
+  }
+
+  async function listTelegramThreads({ query = "", archived = false } = {}) {
+    const threads = normalizeTelegramThreadsList(await sendCodexRequest("thread/list", {
+      limit: normalizeNonEmptyString(query) ? 50 : 10,
+      archived,
+    }));
+    return filterTelegramThreads(threads, query);
+  }
+
+  async function readTelegramRateLimits() {
+    return sendCodexRequest("account/rateLimits/read", null)
+      .catch((error) => {
+        if (!shouldRetryRateLimitsWithEmptyObject(error)) {
+          throw error;
+        }
+        return sendCodexRequest("account/rateLimits/read", {});
+      });
+  }
+
+  async function readTelegramUsageStatus({ threadId } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const [rateLimitsResult, contextResult] = await Promise.allSettled([
+      readTelegramRateLimits(),
+      normalizedThreadId ? readTelegramContextWindow(normalizedThreadId) : Promise.resolve(null),
+    ]);
+    const errors = {};
+    if (rateLimitsResult.status === "rejected") {
+      errors.rateLimits = safeTelegramUsageError(rateLimitsResult.reason);
+    }
+    if (contextResult.status === "rejected") {
+      errors.context = safeTelegramUsageError(contextResult.reason);
+    }
+    return {
+      context: contextResult.status === "fulfilled" ? contextResult.value : null,
+      rateLimits: rateLimitsResult.status === "fulfilled" ? rateLimitsResult.value : null,
+      errors,
+    };
+  }
+
+  function safeTelegramUsageError(error) {
+    const code = normalizeNonEmptyString(error?.code);
+    const message = normalizeNonEmptyString(error?.userMessage)
+      || normalizeNonEmptyString(error?.message)
+      || "unavailable";
+    return code ? `${code}: ${message}` : message;
+  }
+
+  function shouldRetryRateLimitsWithEmptyObject(error) {
+    const code = Number(error?.code);
+    if (code !== -32600 && code !== -32602) {
+      return false;
+    }
+    const message = normalizeNonEmptyString(error?.message).toLowerCase();
+    return message.includes("invalid params")
+      || message.includes("invalid param")
+      || message.includes("failed to parse")
+      || message.includes("expected")
+      || message.includes("missing field `params`")
+      || message.includes("missing field params");
+  }
+
+  async function captureTelegramWorkspaceCheckpoint({ threadId, cwd } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before capturing a checkpoint.");
+    }
+    const resolvedCwd = await resolveTelegramThreadCwd(normalizedThreadId, cwd);
+    const checkpointRef = buildTelegramManualCheckpointRef(normalizedThreadId);
+    const checkpoint = await handleWorkspaceMethod("workspace/checkpointCapture", {
+      cwd: resolvedCwd,
+      threadId: normalizedThreadId,
+      checkpointRef,
+      checkpointKind: "telegramManual",
+    });
+    const status = await gitStatus(resolvedCwd).catch(() => null);
+    return { checkpoint, status };
+  }
+
+  async function previewTelegramWorkspaceCheckpointRestore({ threadId, cwd, checkpointRef } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const normalizedCheckpointRef = normalizeNonEmptyString(checkpointRef);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before previewing checkpoint restore.");
+    }
+    if (!normalizedCheckpointRef) {
+      throw new Error("Select a Telegram checkpoint before previewing restore.");
+    }
+    const resolvedCwd = await resolveTelegramThreadCwd(normalizedThreadId, cwd);
+    return handleWorkspaceMethod("workspace/checkpointRestorePreview", {
+      cwd: resolvedCwd,
+      threadId: normalizedThreadId,
+      checkpointRef: normalizedCheckpointRef,
+    });
+  }
+
+  async function applyTelegramWorkspaceCheckpointRestore({
+    threadId,
+    cwd,
+    checkpointRef,
+    expectedTargetCommit,
+  } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const normalizedCheckpointRef = normalizeNonEmptyString(checkpointRef);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before applying checkpoint restore.");
+    }
+    if (!normalizedCheckpointRef) {
+      throw new Error("Select a Telegram checkpoint before applying restore.");
+    }
+    const resolvedCwd = await resolveTelegramThreadCwd(normalizedThreadId, cwd);
+    return handleWorkspaceMethod("workspace/checkpointRestoreApply", buildTelegramCheckpointRestoreApplyParams({
+      cwd: resolvedCwd,
+      threadId: normalizedThreadId,
+      checkpointRef: normalizedCheckpointRef,
+      expectedTargetCommit,
+    }));
+  }
+
+  async function compactTelegramThread(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before compacting context.");
+    }
+    const result = await sendCodexRequest("thread/compact/start", { threadId: normalizedThreadId });
+    return {
+      ...(result && typeof result === "object" && !Array.isArray(result) ? result : {}),
+      threadId: normalizedThreadId,
+    };
+  }
+
+  async function renameTelegramThread({ threadId, title } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const normalizedTitle = normalizeNonEmptyString(title);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before renaming.");
+    }
+    if (!normalizedTitle) {
+      throw new Error("A thread title is required.");
+    }
+    const result = {
+      threadId: normalizedThreadId,
+      thread_id: normalizedThreadId,
+      name: normalizedTitle,
+      title: normalizedTitle,
+    };
+    sendThreadNameUpdatedNotification(result);
+    return result;
+  }
+
+  async function generateTelegramThreadTitle({
+    threadId,
+    cwd,
+    message,
+    runtimePreferences,
+  } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before generating a title.");
+    }
+    const titleSeed = normalizeNonEmptyString(message) || await readTelegramThreadTitleSeed(normalizedThreadId);
+    if (!titleSeed) {
+      throw new Error("No user message found for the selected Telegram thread. Send /title <message> instead.");
+    }
+    const resolvedCwd = await resolveTelegramThreadCwd(normalizedThreadId, cwd).catch(() => normalizeNonEmptyString(cwd));
+    const generated = await threadGenerateTitle({
+      message: titleSeed,
+      cwd: resolvedCwd,
+      model: runtimePreferences?.model,
+    }, {
+      codexAppPath: config.codexAppPath,
+    });
+    const result = threadNameSet({
+      threadId: normalizedThreadId,
+      title: generated.title,
+    });
+    sendThreadNameUpdatedNotification(result);
+    return result;
+  }
+
+  async function readTelegramThreadTitleSeed(threadId) {
+    const result = await sendCodexRequest("thread/turns/list", {
+      threadId,
+      limit: 20,
+      sortDirection: "asc",
+    });
+    return extractTelegramTitleSeedText(result);
+  }
+
+  async function openTelegramThreadOnMac(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before running this command.");
+    }
+    return handleDesktopMethod("desktop/continueOnMac", { threadId: normalizedThreadId });
+  }
+
+  async function listTelegramProjects(query = "") {
+    const normalizedQuery = normalizeNonEmptyString(query);
+    if (normalizedQuery) {
+      const result = await projectSearchDirectories({
+        query: normalizedQuery,
+        limit: 8,
+        maxDepth: 6,
+      });
+      return {
+        query: normalizedQuery,
+        projects: result.entries || [],
+      };
+    }
+    const result = await projectQuickLocations();
+    return {
+      projects: result.locations || [],
+    };
+  }
+
+  async function listTelegramProjectDirectory(projectPath = "") {
+    const normalizedPath = normalizeNonEmptyString(projectPath);
+    if (!normalizedPath) {
+      const result = await projectQuickLocations();
+      return {
+        isRoot: true,
+        entries: result.locations || [],
+      };
+    }
+    const result = await projectListDirectory({
+      path: normalizedPath,
+      limit: 12,
+    });
+    return {
+      path: result.path,
+      parentPath: result.parentPath,
+      entries: result.entries || [],
+    };
+  }
+
+  async function createTelegramProjectDirectory({ parentPath, name } = {}) {
+    const result = await projectCreateDirectory({ parentPath, name });
+    return {
+      ...result,
+      entries: [],
+    };
+  }
+
+  async function transcribeTelegramVoice({ audioData, mimeType, durationMs } = {}) {
+    const audioBuffer = Buffer.isBuffer(audioData)
+      ? audioData
+      : Buffer.from(audioData || []);
+    if (!audioBuffer.length) {
+      throw new Error("Telegram voice message did not include audio.");
+    }
+
+    const normalizedMimeType = normalizeNonEmptyString(mimeType).toLowerCase();
+    const wavBuffer = normalizedMimeType === "audio/wav" || normalizedMimeType === "audio/x-wav"
+      ? audioBuffer
+      : await convertTelegramAudioToWav(audioBuffer);
+
+    return transcribeVoice({
+      mimeType: "audio/wav",
+      audioBase64: wavBuffer.toString("base64"),
+      sampleRateHz: 24_000,
+      durationMs,
+    }, {
+      sendCodexRequest,
+      fetchImpl: globalThis.fetch,
+      FormDataImpl: globalThis.FormData,
+      BlobImpl: globalThis.Blob,
+    });
+  }
+
+  async function continueTelegramThread({
+    threadId,
+    text,
+    attachments,
+    runtimePreferences,
+    collaborationMode,
+  } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const trimmedText = normalizeNonEmptyString(text);
+    if (!normalizedThreadId) {
+      throw new Error("A Telegram active thread is required before continuing.");
+    }
+    if (!trimmedText) {
+      throw new Error("Telegram continue text is required.");
+    }
+    observeTelegramThreadRollout(normalizedThreadId);
+    let threadPayload;
+    try {
+      await resumeTelegramThreadForInput(normalizedThreadId, runtimePreferences);
+      threadPayload = await sendCodexRequest("thread/read", { threadId: normalizedThreadId });
+    } catch (error) {
+      if (!isTelegramMissingRolloutError(error)) {
+        throw error;
+      }
+      threadPayload = { thread: { id: normalizedThreadId, turns: [] } };
+    }
+    const request = buildTelegramCodexInputRequest({
+      threadId: normalizedThreadId,
+      text: trimmedText,
+      threadPayload,
+      attachments,
+      runtimePreferences,
+      collaborationMode,
+    });
+    if (request.method === "turn/start") {
+      return sendTelegramRuntimeRequest(request.method, request.params, {
+        accessMode: telegramRuntimeAccessMode(runtimePreferences),
+        allowCollaborationModeFallback: normalizeNonEmptyString(collaborationMode).toLowerCase() === "plan",
+      });
+    }
+    if (normalizeNonEmptyString(collaborationMode).toLowerCase() === "plan") {
+      return sendTelegramRuntimeRequest(request.method, request.params, {
+        accessMode: telegramRuntimeAccessMode(runtimePreferences),
+        allowCollaborationModeFallback: true,
+      });
+    }
+    return sendCodexRequest(request.method, request.params);
+  }
+
+  function observeTelegramThreadRollout(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      return;
+    }
+    rolloutLiveMirror?.observeInbound(JSON.stringify({
+      method: "thread/resume",
+      params: { threadId: normalizedThreadId },
+    }));
+  }
+
+  async function stopTelegramThread(threadId) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("A Telegram active thread is required before stop.");
+    }
+    const threadPayload = await sendCodexRequest("thread/read", { threadId: normalizedThreadId });
+    const turnId = findActiveTurnId(threadPayload);
+    if (!turnId) {
+      throw new Error("No active turn found for the selected Telegram thread.");
+    }
+    return sendCodexRequest("turn/interrupt", { threadId: normalizedThreadId, turnId });
+  }
+
+  async function createTelegramThread({
+    sourceThreadId,
+    sourceCwd,
+    cwd: requestedCwd,
+    runtimePreferences,
+  } = {}) {
+    const normalizedSourceThreadId = normalizeNonEmptyString(sourceThreadId);
+    const explicitCwd = normalizeNonEmptyString(requestedCwd);
+    const cwd = explicitCwd
+      ? await validateTelegramProjectCwd(explicitCwd)
+      : await resolveTelegramCreateThreadCwd(normalizedSourceThreadId, sourceCwd);
+    const startPayload = await sendTelegramRuntimeRequest(
+      "thread/start",
+      buildTelegramThreadStartParams({ cwd, runtimePreferences }),
+      { accessMode: telegramRuntimeAccessMode(runtimePreferences) }
+    );
+    return normalizeTelegramCreatedThread(startPayload, { cwd });
+  }
+
+  async function forkTelegramThread({ threadId, cwd, runtimePreferences } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before forking.");
+    }
+    const forkPayload = await sendTelegramThreadForkRequest(normalizedThreadId);
+    const forked = normalizeTelegramForkedThread(forkPayload, {
+      sourceThreadId: normalizedThreadId,
+      cwd,
+    });
+    await resumeTelegramForkedThread({
+      threadId: forked.threadId,
+      cwd: readTelegramThreadCwd(forked.thread),
+      runtimePreferences,
+    });
+    return forked;
+  }
+
+  async function createTelegramWorktreeThread({
+    threadId,
+    cwd,
+    branch,
+    runtimePreferences,
+  } = {}) {
+    const normalizedBranch = normalizeNonEmptyString(branch);
+    if (!normalizedBranch) {
+      throw new Error("A worktree branch name is required.");
+    }
+
+    const sourceCwd = await resolveTelegramThreadCwd(threadId, cwd);
+    const worktree = await gitCreateWorktree(sourceCwd, {
+      name: normalizedBranch,
+      changeTransfer: "copy",
+    });
+    const created = await createTelegramThread({
+      sourceThreadId: threadId,
+      sourceCwd,
+      cwd: worktree.worktreePath,
+      runtimePreferences,
+    });
+
+    return normalizeTelegramWorktreeThreadResult({
+      worktree,
+      thread: created.thread,
+      threadId: created.threadId,
+    });
+  }
+
+  async function generateTelegramCommitDraft({ threadId, cwd, runtimePreferences } = {}) {
+    const resolvedCwd = await resolveTelegramThreadCwd(threadId, cwd);
+    return gitGenerateCommitMessage(resolvedCwd, {
+      model: runtimePreferences?.model,
+    }, {
+      codexAppPath: config.codexAppPath,
+    });
+  }
+
+  async function generateTelegramPullRequestDraft({ threadId, cwd, runtimePreferences } = {}) {
+    const resolvedCwd = await resolveTelegramThreadCwd(threadId, cwd);
+    return gitGeneratePullRequestDraft(resolvedCwd, {
+      model: runtimePreferences?.model,
+    }, {
+      codexAppPath: config.codexAppPath,
+    });
+  }
+
+  async function startTelegramReview({
+    threadId,
+    runtimePreferences,
+    target,
+    baseBranch,
+  } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before starting review.");
+    }
+    observeTelegramThreadRollout(normalizedThreadId);
+    await resumeTelegramThreadForInput(normalizedThreadId, runtimePreferences);
+    const params = buildTelegramReviewStartParams({
+      threadId: normalizedThreadId,
+      target,
+      baseBranch,
+    });
+    const result = await sendTelegramRuntimeRequest("review/start", params, {
+      accessMode: telegramRuntimeAccessMode(runtimePreferences),
+    });
+    return {
+      ...result,
+      target: params.target,
+    };
+  }
+
+  async function sendTelegramThreadForkRequest(threadId) {
+    let includeExcludeTurns = true;
+    while (true) {
+      try {
+        return await sendCodexRequest(
+          "thread/fork",
+          buildTelegramThreadForkParams({ threadId, excludeTurns: includeExcludeTurns })
+        );
+      } catch (error) {
+        if (includeExcludeTurns && shouldRetryTelegramRuntimeWithoutField(error)) {
+          includeExcludeTurns = false;
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  async function resumeTelegramForkedThread({ threadId, cwd, runtimePreferences } = {}) {
+    let includeExcludeTurns = true;
+    while (true) {
+      try {
+        return await sendTelegramRuntimeRequest(
+          "thread/resume",
+          buildTelegramThreadResumeParams({
+            threadId,
+            cwd,
+            excludeTurns: includeExcludeTurns,
+            runtimePreferences,
+          }),
+          { accessMode: telegramRuntimeAccessMode(runtimePreferences) }
+        );
+      } catch (error) {
+        if (includeExcludeTurns && shouldRetryTelegramRuntimeWithoutField(error)) {
+          includeExcludeTurns = false;
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  async function validateTelegramProjectCwd(candidatePath) {
+    const validation = await projectValidatePath({ path: candidatePath });
+    if (!validation?.isAllowed) {
+      throw new Error("That Telegram project folder is outside the allowed local project locations.");
+    }
+    if (!validation.exists) {
+      throw new Error("That Telegram project folder does not exist on this Mac.");
+    }
+    if (!validation.isDirectory) {
+      throw new Error("That Telegram project path is not a folder.");
+    }
+    return validation.path;
+  }
+
+  async function resumeTelegramThreadForInput(threadId, runtimePreferences) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("A Telegram active thread is required before continuing.");
+    }
+    let thread = null;
+    let cwd = "";
+    try {
+      thread = findTelegramThreadById(
+        normalizeTelegramThreadsList(await sendCodexRequest("thread/list", { limit: 50 })),
+        normalizedThreadId
+      );
+      cwd = readTelegramThreadCwd(thread);
+    } catch {
+      // thread/resume can still succeed from the id alone.
+    }
+
+    let includeExcludeTurns = true;
+    while (true) {
+      try {
+        return await sendTelegramRuntimeRequest(
+          "thread/resume",
+          buildTelegramThreadResumeParams({
+            threadId: normalizedThreadId,
+            cwd,
+            excludeTurns: includeExcludeTurns,
+            runtimePreferences,
+          }),
+          { accessMode: telegramRuntimeAccessMode(runtimePreferences) }
+        );
+      } catch (error) {
+        if (includeExcludeTurns && shouldRetryTelegramRuntimeWithoutField(error)) {
+          includeExcludeTurns = false;
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  async function sendTelegramRuntimeRequest(method, baseParams, options = {}) {
+    const attempts = buildTelegramRuntimeRequestAttempts(baseParams, options);
+    let lastError = null;
+    for (let index = 0; index < attempts.length; index += 1) {
+      try {
+        return await sendCodexRequest(method, attempts[index]);
+      } catch (error) {
+        lastError = error;
+        const hasMoreAttempts = index < attempts.length - 1;
+        if (!hasMoreAttempts || !shouldRetryTelegramRuntimeRequest(error)) {
+          throw error;
+        }
+      }
+    }
+    throw lastError || new Error(`Codex request failed: ${method}`);
+  }
+
+  async function resolveTelegramCreateThreadCwd(sourceThreadId, sourceCwd) {
+    if (sourceThreadId) {
+      return resolveTelegramThreadCwd(sourceThreadId, sourceCwd);
+    }
+    const fallbackCwd = normalizeNonEmptyString(sourceCwd);
+    if (fallbackCwd) {
+      return fallbackCwd;
+    }
+    const recentThreads = normalizeTelegramThreadsList(await sendCodexRequest("thread/list", { limit: 10 }));
+    for (const thread of recentThreads) {
+      const cwd = readTelegramThreadCwd(thread);
+      if (cwd) {
+        return cwd;
+      }
+      const threadId = normalizeNonEmptyString(thread?.id || thread?.threadId || thread?.thread_id);
+      if (!threadId) {
+        continue;
+      }
+      try {
+        const threadPayload = await sendCodexRequest("thread/read", { threadId });
+        const resolvedCwd = readTelegramThreadCwd(readThreadFromPayload(threadPayload));
+        if (resolvedCwd) {
+          return resolvedCwd;
+        }
+      } catch {
+        // Try the next recent thread before giving up on first-run Telegram /new.
+      }
+    }
+    throw new Error("No recent Remodex thread has a local project path. Select a thread with /threads first.");
+  }
+
+  async function resolveTelegramThreadCwd(threadId, fallbackCwd = "") {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("Select an active Telegram thread before running this command.");
+    }
+    const normalizedFallbackCwd = normalizeNonEmptyString(fallbackCwd);
+    let thread = null;
+    try {
+      thread = findTelegramThreadById(
+        normalizeTelegramThreadsList(await sendCodexRequest("thread/list", { limit: 50 })),
+        normalizedThreadId
+      ) || readThreadFromPayload(await sendCodexRequest("thread/read", { threadId: normalizedThreadId }));
+    } catch (error) {
+      if (normalizedFallbackCwd) {
+        return normalizedFallbackCwd;
+      }
+      throw error;
+    }
+    const cwd = readTelegramThreadCwd(thread);
+    if (!cwd) {
+      if (normalizedFallbackCwd) {
+        return normalizedFallbackCwd;
+      }
+      throw new Error("The selected Telegram thread does not have a local project path.");
+    }
+    return cwd;
+  }
+
+  async function resolveTelegramApproval(payload, decision) {
+    const requestId = payload?.requestId;
+    if (requestId == null) {
+      throw new Error("Telegram approval callback is missing a request id.");
+    }
+    return handleApplicationMessage(JSON.stringify({
+      id: requestId,
+      result: buildTelegramApprovalResponseResult({
+        method: payload?.method,
+        params: payload?.params,
+        decision,
+      }),
+    }));
+  }
+
+  async function resolveTelegramUserInput(payload = {}) {
+    const requestId = normalizeNonEmptyString(payload.requestId);
+    const answers = payload.answers && typeof payload.answers === "object" && !Array.isArray(payload.answers)
+      ? payload.answers
+      : null;
+    if (!requestId) {
+      throw new Error("Telegram input callback is missing a request id.");
+    }
+    if (!answers || Object.keys(answers).length === 0) {
+      throw new Error("Telegram input callback is missing answers.");
+    }
+
+    const handled = desktopIpcActionFollower?.observeInbound(JSON.stringify({
+      id: requestId,
+      result: { answers },
+    }));
+    if (!handled) {
+      throw new Error("No active desktop input request found for this Telegram answer.");
+    }
+    return { success: true };
+  }
+
   function stopBridge() {
     if (isShuttingDown) {
       return;
@@ -1273,6 +2348,7 @@ function startBridge({
     stopContextUsageWatcher();
     rolloutLiveMirror?.stopAll();
     desktopIpcActionFollower?.stopAll();
+    telegramAdapter?.stop?.();
     desktopRefresher.handleTransportReset();
     failBridgeManagedCodexRequests(new Error("Bridge stopped before the request completed."));
     forwardedRequestMethodsById.clear();
@@ -1286,6 +2362,88 @@ function startBridge({
   return {
     stop: stopBridge,
   };
+}
+
+function convertTelegramAudioToWav(audioBuffer, { spawnImpl = spawn, timeoutMs = 30_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let child;
+    try {
+      child = spawnImpl("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        "pipe:0",
+        "-ac",
+        "1",
+        "-ar",
+        "24000",
+        "-f",
+        "wav",
+        "pipe:1",
+      ], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      reject(telegramVoiceConversionError(error));
+      return;
+    }
+
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill?.();
+      reject(telegramVoiceConversionError(new Error("ffmpeg timed out while converting Telegram voice audio.")));
+    }, timeoutMs);
+    timeout.unref?.();
+
+    child.stdout?.on("data", (chunk) => {
+      stdoutChunks.push(Buffer.from(chunk));
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderrChunks.push(Buffer.from(chunk));
+    });
+    child.on?.("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(telegramVoiceConversionError(error));
+    });
+    child.on?.("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      const wavBuffer = Buffer.concat(stdoutChunks);
+      if (code === 0 && wavBuffer.length > 0) {
+        resolve(wavBuffer);
+        return;
+      }
+      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+      reject(telegramVoiceConversionError(new Error(stderr || `ffmpeg exited with code ${code}`)));
+    });
+
+    child.stdin?.end(audioBuffer);
+  });
+}
+
+function telegramVoiceConversionError(cause) {
+  const error = new Error("Telegram voice transcription requires ffmpeg to convert voice notes on this Mac.");
+  error.errorCode = "telegram_voice_conversion_failed";
+  error.cause = cause;
+  return error;
+}
+
+function telegramRuntimeAccessMode(runtimePreferences = {}) {
+  return normalizeTelegramAccessMode(runtimePreferences?.accessMode || runtimePreferences?.runtimeAccessMode) || "on-request";
 }
 
 // Holds a single macOS idle-sleep assertion for as long as the bridge process stays alive.
@@ -1542,6 +2700,14 @@ function readString(value) {
 
 function normalizeNonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizeTelegramActivityLimit(value) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 3;
+  }
+  return Math.min(Math.max(parsed, 1), 10);
 }
 
 function parseAdaptiveThreadTurnsListRequest(rawMessage) {
