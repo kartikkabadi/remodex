@@ -74,8 +74,8 @@ const TELEGRAM_CONTROL_COMMANDS = [
     callbackAction: true,
   },
   { command: "threads", description: "Choose a recent Remodex thread", usage: "/threads [search]", callbackAction: true, primary: true },
-  { command: "resume", description: "Select the Mac's last active Remodex thread", callbackAction: true, primary: true },
-  { command: "thread", description: "Select a thread by number or thread id", usage: "/thread <number|id>", primary: true },
+  { command: "resume", description: "Select the Mac's last active Remodex thread", callbackAction: true },
+  { command: "thread", description: "Select a thread by number or thread id", usage: "/thread <number|id>" },
   { command: "archived", description: "Show archived Remodex threads with restore buttons", usage: "/archived [search]", callbackAction: true },
   {
     command: "archive",
@@ -111,12 +111,11 @@ const TELEGRAM_CONTROL_COMMANDS = [
     requiresActiveThread: true,
     activeThreadSample: "/activity 8",
     callbackAction: true,
-    primary: true,
   },
   { command: "checkpoint", description: "Capture a local workspace checkpoint", requiresActiveThread: true, callbackAction: true },
   { command: "compact", description: "Summarize older context for the active thread", requiresActiveThread: true, callbackAction: true },
   { command: "context", description: "Show active thread context window usage", requiresActiveThread: true, callbackAction: true },
-  { command: "open", description: "Open the active Remodex thread on this Mac", requiresActiveThread: true, callbackAction: true, primary: true },
+  { command: "open", description: "Open the active Remodex thread on this Mac", requiresActiveThread: true, callbackAction: true },
   { command: "wake", description: "Wake the Mac display from Telegram", callbackAction: true },
   { command: "prefs", description: "Show bridge preferences", callbackAction: true },
   { command: "pets", description: "List local Codex pets without spritesheet data", callbackAction: true },
@@ -228,21 +227,18 @@ const TELEGRAM_CONTROL_COMMANDS = [
     usage: "/answer <response>",
     requiresActiveThread: true,
     activeThreadSample: "/answer Continue with the smallest safe change",
-    primary: true,
   },
   {
     command: "link",
     description: "Link this Telegram chat to your local bridge",
     usage: "/link <code>",
     allowedWhenProMissing: true,
-    primary: true,
   },
   {
     command: "unlink",
     description: "Unlink this Telegram chat from the local bridge",
     allowedWhenProMissing: true,
     callbackAction: true,
-    primary: true,
   },
   {
     command: "help",
@@ -322,15 +318,15 @@ const TELEGRAM_COMMAND_HELP_TOPICS = Object.freeze([
 const TELEGRAM_PRIMARY_COMMAND_HELP_GROUPS = Object.freeze([
   {
     title: "Chat",
-    commands: ["continue", "plan", "answer"],
+    commands: ["continue", "plan", "stop", "pending"],
   },
   {
     title: "Threads",
-    commands: ["status", "threads", "resume", "thread", "new", "activity", "open", "stop", "pending"],
+    commands: ["threads", "new", "status"],
   },
   {
     title: "Setup",
-    commands: ["start", "menu", "link", "unlink", "help"],
+    commands: ["start", "menu", "help"],
   },
 ]);
 

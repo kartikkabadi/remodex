@@ -21,6 +21,7 @@ const {
   normalizeTelegramAccessDescription,
 } = require("./telegram-access");
 const { createTelegramActionRegistry } = require("./telegram-action-registry");
+const { createTelegramKeyboards } = require("./telegram-keyboards");
 const {
   TELEGRAM_ACTIVE_THREAD_COMMANDS,
   TELEGRAM_COMMAND_MENU,
@@ -30,6 +31,7 @@ const {
 } = require("./telegram-command-catalog");
 const {
   renderTelegramAccessRequired,
+  renderTelegramUpgradeInfo,
   renderTelegramAccountStatus,
   renderTelegramArchivedThreads,
   renderTelegramArchiveResult,
@@ -168,6 +170,14 @@ const TELEGRAM_IMAGE_MIME_TYPES_BY_EXTENSION = new Map([
   [".heif", "image/heif"],
 ]);
 
+function canLogoutFromAccountStatus(status = {}) {
+  const accountStatus = String(status?.status ?? "").trim().toLowerCase();
+  return status.tokenReady === true
+    || accountStatus === "authenticated"
+    || accountStatus === "signed_in"
+    || accountStatus === "logged_in";
+}
+
 function createTelegramAdapter({
   botClient,
   sessionState = defaultSessionState,
@@ -183,6 +193,59 @@ function createTelegramAdapter({
   let nextOffset = 0;
   let pollTimer = null;
   const telegramAccessState = normalizeTelegramAccessDescription(telegramAccess);
+  const keyboards = createTelegramKeyboards({
+    actionRegistry,
+    telegramAccessModeFor,
+    canLogoutFromAccountStatus,
+  });
+  const {
+    buildHomeHubReplyMarkup,
+    buildChatHubReplyMarkup,
+    buildThreadsHubReplyMarkup,
+    buildGitHubReplyMarkup,
+    buildSettingsHubReplyMarkup,
+    buildAdvancedMacHubReplyMarkup,
+    buildStatusReplyMarkup,
+    buildActionMenuReplyMarkup,
+    buildMissingThreadReplyMarkup,
+    buildContinueReplyMarkup,
+    buildThreadActivityReplyMarkup,
+    buildCheckpointReplyMarkup,
+    buildCheckpointPreviewReplyMarkup,
+    buildCheckpointAppliedReplyMarkup,
+    buildAccountReplyMarkup,
+    buildLogoutConfirmationReplyMarkup,
+    buildRateLimitsReplyMarkup,
+    buildUsageReplyMarkup,
+    buildVersionReplyMarkup,
+    buildFeedbackReplyMarkup,
+    buildAccessRequiredReplyMarkup,
+    buildAccessStatusReplyMarkup,
+    buildUpgradeReplyMarkup,
+    buildPreferencesReplyMarkup,
+    buildPetsReplyMarkup,
+    buildDiscoveryReplyMarkup,
+    buildModelReplyMarkup,
+    buildModelPickerReplyMarkup,
+    buildDraftCommitReplyMarkup,
+    buildDraftPullRequestReplyMarkup,
+    buildReviewReplyMarkup,
+    buildThreadChoiceReplyMarkup,
+    buildArchivedThreadReplyMarkup,
+    buildArchivedActionReplyMarkup,
+    buildProjectChoiceReplyMarkup,
+    buildProjectDirectoryReplyMarkup,
+    buildCreatedProjectDirectoryReplyMarkup,
+    buildBranchesReplyMarkup,
+    buildGitInitReplyMarkup,
+    buildResetRemoteConfirmationReplyMarkup,
+    buildApprovalReplyMarkup,
+    buildUserInputReplyMarkup,
+    buildMissingPendingUserInputReplyMarkup,
+    buildThreadEventReplyMarkup,
+    buildPostTurnReplyMarkup,
+    makeActionButton,
+  } = keyboards;
   const sentThreadEventKeys = new Map();
   const agentMessageTurns = new Map();
   const pendingUserInputRequestsByChat = new Map();
@@ -644,8 +707,35 @@ function createTelegramAdapter({
     const activeLabel = linkedChat?.activeThreadId ? "Active thread selected." : "No active thread selected.";
     await botClient.sendMessage({
       chatId,
-      text: `Remodex actions\n${activeLabel}`,
-      replyMarkup: buildActionMenuReplyMarkup(chatId, linkedChat),
+      text: `Remodex hub\n${activeLabel}`,
+      replyMarkup: buildHomeHubReplyMarkup(chatId, linkedChat),
+    });
+  }
+
+  async function sendHub(chatId, linkedChat, hub) {
+    const labels = {
+      chat: "Chat hub",
+      threads: "Threads hub",
+      git: "Git hub",
+      settings: "Settings hub",
+      advanced: "Advanced (Mac)",
+    };
+    const builders = {
+      chat: buildChatHubReplyMarkup,
+      threads: buildThreadsHubReplyMarkup,
+      git: buildGitHubReplyMarkup,
+      settings: buildSettingsHubReplyMarkup,
+      advanced: buildAdvancedMacHubReplyMarkup,
+    };
+    const build = builders[hub];
+    if (!build) {
+      await sendActionMenu(chatId, linkedChat);
+      return;
+    }
+    await botClient.sendMessage({
+      chatId,
+      text: labels[hub],
+      replyMarkup: build(chatId, linkedChat),
     });
   }
 
@@ -703,8 +793,8 @@ function createTelegramAdapter({
   async function sendUpgradeStatus(chatId) {
     await botClient.sendMessage({
       chatId,
-      text: renderTelegramAccessRequired(telegramAccessState),
-      replyMarkup: buildAccessStatusReplyMarkup(chatId),
+      text: renderTelegramUpgradeInfo(telegramAccessState),
+      replyMarkup: buildUpgradeReplyMarkup(chatId),
     });
   }
 
@@ -751,14 +841,16 @@ function createTelegramAdapter({
     });
   }
 
-  async function sendThreads(chatId, query = "") {
+  async function sendThreads(chatId, query = "", page = 0) {
     const normalizedQuery = normalizeChatId(query);
     const threads = await listThreads({ query: normalizedQuery });
-    const lines = threads.slice(0, 10).map((thread, index) => `${index + 1}. ${threadTitle(thread)}`);
+    const pageSize = 5;
+    const pageItems = threads.slice(page * pageSize, (page + 1) * pageSize);
+    const lines = pageItems.map((thread, index) => `${page * pageSize + index + 1}. ${threadTitle(thread)}`);
     await botClient.sendMessage({
       chatId,
       text: renderThreadsText({ lines, query: normalizedQuery }),
-      replyMarkup: buildThreadChoiceReplyMarkup(chatId, threads),
+      replyMarkup: buildThreadChoiceReplyMarkup(chatId, threads, { page, query: normalizedQuery }),
     });
   }
 
@@ -777,7 +869,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: `Active thread: ${threadTitle(thread)}`,
-        replyMarkup: buildStatusReplyMarkup(chatId, {
+        replyMarkup: buildContinueReplyMarkup(chatId, {
           activeThreadId: thread.id,
           activeThreadCwd: threadCwd(thread),
         }),
@@ -796,7 +888,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: `Active thread: ${thread ? threadTitle(thread) : explicitThreadId}`,
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         activeThreadId: explicitThreadId,
         activeThreadCwd: threadCwd(thread),
       }),
@@ -826,20 +918,20 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramResumeResult(selected),
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         activeThreadId: threadId,
         activeThreadCwd: threadCwd(thread),
       }),
     });
   }
 
-  async function sendArchivedThreads(chatId, query = "") {
+  async function sendArchivedThreads(chatId, query = "", page = 0) {
     const normalizedQuery = normalizeChatId(query);
     const threads = await listArchivedThreads({ query: normalizedQuery });
     await botClient.sendMessage({
       chatId,
       text: renderTelegramArchivedThreads({ threads, query: normalizedQuery }),
-      replyMarkup: buildArchivedThreadReplyMarkup(chatId, threads),
+      replyMarkup: buildArchivedThreadReplyMarkup(chatId, threads, { page, query: normalizedQuery }),
     });
   }
 
@@ -887,7 +979,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramUnarchiveResult(restoredThread),
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         activeThreadId: thread.id,
         activeThreadCwd: threadCwd(restoredThread),
       }),
@@ -1008,7 +1100,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramGeneratedTitleResult(result),
-      replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+      replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
     });
   }
 
@@ -1022,7 +1114,7 @@ function createTelegramAdapter({
     });
     const replyMarkup = status?.isRepo === false && linkedChat?.activeThreadId
       ? buildGitInitReplyMarkup(chatId, linkedChat)
-      : undefined;
+      : buildGitHubReplyMarkup(chatId, linkedChat);
     await botClient.sendMessage({ chatId, text: renderTelegramGitStatus(status), replyMarkup });
   }
 
@@ -1037,20 +1129,21 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramGitInitResult(result),
-      replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+      replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
     });
   }
 
-  async function sendProjects(chatId, query = "") {
-    const result = await controlSurface.listProjects?.({ query: normalizeChatId(query) });
+  async function sendProjects(chatId, query = "", page = 0) {
+    const normalizedQuery = normalizeChatId(query);
+    const result = await controlSurface.listProjects?.({ query: normalizedQuery });
     await botClient.sendMessage({
       chatId,
-      text: renderTelegramProjects({ ...result, query: normalizeChatId(query) }),
-      replyMarkup: buildProjectChoiceReplyMarkup(chatId, result),
+      text: renderTelegramProjects({ ...result, query: normalizedQuery }),
+      replyMarkup: buildProjectChoiceReplyMarkup(chatId, result, { page, query: normalizedQuery }),
     });
   }
 
-  async function sendProjectDirectory(chatId, projectPath = "") {
+  async function sendProjectDirectory(chatId, projectPath = "", page = 0) {
     const result = await controlSurface.listProjectDirectory?.({ path: normalizeChatId(projectPath) });
     const browsePath = normalizeChatId(result?.path);
     if (sessionState.setProjectBrowsePath) {
@@ -1059,7 +1152,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramProjectDirectory(result),
-      replyMarkup: buildProjectDirectoryReplyMarkup(chatId, result),
+      replyMarkup: buildProjectDirectoryReplyMarkup(chatId, result, { page }),
     });
   }
 
@@ -1109,7 +1202,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: `New active thread: ${selection.title}`,
-      replyMarkup: buildStatusReplyMarkup(chatId, selection),
+      replyMarkup: buildContinueReplyMarkup(chatId, selection),
     });
   }
 
@@ -1155,7 +1248,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramForkResult({ ...result, thread: { ...thread, id: threadId } }),
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         ...linkedChat,
         activeThreadId: threadId,
         activeThreadCwd: threadCwd(thread),
@@ -1213,7 +1306,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: "Checkpoint restore preview is unavailable for this checkpoint.",
-        replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+        replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
       });
       return;
     }
@@ -1221,7 +1314,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: "Checkpoint restore preview is not available in this bridge.",
-        replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+        replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
       });
       return;
     }
@@ -1250,7 +1343,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: "Checkpoint restore is unavailable for this checkpoint.",
-        replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+        replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
       });
       return;
     }
@@ -1258,7 +1351,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: "Checkpoint restore is not available in this bridge.",
-        replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+        replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
       });
       return;
     }
@@ -1391,7 +1484,7 @@ function createTelegramAdapter({
         reasoningEffort: nextPreferences.reasoningEffort,
         runtimeServiceTier: nextPreferences.serviceTier,
         runtimeAccessMode: nextPreferences.accessMode,
-      }),
+      }, { section: "summary" }),
     });
   }
 
@@ -1425,7 +1518,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramModelPreferences(nextLinkedChat),
-      replyMarkup: buildModelReplyMarkup(chatId, nextLinkedChat),
+      replyMarkup: buildModelReplyMarkup(chatId, nextLinkedChat, { section: "summary" }),
     });
   }
 
@@ -1476,7 +1569,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({ chatId, text: renderTelegramRemote(remote) });
   }
 
-  async function sendBranches(chatId, linkedChat) {
+  async function sendBranches(chatId, linkedChat, page = 0) {
     if (!await requireActiveThread(chatId, linkedChat)) {
       return;
     }
@@ -1487,7 +1580,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramBranches(branches),
-      replyMarkup: buildBranchesReplyMarkup(chatId, linkedChat, branches),
+      replyMarkup: buildBranchesReplyMarkup(chatId, linkedChat, branches, { page }),
     });
   }
 
@@ -1550,7 +1643,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramWorktreeThreadResult(result),
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         ...linkedChat,
         activeThreadId: threadId,
         activeThreadCwd: threadCwd(thread) || result?.worktree?.worktreePath,
@@ -1594,7 +1687,7 @@ function createTelegramAdapter({
       await botClient.sendMessage({
         chatId,
         text: "Reset to remote is not available in this bridge.",
-        replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+        replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
       });
       return;
     }
@@ -1605,7 +1698,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: renderTelegramResetRemoteResult(result),
-      replyMarkup: buildStatusReplyMarkup(chatId, linkedChat),
+      replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
     });
   }
 
@@ -1917,6 +2010,48 @@ function createTelegramAdapter({
       if (action.type === "command.menu") {
         await sendActionMenu(chatId, linkedChat);
         await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Menu opened." });
+        return;
+      }
+      if (action.type === "hub.open") {
+        await sendHub(chatId, linkedChat, normalizeChatId(action.payload?.hub));
+        await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Hub opened." });
+        return;
+      }
+      if (action.type === "picker.page") {
+        const listType = normalizeChatId(action.payload?.listType);
+        const page = Number.parseInt(String(action.payload?.page ?? "0"), 10) || 0;
+        if (listType === "threads") {
+          await sendThreads(chatId, action.payload?.query, page);
+        } else if (listType === "archived") {
+          await sendArchivedThreads(chatId, action.payload?.query, page);
+        } else if (listType === "projects") {
+          await sendProjects(chatId, action.payload?.query, page);
+        } else if (listType === "browse") {
+          await sendProjectDirectory(chatId, action.payload?.path, page);
+        } else if (listType === "branches") {
+          await sendBranches(chatId, linkedChat, page);
+        } else if (listType === "model") {
+          await botClient.sendMessage({
+            chatId,
+            text: renderTelegramModelPreferences(linkedChat),
+            replyMarkup: buildModelPickerReplyMarkup(chatId, linkedChat, {
+              page,
+              section: normalizeChatId(action.payload?.section) || "model",
+            }),
+          });
+        }
+        await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Page updated." });
+        return;
+      }
+      if (action.type === "runtime.model_picker") {
+        const section = normalizeChatId(action.payload?.section) || "model";
+        const page = Number.parseInt(String(action.payload?.page ?? "0"), 10) || 0;
+        await botClient.sendMessage({
+          chatId,
+          text: renderTelegramModelPreferences(linkedChat),
+          replyMarkup: buildModelPickerReplyMarkup(chatId, linkedChat, { page, section }),
+        });
+        await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Picker opened." });
         return;
       }
       if (action.type === "command.threads") {
@@ -2537,7 +2672,7 @@ function createTelegramAdapter({
     await botClient.sendMessage({
       chatId,
       text: `Active thread: ${title}`,
-      replyMarkup: buildStatusReplyMarkup(chatId, {
+      replyMarkup: buildContinueReplyMarkup(chatId, {
         activeThreadId: normalizedThreadId,
         activeThreadCwd: threadCwd(thread),
       }),
@@ -2565,755 +2700,6 @@ function createTelegramAdapter({
     } catch (error) {
       logger.warn?.(`[remodex] Telegram bot identity lookup failed: ${error.message}`);
     }
-  }
-
-  function buildStatusReplyMarkup(chatId, linkedChat) {
-    const rows = [
-      [
-        makeActionButton(chatId, "Status", "command.status"),
-        makeActionButton(chatId, "Threads", "command.threads"),
-      ],
-      [
-        makeActionButton(chatId, "New", "command.new", linkedChat?.activeThreadId
-          ? { sourceThreadId: linkedChat.activeThreadId }
-          : undefined),
-        makeActionButton(chatId, "Resume Mac", "command.resume"),
-      ],
-      [
-        makeActionButton(chatId, "Menu", "command.menu"),
-        makeActionButton(chatId, "Help", "command.help"),
-      ],
-    ];
-    if (linkedChat?.activeThreadId) {
-      rows.push([
-        makeActionButton(chatId, "Stop", "command.stop", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Pending", "command.pending", { threadId: linkedChat.activeThreadId }),
-      ]);
-      rows.push([
-        makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      ]);
-    }
-    return { inline_keyboard: rows };
-  }
-
-  function buildActionMenuReplyMarkup(chatId, linkedChat) {
-    const rows = [
-      [
-        makeActionButton(chatId, "Status", "command.status"),
-        makeActionButton(chatId, "Threads", "command.threads"),
-      ],
-      [
-        makeActionButton(chatId, "New", "command.new", { sourceThreadId: linkedChat?.activeThreadId }),
-        makeActionButton(chatId, "Resume Mac", "command.resume"),
-      ],
-      [
-        makeActionButton(chatId, "Help", "command.help"),
-        makeActionButton(chatId, "All Commands", "command.help", { topic: "all" }),
-      ],
-    ];
-    if (linkedChat?.activeThreadId) {
-      rows.push([
-        makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      ]);
-      rows.push([
-        makeActionButton(chatId, "Stop", "command.stop", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Pending", "command.pending", { threadId: linkedChat.activeThreadId }),
-      ]);
-    }
-    return { inline_keyboard: rows };
-  }
-
-  function buildMissingThreadReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Threads", "command.threads"),
-          makeActionButton(chatId, "Help", "command.help"),
-        ],
-        [
-          makeActionButton(chatId, "New", "command.new"),
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-      ],
-    };
-  }
-
-  function buildContinueReplyMarkup(chatId, linkedChat) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Stop", "command.stop", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-        [
-          makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Pending", "command.pending", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, "Menu", "command.menu"),
-          makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-        ],
-      ],
-    };
-  }
-
-  function buildThreadActivityReplyMarkup(chatId, linkedChat, limit = TELEGRAM_ACTIVITY_DEFAULT_LIMIT) {
-    const normalizedLimit = normalizeTelegramActivityLimit(limit);
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh", "command.activity", { threadId: linkedChat.activeThreadId, limit: normalizedLimit }),
-          makeActionButton(chatId, "More", "command.activity", { threadId: linkedChat.activeThreadId, limit: TELEGRAM_ACTIVITY_MORE_LIMIT }),
-        ],
-        [
-          makeActionButton(chatId, "Help", "command.help"),
-        ],
-        [
-          makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-      ],
-    };
-  }
-
-  function buildCheckpointReplyMarkup(chatId, linkedChat, result = {}) {
-    const checkpoint = result.checkpoint || result || {};
-    const checkpointRef = normalizeChatId(checkpoint.checkpointRef);
-    const commit = normalizeChatId(checkpoint.commit);
-    const rows = [];
-    if (checkpointRef) {
-      rows.push([
-        makeActionButton(chatId, "Preview Restore", "checkpoint.restore_preview", {
-          threadId: linkedChat.activeThreadId,
-          checkpointRef,
-          commit,
-        }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-      makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-    ]);
-    rows.push([
-      makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      makeActionButton(chatId, "Status", "command.status"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildCheckpointPreviewReplyMarkup(chatId, linkedChat, result = {}) {
-    const checkpointRef = normalizeChatId(result.checkpointRef);
-    const expectedTargetCommit = normalizeChatId(result.commit);
-    const rows = [];
-    if (result.canRestore !== false && checkpointRef) {
-      rows.push([
-        makeActionButton(chatId, "Apply Restore", "checkpoint.restore_apply", {
-          threadId: linkedChat.activeThreadId,
-          checkpointRef,
-          expectedTargetCommit,
-        }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      makeActionButton(chatId, "Checkpoint", "command.checkpoint", { threadId: linkedChat.activeThreadId }),
-    ]);
-    rows.push([
-      makeActionButton(chatId, "Status", "command.status"),
-      makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildCheckpointAppliedReplyMarkup(chatId, linkedChat) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-      ],
-    };
-  }
-
-  function buildAccountReplyMarkup(chatId, status = {}) {
-    const rows = [
-      [
-        makeActionButton(chatId, "Open Login", "command.login"),
-        makeActionButton(chatId, "Refresh", "command.account"),
-      ],
-    ];
-    if (status.loginInFlight) {
-      rows.push([
-        makeActionButton(chatId, "Cancel Login", "command.cancel_login"),
-      ]);
-    }
-    if (canLogoutFromAccountStatus(status)) {
-      rows.push([
-        makeActionButton(chatId, "Sign Out", "command.logout"),
-      ]);
-    }
-    rows.push(
-      [
-        makeActionButton(chatId, "Limits", "command.limits"),
-      ],
-      [
-        makeActionButton(chatId, "Menu", "command.menu"),
-        makeActionButton(chatId, "Version", "command.version"),
-      ],
-    );
-    return { inline_keyboard: rows };
-  }
-
-  function buildLogoutConfirmationReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Confirm Sign Out", "command.logout", { confirm: true }),
-        ],
-        [
-          makeActionButton(chatId, "Account", "command.account"),
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-      ],
-    };
-  }
-
-  function canLogoutFromAccountStatus(status = {}) {
-    const accountStatus = normalizeChatId(status.status).toLowerCase();
-    return status.tokenReady === true
-      || accountStatus === "authenticated"
-      || accountStatus === "signed_in"
-      || accountStatus === "logged_in";
-  }
-
-  function buildRateLimitsReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh", "command.limits"),
-          makeActionButton(chatId, "Usage", "command.usage"),
-        ],
-        [
-          makeActionButton(chatId, "Account", "command.account"),
-        ],
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildUsageReplyMarkup(chatId, linkedChat) {
-    const rows = [
-      [
-        makeActionButton(chatId, "Refresh", "command.usage", linkedChat?.activeThreadId
-          ? { threadId: linkedChat.activeThreadId }
-          : undefined),
-        makeActionButton(chatId, "Limits", "command.limits"),
-      ],
-      [
-        makeActionButton(chatId, "Account", "command.account"),
-        makeActionButton(chatId, "Status", "command.status"),
-      ],
-    ];
-    if (linkedChat?.activeThreadId) {
-      rows.push([
-        makeActionButton(chatId, "Context", "command.context", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Menu", "command.menu"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildVersionReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh", "command.version"),
-          makeActionButton(chatId, "Account", "command.account"),
-        ],
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildFeedbackReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildAccessRequiredReplyMarkup(chatId) {
-    return buildAccessStatusReplyMarkup(chatId);
-  }
-
-  function buildAccessStatusReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Upgrade", "command.upgrade"),
-        ],
-        [
-          makeActionButton(chatId, "Help", "command.help"),
-        ],
-        [
-          makeActionButton(chatId, "Account", "command.account"),
-          makeActionButton(chatId, "Limits", "command.limits"),
-        ],
-        [
-          makeActionButton(chatId, "Version", "command.version"),
-          makeActionButton(chatId, "Login", "command.login"),
-        ],
-        [
-          makeActionButton(chatId, "Feedback", "command.feedback"),
-          makeActionButton(chatId, "Unlink", "command.unlink"),
-        ],
-      ],
-    };
-  }
-
-  function buildPreferencesReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Keep Awake On", "prefs.keep_awake", { value: true }),
-          makeActionButton(chatId, "Keep Awake Off", "prefs.keep_awake", { value: false }),
-        ],
-        [
-          makeActionButton(chatId, "Model", "command.model"),
-          makeActionButton(chatId, "Access", "command.access"),
-        ],
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildPetsReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh", "command.pets"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildDiscoveryReplyMarkup(chatId, linkedChat, kind, query = "") {
-    const actionType = kind === "plugins" ? "command.plugins" : "command.skills";
-    const payload = { threadId: linkedChat?.activeThreadId, query: normalizeChatId(query) };
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh", actionType, payload),
-          makeActionButton(chatId, kind === "plugins" ? "Skills" : "Plugins", kind === "plugins" ? "command.skills" : "command.plugins", {
-            threadId: linkedChat?.activeThreadId,
-          }),
-        ],
-        [
-          makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat?.activeThreadId }),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildModelReplyMarkup(chatId, linkedChat = {}) {
-    const runtime = normalizeTelegramRuntimePreferences(linkedChat);
-    const accessMode = telegramAccessModeFor(linkedChat);
-    const modelRows = TELEGRAM_MODEL_CHOICES.map((choice) => ([
-      makeActionButton(
-        chatId,
-        `${choice.id === runtime.model ? "* " : ""}${choice.label}`,
-        "runtime.model",
-        { model: choice.id }
-      ),
-    ]));
-    const effortRows = [
-      TELEGRAM_REASONING_EFFORT_CHOICES.map((choice) => makeActionButton(
-        chatId,
-        `${choice.id === runtime.reasoningEffort ? "* " : ""}${choice.label}`,
-        "runtime.effort",
-        { reasoningEffort: choice.id }
-      )),
-    ];
-    const serviceTierRows = [
-      TELEGRAM_SERVICE_TIER_CHOICES.map((choice) => makeActionButton(
-        chatId,
-        `${choice.value === runtime.serviceTier ? "* " : ""}${choice.label}`,
-        "runtime.service_tier",
-        { serviceTier: choice.id }
-      )),
-    ];
-    const accessRows = [[
-      makeActionButton(chatId, `${accessMode === "on-request" ? "* " : ""}On-Request`, "runtime.access", { accessMode: "on-request" }),
-      makeActionButton(chatId, `${accessMode === "full-access" ? "* " : ""}Full Access`, "runtime.access", { accessMode: "full-access" }),
-    ]];
-    return {
-      inline_keyboard: [
-        ...modelRows,
-        ...effortRows,
-        ...serviceTierRows,
-        ...accessRows,
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildDraftCommitReplyMarkup(chatId, linkedChat, draft = {}) {
-    const subject = normalizeChatId(draft.subject);
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh Draft", "command.draft_commit", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, subject ? "Commit Help" : "Commit/Ship", "command.help", { topic: "commit_ship" }),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildDraftPullRequestReplyMarkup(chatId, linkedChat) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Refresh Draft", "command.draft_pr", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "PR", "command.pr", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, "Push", "command.push", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildReviewReplyMarkup(chatId, linkedChat) {
-    const rows = [];
-    if (linkedChat?.activeThreadId) {
-      rows.push([
-        makeActionButton(chatId, "Review Changes", "command.review", { threadId: linkedChat.activeThreadId, target: "changes" }),
-        makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Branches", "command.branches", linkedChat?.activeThreadId ? { threadId: linkedChat.activeThreadId } : {}),
-      makeActionButton(chatId, "Menu", "command.menu"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildThreadChoiceReplyMarkup(chatId, threads) {
-    const rows = threads.slice(0, 10)
-      .filter((thread) => thread?.id)
-      .map((thread, index) => ([
-        makeActionButton(
-          chatId,
-          `${index + 1}. ${threadTitle(thread)}`,
-          "thread.select",
-          { threadId: thread.id, title: threadTitle(thread) }
-        ),
-      ]));
-    return rows.length ? { inline_keyboard: rows } : undefined;
-  }
-
-  function buildArchivedThreadReplyMarkup(chatId, threads) {
-    const rows = threads.slice(0, 10)
-      .filter((thread) => thread?.id)
-      .map((thread, index) => ([
-        makeActionButton(
-          chatId,
-          `Unarchive ${index + 1}. ${threadTitle(thread)}`,
-          "thread.unarchive",
-          { threadId: thread.id, title: threadTitle(thread) }
-        ),
-      ]));
-    rows.push([
-      makeActionButton(chatId, "Threads", "command.threads"),
-      makeActionButton(chatId, "Menu", "command.menu"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildArchivedActionReplyMarkup(chatId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Archived", "command.archived"),
-          makeActionButton(chatId, "Threads", "command.threads"),
-        ],
-        [
-          makeActionButton(chatId, "New", "command.new"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildProjectChoiceReplyMarkup(chatId, result = {}) {
-    const projects = normalizeProjectEntries(result);
-    const rows = projects.slice(0, 8)
-      .filter((project) => normalizeChatId(project?.path))
-      .map((project) => ([
-        makeActionButton(
-          chatId,
-          `New: ${projectTitle(project)}`,
-          "project.new_thread",
-          { cwd: project.path }
-        ),
-      ]));
-    return rows.length ? { inline_keyboard: rows } : undefined;
-  }
-
-  function buildProjectDirectoryReplyMarkup(chatId, result = {}) {
-    const currentPath = normalizeChatId(result.path);
-    const parentPath = normalizeChatId(result.parentPath);
-    const entries = normalizeProjectEntries(result).filter((entry) => normalizeChatId(entry?.path));
-    const rows = [];
-    if (currentPath) {
-      rows.push([
-        makeActionButton(chatId, "New here", "project.new_thread", { cwd: currentPath }),
-        makeActionButton(chatId, "New folder", "project.mkdir_help", { path: currentPath }),
-      ]);
-      rows.push([
-        parentPath
-          ? makeActionButton(chatId, "Parent", "project.browse", { path: parentPath })
-          : makeActionButton(chatId, "Roots", "command.browse"),
-      ]);
-    }
-    for (const entry of entries.slice(0, 8)) {
-      rows.push([
-        makeActionButton(chatId, `Open: ${projectTitle(entry)}`, "project.browse", { path: entry.path }),
-        makeActionButton(chatId, `New: ${projectTitle(entry)}`, "project.new_thread", { cwd: entry.path }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Projects", "command.projects"),
-      makeActionButton(chatId, "Status", "command.status"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildCreatedProjectDirectoryReplyMarkup(chatId, result = {}) {
-    const folderPath = normalizeChatId(result.path);
-    const rows = [];
-    if (folderPath) {
-      rows.push([
-        makeActionButton(chatId, "Open folder", "project.browse", { path: folderPath }),
-        makeActionButton(chatId, "New thread", "project.new_thread", { cwd: folderPath }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Browse", "command.browse"),
-      makeActionButton(chatId, "Status", "command.status"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildBranchesReplyMarkup(chatId, linkedChat, branchesResult = {}) {
-    const current = normalizeChatId(branchesResult.current || branchesResult.status?.branch);
-    const elsewhere = new Set(Array.isArray(branchesResult.branchesCheckedOutElsewhere)
-      ? branchesResult.branchesCheckedOutElsewhere.map(normalizeChatId)
-      : []);
-    const rows = (Array.isArray(branchesResult.branches) ? branchesResult.branches : [])
-      .map(normalizeChatId)
-      .filter((branch) => (
-        branch
-        && branch !== current
-        && !elsewhere.has(branch)
-      ))
-      .slice(0, 8)
-      .map((branch) => ([
-        makeActionButton(
-          chatId,
-          `Checkout ${branch}`,
-          "git.checkout",
-          { threadId: linkedChat.activeThreadId, branch }
-        ),
-      ]));
-    return rows.length ? { inline_keyboard: rows } : undefined;
-  }
-
-  function buildGitInitReplyMarkup(chatId, linkedChat) {
-    return {
-      inline_keyboard: [[
-        makeActionButton(chatId, "Init Git", "command.init", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Projects", "command.projects"),
-      ]],
-    };
-  }
-
-  function buildResetRemoteConfirmationReplyMarkup(chatId, linkedChat) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Discard Changes", "git.reset_to_remote", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, "Git", "command.git", { threadId: linkedChat.activeThreadId }),
-          makeActionButton(chatId, "Stash", "command.stash", { threadId: linkedChat.activeThreadId }),
-        ],
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-          makeActionButton(chatId, "Menu", "command.menu"),
-        ],
-      ],
-    };
-  }
-
-  function buildApprovalReplyMarkup(chatId, request) {
-    return {
-      inline_keyboard: [[
-        makeActionButton(chatId, "Approve", "approval.accept", {
-          requestId: request.id,
-          method: request.method,
-          params: request.params,
-        }),
-        makeActionButton(chatId, "Decline", "approval.reject", {
-          requestId: request.id,
-          method: request.method,
-          params: request.params,
-        }),
-      ]],
-    };
-  }
-
-  function buildUserInputReplyMarkup(chatId, request) {
-    const rows = [];
-    const question = singleAnswerableTelegramQuestion(request.params);
-    if (question) {
-      const questionId = normalizeChatId(question.id);
-      for (const option of question.options.slice(0, 8)) {
-        const label = normalizeChatId(option.label);
-        if (!label) {
-          continue;
-        }
-        rows.push([
-          makeActionButton(chatId, label, "user_input.answer", {
-            requestId: request.id,
-            method: request.method,
-            params: request.params,
-            answers: {
-              [questionId]: { answers: [label] },
-            },
-          }),
-        ]);
-      }
-    }
-
-    const threadId = normalizeChatId(request.params?.threadId || request.params?.thread_id);
-    if (threadId) {
-      rows.push([
-        makeActionButton(chatId, "Open Mac", "command.open", { threadId }),
-        makeActionButton(chatId, "Activity", "command.activity", { threadId }),
-      ]);
-    }
-    return rows.length ? { inline_keyboard: rows } : undefined;
-  }
-
-  function buildMissingPendingUserInputReplyMarkup(chatId, linkedChat) {
-    const rows = [];
-    if (linkedChat?.activeThreadId) {
-      rows.push([
-        makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Open Mac", "command.open", { threadId: linkedChat.activeThreadId }),
-      ]);
-    }
-    rows.push([
-      makeActionButton(chatId, "Status", "command.status"),
-      makeActionButton(chatId, "Menu", "command.menu"),
-    ]);
-    return { inline_keyboard: rows };
-  }
-
-  function buildThreadEventReplyMarkup(chatId, event) {
-    if (event.method === "turn/started") {
-      return {
-        inline_keyboard: [[
-          makeActionButton(chatId, "Stop", "command.stop", { threadId: event.threadId }),
-          makeActionButton(chatId, "Status", "command.status"),
-        ]],
-      };
-    }
-    if (event.method === "codex/event/agent_message" || event.method === "turn/completed") {
-      return buildPostTurnReplyMarkup(chatId, event.threadId);
-    }
-    return undefined;
-  }
-
-  function buildPostTurnReplyMarkup(chatId, threadId) {
-    return {
-      inline_keyboard: [
-        [
-          makeActionButton(chatId, "Activity", "command.activity", { threadId }),
-          makeActionButton(chatId, "Pending", "command.pending", { threadId }),
-        ],
-        [
-          makeActionButton(chatId, "Menu", "command.menu"),
-          makeActionButton(chatId, "Open Mac", "command.open", { threadId }),
-        ],
-        [
-          makeActionButton(chatId, "Status", "command.status"),
-        ],
-      ],
-    };
-  }
-
-  function makeActionButton(chatId, text, type, payload = {}) {
-    const actionType = normalizeTelegramActionType(type);
-    return {
-      text: truncateTelegramButtonText(text),
-      callback_data: actionRegistry.createAction({
-        chatId,
-        type: actionType,
-        payload,
-        singleUse: isSingleUseTelegramAction(actionType, payload),
-      }),
-    };
-  }
-
-  function truncateTelegramButtonText(value) {
-    const text = normalizeChatId(value).replace(/\s+/g, " ");
-    const chars = Array.from(text);
-    if (chars.length <= TELEGRAM_BUTTON_TEXT_MAX_CHARS) {
-      return text || "Action";
-    }
-    const suffixChars = Array.from(TELEGRAM_BUTTON_TEXT_TRUNCATION_SUFFIX);
-    return `${chars.slice(0, TELEGRAM_BUTTON_TEXT_MAX_CHARS - suffixChars.length).join("")}${TELEGRAM_BUTTON_TEXT_TRUNCATION_SUFFIX}`;
-  }
-
-  function isSingleUseTelegramAction(type, payload = {}) {
-    return SINGLE_USE_TELEGRAM_ACTION_TYPES.has(type)
-      || (type === "command.logout" && payload?.confirm === true);
   }
 
   function shouldSkipThreadEventForChat(chatId, event) {

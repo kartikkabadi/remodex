@@ -142,6 +142,31 @@ npm install -g remodex@latest
 
 If you only want to try Remodex, you can install it from npm and run it without cloning this repository.
 
+## Telegram (optional)
+
+Remodex Telegram controls the same local bridge from a linked chat. See [Docs/telegram-ux.md](Docs/telegram-ux.md) for hub navigation and keyboard limits.
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. Export env vars before starting the bridge (or add them to your launch agent plist):
+
+```sh
+export REMODEX_TELEGRAM_ENABLED=1
+export REMODEX_TELEGRAM_BOT_TOKEN="<bot-token>"
+# optional:
+export REMODEX_TELEGRAM_POLL_INTERVAL_MS=2500
+```
+
+3. Start the bridge (`remodex up` or `cd phodex-bridge && npm start`).
+4. Link the chat from the Mac:
+
+```sh
+remodex telegram link
+```
+
+Paste the `/link <code>` message into Telegram. Use `/menu` for hub buttons and `/status` for bridge + thread summary.
+
+Pro gating is unchanged: Telegram requires the same local Remodex Pro entitlement as other surfaces (`REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED` / `REMODEX_TELEGRAM_PRO_ENTITLED`).
+
 ## Quick Start
 
 Install the bridge, then run:

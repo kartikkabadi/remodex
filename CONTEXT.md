@@ -77,3 +77,5 @@ _Avoid_: Trust level, admin mode
 - "Telegram app" could mean a Mini App or a normal chat bot — resolved: **Remodex Telegram** is a normal Telegram chat interface, not a Telegram Mini App.
 - "User" could mean a Telegram user or a Telegram chat — resolved: pairing is scoped to **Linked Chat**.
 - "Continue" could mean selecting a thread or submitting model input — resolved: thread selection is a **Thread Choice**; model input is **Codex Input**, and a first plain text message may create the initial **Active Thread**.
+
+Telegram hub layout and keyboard row limits: [Docs/telegram-ux.md](Docs/telegram-ux.md).

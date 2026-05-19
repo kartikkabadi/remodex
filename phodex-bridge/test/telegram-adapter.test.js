@@ -17,7 +17,10 @@ const {
   createTelegramAdapterFromBridgeConfig,
   parseTelegramCommand,
 } = require("../src/telegram-adapter");
-const { TELEGRAM_CALLBACK_COMMANDS } = require("../src/telegram-command-catalog");
+const {
+  TELEGRAM_CALLBACK_COMMANDS,
+  TELEGRAM_PRIMARY_COMMAND_HELP_GROUPS,
+} = require("../src/telegram-command-catalog");
 const {
   createTelegramLinkCode,
   linkTelegramChat,
@@ -189,19 +192,16 @@ test("telegram help stays aligned with the command picker source", async () => {
 
   await adapter.handleUpdate(messageUpdate({ text: "/help", chatId: 42 }));
 
-  for (const { command } of TELEGRAM_COMMAND_MENU) {
-    assert.match(messages[0].text, new RegExp(`/${command}\\b`));
+  for (const group of TELEGRAM_PRIMARY_COMMAND_HELP_GROUPS) {
+    for (const command of group.commands) {
+      assert.match(messages[0].text, new RegExp(`/${command}\\b`));
+    }
   }
   assert.match(messages[0].text, /^Remodex Telegram\nType a message to chat with Codex\./);
   assert.equal(callbackDataForButton(messages[0], "Status").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "All Commands").startsWith("a:"), true);
-  assert.match(messages[0].text, /\/thread <number\|id>/);
-  assert.match(messages[0].text, /\/new \[folder\]/);
-  assert.match(messages[0].text, /\/activity \[count\]/);
+  assert.equal(callbackDataForButton(messages[0], "Threads").startsWith("a:"), true);
   assert.match(messages[0].text, /\/plan <message>/);
   assert.match(messages[0].text, /\/continue <message>/);
-  assert.match(messages[0].text, /\/answer <response>/);
-  assert.match(messages[0].text, /\/link <code>/);
   assert.doesNotMatch(messages[0].text, /\/ship <message>/);
 });
 
@@ -655,19 +655,16 @@ test("telegram adapter handles read-only commands and active thread selection", 
   await adapter.handleUpdate(messageUpdate({ text: "/branches", chatId: 42 }));
 
   assert.match(messages[0].text, /Bridge: connected/);
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Status");
+  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Chat");
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Threads");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[1][0].text, "New");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[1][1].text, "Resume Mac");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][0].text, "Menu");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][1].text, "Help");
+  assert.equal(messages[0].replyMarkup.inline_keyboard[1][0].text, "Git");
+  assert.equal(messages[0].replyMarkup.inline_keyboard[1][1].text, "Settings");
   assert.equal(messages[1].text, "Active thread: One\nSource: desktop");
   assert.equal(messages[2].text, "Threads:\n1. One\n2. Two");
   assert.equal(messages[2].replyMarkup.inline_keyboard[1][0].text, "2. Two");
   assert.equal(messages[3].text, "Active thread: Two");
-  assert.equal(messages[3].replyMarkup.inline_keyboard[0][0].text, "Status");
-  assert.equal(messages[3].replyMarkup.inline_keyboard[1][0].text, "New");
-  assert.equal(messages[3].replyMarkup.inline_keyboard[4][0].text, "Activity");
+  assert.equal(messages[3].replyMarkup.inline_keyboard[0][0].text, "Stop");
+  assert.equal(messages[3].replyMarkup.inline_keyboard[0][1].text, "Status");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/two");
   assert.equal(messages[4].text, "Bridge version: 1.5.2\nLatest published: 1.5.3\nUpdate: available on npm.");
   assert.equal(callbackDataForButton(messages[4], "Refresh").startsWith("a:"), true);
@@ -1596,19 +1593,15 @@ test("telegram adapter opens a primary action menu with callbacks for supported 
 
   await adapter.handleUpdate(messageUpdate({ text: "/menu", chatId: 42 }));
 
-  assert.equal(messages[0].text, "Remodex actions\nActive thread selected.");
-  assert.equal(callbackDataForButton(messages[0], "Status").startsWith("a:"), true);
+  assert.equal(messages[0].text, "Remodex hub\nActive thread selected.");
+  assert.equal(callbackDataForButton(messages[0], "Chat").startsWith("a:"), true);
   assert.equal(callbackDataForButton(messages[0], "Threads").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "New").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Resume Mac").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Git").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Settings").startsWith("a:"), true);
   assert.equal(callbackDataForButton(messages[0], "Help").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "All Commands").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Activity").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Open Mac").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Stop").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Pending").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Menu").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Status").startsWith("a:"), true);
   assert.throws(() => callbackDataForButton(messages[0], "Projects"), /button not found/);
-  assert.throws(() => callbackDataForButton(messages[0], "Git"), /button not found/);
 
   const catalogCommandActions = new Set(TELEGRAM_COMMAND_MENU.map(({ command }) => `command.${command}`));
   for (const action of actions.actions.values()) {
@@ -1616,39 +1609,37 @@ test("telegram adapter opens a primary action menu with callbacks for supported 
       assert.equal(catalogCommandActions.has(action.type), true, `${action.type} should match a primary Telegram Control Command`);
     }
   }
-  assert.equal(actionForButton(actions, messages[0], "Open Mac").type, "command.open");
-  assert.deepEqual(actionForButton(actions, messages[0], "All Commands"), {
-    chatId: "42",
-    type: "command.help",
-    payload: { topic: "all" },
-  });
+  const chatHubCallback = callbackDataForButton(messages[0], "Chat");
+  await adapter.handleUpdate(callbackUpdate({
+    callbackData: chatHubCallback,
+    chatId: 42,
+    callbackQueryId: "cb-chat-hub",
+  }));
+  const chatHubMessage = messages.at(-1);
+  assert.equal(actionForButton(actions, chatHubMessage, "Open Mac").type, "command.open");
 
   await adapter.handleUpdate(callbackUpdate({
-    callbackData: callbackDataForButton(messages[0], "Activity"),
+    callbackData: callbackDataForButton(chatHubMessage, "Activity"),
     chatId: 42,
     callbackQueryId: "cb-activity",
   }));
   await adapter.handleUpdate(callbackUpdate({
-    callbackData: callbackDataForButton(messages[0], "Open Mac"),
+    callbackData: callbackDataForButton(chatHubMessage, "Open Mac"),
     chatId: 42,
     callbackQueryId: "cb-open",
   }));
-  await adapter.handleUpdate(callbackUpdate({
-    callbackData: callbackDataForButton(messages[0], "All Commands"),
-    chatId: 42,
-    callbackQueryId: "cb-all",
-  }));
+  await adapter.handleUpdate(messageUpdate({ text: "/help all", chatId: 42 }));
 
   assert.deepEqual(activityCalls, [{ threadId: "thread-1", limit: 3 }]);
   assert.deepEqual(openCalls, [{ threadId: "thread-1" }]);
-  assert.equal(messages[1].text, "Activity:\n- Assistant: Telegram activity is ready.\nOpen Remodex for the full timeline.");
-  assert.equal(messages[2].text, "Opened the active thread on Mac.");
-  assert.match(messages[3].text, /^All commands:\n/);
-  assert.match(messages[3].text, /Git: .*\/ship <message>/);
+  assert.equal(messages.at(-3).text, "Activity:\n- Assistant: Telegram activity is ready.\nOpen Remodex for the full timeline.");
+  assert.equal(messages.at(-2).text, "Opened the active thread on Mac.");
+  assert.match(messages.at(-1).text, /^All commands:\n/);
+  assert.match(messages.at(-1).text, /Git: .*\/ship <message>/);
   assert.deepEqual(callbacks, [
+    { callbackQueryId: "cb-chat-hub", text: "Hub opened." },
     { callbackQueryId: "cb-activity", text: "Activity refreshed." },
     { callbackQueryId: "cb-open", text: "Mac handoff requested." },
-    { callbackQueryId: "cb-all", text: "Help sent." },
   ]);
 });
 
@@ -1720,14 +1711,13 @@ test("telegram adapter persists runtime model preferences and forwards them to t
   assert.match(messages[0].text, /Reasoning: High \(high\)/);
   assert.match(messages[0].text, /Speed: Fast \(fast\)/);
   assert.match(messages[0].text, /Access: On-Request \(on-request\)/);
-  assert.equal(callbackDataForButton(messages[0], "* GPT-5.4 Mini").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "* High").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "* Fast").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Pick Model").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[0], "Effort").startsWith("a:"), true);
 
   await adapter.handleUpdate(messageUpdate({ text: "/access full", chatId: 42 }));
   assert.equal(state.linkedChats[0].runtimeAccessMode, "full-access");
   assert.match(messages[1].text, /Access: Full Access \(full-access\)/);
-  assert.equal(callbackDataForButton(messages[1], "* Full Access").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(messages[1], "Access").startsWith("a:"), true);
 
   await adapter.handleUpdate(messageUpdate({ text: "/new", chatId: 42 }));
   await adapter.handleUpdate(messageUpdate({ text: "/continue Ship with this runtime", chatId: 42 }));
@@ -1738,26 +1728,35 @@ test("telegram adapter persists runtime model preferences and forwards them to t
     runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high", serviceTier: "fast", accessMode: "full-access" },
   }]);
 
-  const lowCallback = callbackDataForButton(messages[0], "Low");
+  const effortCallback = callbackDataForButton(messages[0], "Effort");
+  await adapter.handleUpdate(callbackUpdate({ callbackData: effortCallback, chatId: 42, callbackQueryId: "cb-effort-picker" }));
+  const lowCallback = callbackDataForButton(messages.at(-1), "Low");
   await adapter.handleUpdate(callbackUpdate({ callbackData: lowCallback, chatId: 42, callbackQueryId: "cb-runtime-low" }));
 
   assert.equal(state.linkedChats[0].runtimeModel, "gpt-5.4-mini");
   assert.equal(state.linkedChats[0].reasoningEffort, "low");
   assert.equal(state.linkedChats[0].runtimeServiceTier, "fast");
   assert.match(messages.at(-1).text, /Reasoning: Low \(low\)/);
+  const tierCallback = callbackDataForButton(messages.at(-1), "Tier");
+  await adapter.handleUpdate(callbackUpdate({ callbackData: tierCallback, chatId: 42, callbackQueryId: "cb-tier-picker" }));
   const normalCallback = callbackDataForButton(messages.at(-1), "Normal");
   await adapter.handleUpdate(callbackUpdate({ callbackData: normalCallback, chatId: 42, callbackQueryId: "cb-speed-normal" }));
 
   assert.equal(state.linkedChats[0].runtimeServiceTier, "");
   assert.match(messages.at(-1).text, /Speed: Normal \(normal\)/);
+  const accessCallback = callbackDataForButton(messages.at(-1), "Access");
+  await adapter.handleUpdate(callbackUpdate({ callbackData: accessCallback, chatId: 42, callbackQueryId: "cb-access-picker" }));
   const askCallback = callbackDataForButton(messages.at(-1), "On-Request");
   await adapter.handleUpdate(callbackUpdate({ callbackData: askCallback, chatId: 42, callbackQueryId: "cb-access-ask" }));
 
   assert.equal(state.linkedChats[0].runtimeAccessMode, "on-request");
   assert.match(messages.at(-1).text, /Access: On-Request \(on-request\)/);
   assert.deepEqual(callbacks, [
+    { callbackQueryId: "cb-effort-picker", text: "Picker opened." },
     { callbackQueryId: "cb-runtime-low", text: "Reasoning updated." },
+    { callbackQueryId: "cb-tier-picker", text: "Picker opened." },
     { callbackQueryId: "cb-speed-normal", text: "Speed updated." },
+    { callbackQueryId: "cb-access-picker", text: "Picker opened." },
     { callbackQueryId: "cb-access-ask", text: "Access updated." },
   ]);
 });
@@ -1898,7 +1897,7 @@ test("telegram adapter routes no-active-thread recovery buttons", async () => {
   await adapter.handleUpdate(messageUpdate({ text: "/status", chatId: 42 }));
   const statusSurface = messages.at(-1);
   assert.equal(callbackDataForButton(statusSurface, "Threads").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(statusSurface, "New").startsWith("a:"), true);
+  assert.equal(callbackDataForButton(statusSurface, "Chat").startsWith("a:"), true);
 
   await adapter.handleUpdate(messageUpdate({ text: "/continue continue from Telegram", chatId: 42 }));
   const missingThreadSurface = messages.at(-1);
@@ -2404,7 +2403,7 @@ test("telegram adapter checks out branches by command and refuses stale branch b
   assert.deepEqual(checkoutCalls, [{ threadId: "thread-1", cwd: "/tmp/current", branch: "feature/telegram" }]);
   assert.equal(messages[0].text, "Checked out feature/telegram. 1 changed files remain in the working tree.");
   assert.equal(messages[1].text, "Usage: /checkout <branch>");
-  assert.equal(messages[2].replyMarkup.inline_keyboard.length, 1);
+  assert.ok(messages[2].replyMarkup.inline_keyboard.length >= 1);
   assert.equal(messages[2].replyMarkup.inline_keyboard[0][0].text, "Checkout feature/telegram");
 
   const checkoutCallback = callbackDataForButton(messages[2], "Checkout feature/telegram");
@@ -2500,7 +2499,9 @@ test("telegram adapter creates a new active thread from command and inline butto
 
   await adapter.handleUpdate(messageUpdate({ text: "/new", chatId: 42 }));
   await adapter.handleUpdate(messageUpdate({ text: "/status", chatId: 42 }));
-  const newCallback = callbackDataForButton(messages[1], "New");
+  const threadsHubCallback = callbackDataForButton(messages[1], "Threads");
+  await adapter.handleUpdate(callbackUpdate({ callbackData: threadsHubCallback, chatId: 42, callbackQueryId: "cb-threads-hub" }));
+  const newCallback = callbackDataForButton(messages[2], "New");
   await adapter.handleUpdate(callbackUpdate({ callbackData: newCallback, chatId: 42, callbackQueryId: "cb-new" }));
 
   assert.deepEqual(createCalls, [
@@ -2511,9 +2512,11 @@ test("telegram adapter creates a new active thread from command and inline butto
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/new-2");
   assert.equal(messages[0].text, "New active thread: New 1");
   assert.equal(callbackDataForButton(messages[0], "Menu").startsWith("a:"), true);
-  assert.equal(messages[2].text, "New active thread: New 2");
-  assert.equal(callbackDataForButton(messages[2], "Activity").startsWith("a:"), true);
-  assert.deepEqual(callbacks, [{ callbackQueryId: "cb-new", text: "New thread created." }]);
+  assert.equal(messages[3].text, "New active thread: New 2");
+  assert.deepEqual(callbacks, [
+    { callbackQueryId: "cb-threads-hub", text: "Hub opened." },
+    { callbackQueryId: "cb-new", text: "New thread created." },
+  ]);
 });
 
 test("telegram adapter creates a first active thread without an existing selection", async () => {
@@ -2552,27 +2555,28 @@ test("telegram adapter creates a first active thread without an existing selecti
   });
 
   await adapter.handleUpdate(messageUpdate({ text: "/status", chatId: 42 }));
-  const newCallback = callbackDataForButton(messages[0], "New");
+  const threadsHubCallback = callbackDataForButton(messages[0], "Threads");
+  await adapter.handleUpdate(callbackUpdate({ callbackData: threadsHubCallback, chatId: 42, callbackQueryId: "cb-threads-hub" }));
+  const newCallback = callbackDataForButton(messages[1], "New");
   await adapter.handleUpdate(callbackUpdate({ callbackData: newCallback, chatId: 42, callbackQueryId: "cb-new" }));
   await adapter.handleUpdate(messageUpdate({ text: "/new", chatId: 42 }));
 
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Status");
+  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Chat");
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Threads");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[1][0].text, "New");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[1][1].text, "Resume Mac");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][0].text, "Menu");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][1].text, "Help");
+  assert.equal(messages[1].replyMarkup.inline_keyboard[0][0].text, "Threads");
+  assert.equal(messages[1].replyMarkup.inline_keyboard[1][0].text, "New");
   assert.deepEqual(createCalls, [
     { sourceThreadId: undefined, sourceCwd: undefined },
     { sourceThreadId: "thread-new-1", sourceCwd: "/tmp/fresh-1" },
   ]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-new-2");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/fresh-2");
-  assert.equal(messages[1].text, "New active thread: Fresh 1");
-  assert.equal(callbackDataForButton(messages[1], "Menu").startsWith("a:"), true);
-  assert.equal(messages[2].text, "New active thread: Fresh 2");
-  assert.equal(callbackDataForButton(messages[2], "Activity").startsWith("a:"), true);
-  assert.deepEqual(callbacks, [{ callbackQueryId: "cb-new", text: "New thread created." }]);
+  assert.equal(messages[2].text, "New active thread: Fresh 1");
+  assert.equal(messages[3].text, "New active thread: Fresh 2");
+  assert.deepEqual(callbacks, [
+    { callbackQueryId: "cb-threads-hub", text: "Hub opened." },
+    { callbackQueryId: "cb-new", text: "New thread created." },
+  ]);
 });
 
 test("telegram adapter sends approval buttons only to linked chats on the active thread", async () => {
@@ -4158,24 +4162,18 @@ test("telegram adapter keeps Telegram conversational but blocks Codex controls w
     chatId: 42,
     callbackQueryId: "cb-restricted-help",
   }));
-  await adapter.handleUpdate(callbackUpdate({
-    callbackData: callbackDataForButton(messages[0], "Unlink"),
-    chatId: 42,
-    callbackQueryId: "cb-restricted-unlink",
-  }));
+  await adapter.handleUpdate(messageUpdate({ text: "/unlink", chatId: 42 }));
 
   assert.deepEqual(continueCalls, []);
   assert.deepEqual(links, [{ chatId: "99", code: "ABC123" }]);
   assert.deepEqual(unlinked, ["42"]);
   assert.match(messages[0].text, /active Remodex Pro entitlement/);
-  assert.match(messages[0].text, /Telegram Payments/);
+  assert.doesNotMatch(messages[0].text, /Telegram Payments|Unlock routes/);
   assert.equal(callbackDataForButton(messages[0], "Help").startsWith("a:"), true);
   assert.equal(callbackDataForButton(messages[0], "Account").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Unlink").startsWith("a:"), true);
   assert.match(messages[1].text, /Bridge: connected/);
   assert.match(messages[1].text, /Access: requires_pro/);
-  assert.match(messages[2].text, /active Remodex Pro entitlement/);
-  assert.match(messages[2].text, /web billing/);
+  assert.match(messages[2].text, /no in-chat checkout/i);
   assert.equal(callbackDataForButton(messages[2], "Upgrade").startsWith("a:"), true);
   assert.match(messages[3].text, /^Git commands:\n/);
   assert.match(messages[3].text, /active Remodex Pro entitlement/);
@@ -4187,7 +4185,6 @@ test("telegram adapter keeps Telegram conversational but blocks Codex controls w
   assert.equal(messages[6].text, "Unlinked this Telegram chat from Remodex.");
   assert.deepEqual(callbacks, [
     { callbackQueryId: "cb-restricted-help", text: "Help sent." },
-    { callbackQueryId: "cb-restricted-unlink", text: "Chat unlinked." },
   ]);
 });
 
@@ -4261,8 +4258,9 @@ test("telegram adapter allows entitlement callbacks while Pro access is missing"
 
   await adapter.handleUpdate(callbackUpdate({ callbackData: "opaque", chatId: 42, callbackQueryId: "cb-upgrade" }));
 
-  assert.match(messages[0].text, /active Remodex Pro entitlement/);
-  assert.match(messages[0].text, /web billing/);
+  assert.match(messages[0].text, /no in-chat checkout/i);
+  assert.match(messages[0].text, /Remodex Mac app/i);
+  assert.doesNotMatch(messages[0].text, /web billing|Telegram Payments/);
   assert.deepEqual(callbacks, [{ callbackQueryId: "cb-upgrade", text: "Entitlement shown." }]);
 });
 

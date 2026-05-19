@@ -61,6 +61,7 @@ const {
   renderTelegramUnarchiveResult,
   renderTelegramUserInputRequest,
   renderTelegramUsageStatus,
+  renderTelegramUpgradeInfo,
   renderTelegramVersionStatus,
   renderTelegramWakeMacResult,
   renderTelegramWorktreeThreadResult,
@@ -186,10 +187,15 @@ test("telegram renderer explains a Pro-required access gate without billing secr
 
   assert.match(message, /active Remodex Pro entitlement/);
   assert.match(message, /Access: requires_pro/);
-  assert.match(message, /app subscription entitlement/);
-  assert.match(message, /web billing/);
-  assert.match(message, /Telegram Payments/);
+  assert.doesNotMatch(message, /Unlock routes|web billing|Telegram Payments/);
   assert.doesNotMatch(message, /session|token|chatId/i);
+
+  const upgradeMessage = renderTelegramUpgradeInfo({
+    allowed: false,
+    status: "requires_pro",
+  });
+  assert.match(upgradeMessage, /no in-chat checkout/i);
+  assert.match(upgradeMessage, /Remodex Mac app/i);
 });
 
 test("telegram renderer summarizes bridge version status", () => {

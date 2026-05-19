@@ -149,19 +149,26 @@ function renderTelegramAccessRequired(access = {}) {
     || "Remodex Telegram requires an active Remodex Pro entitlement.";
   const status = normalizeNonEmptyString(access.status) || "requires_pro";
   const allowed = access.allowed !== false;
-  const options = Array.isArray(access.upgradeOptions) ? access.upgradeOptions : [];
   const lines = [
     message,
     `Access: ${status}`,
   ];
-  if (options.length > 0) {
-    lines.push(`Unlock routes: ${options.map((option) => (
-      normalizeNonEmptyString(option.label) || normalizeNonEmptyString(option.id)
-    )).filter(Boolean).map((label) => truncateTelegramLine(label, 80)).join("; ")}`);
-  }
   lines.push(allowed
     ? "Use /account to refresh local account status."
     : "Use /account or /login to refresh the local entitlement, or /feedback if this looks wrong.");
+  return lines.join("\n");
+}
+
+function renderTelegramUpgradeInfo(access = {}) {
+  const allowed = access.allowed !== false;
+  const lines = [
+    "Remodex Telegram uses the Remodex Pro entitlement on this Mac.",
+    allowed
+      ? "This chat currently has Pro access."
+      : "This chat does not currently have Pro access.",
+    "Purchase or restore Pro in the Remodex Mac app, then run /account to refresh local status.",
+    "There is no in-chat checkout. Billing stays on the Mac.",
+  ];
   return lines.join("\n");
 }
 
@@ -1375,6 +1382,7 @@ function formatActivityRole(role) {
 
 module.exports = {
   renderTelegramAccessRequired,
+  renderTelegramUpgradeInfo,
   renderTelegramAccountStatus,
   renderTelegramArchivedThreads,
   renderTelegramArchiveResult,
