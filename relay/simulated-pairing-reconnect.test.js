@@ -143,6 +143,8 @@ test("simulated relay harness covers QR bootstrap, trusted resolve, and reconnec
       JSON.stringify({ id: "response-2", result: { replayed: true } }),
       failUnexpectedDirectSend
     );
+    await waitUntil(() => macSocket.bufferedAmount === 0);
+    await delay(25);
 
     const secondPhoneSocket = new WebSocket(`ws://127.0.0.1:${port}/relay/${sessionId}`, {
       headers: { "x-role": "iphone" },
