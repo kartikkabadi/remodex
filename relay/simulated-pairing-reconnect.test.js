@@ -27,7 +27,7 @@ const {
 const { createRelayServer } = require("./server");
 
 test("simulated relay harness covers QR bootstrap, trusted resolve, and reconnect replay", async () => {
-  await withServer(async ({ port }) => {
+  await withServer(async ({ port, wss }) => {
     const sessionId = "simulated-pairing-session";
     const macDeviceId = "simulated-mac";
     const pairingCode = "AB23CD34";
@@ -137,6 +137,7 @@ test("simulated relay harness covers QR bootstrap, trusted resolve, and reconnec
     const firstPhoneClosed = onceClosed(firstPhoneSocket);
     firstPhoneSocket.close();
     await firstPhoneClosed;
+    await waitUntil(() => countRelayClients(wss, "iphone") === 0);
 
     secureTransport.queueOutboundApplicationMessage(
       JSON.stringify({ id: "response-2", result: { replayed: true } }),
@@ -318,7 +319,7 @@ async function withServer(run) {
   const { server, wss } = createRelayServer();
   const address = await listen(server);
   try {
-    return await run({ port: address.port });
+    return await run({ port: address.port, wss });
   } finally {
     for (const client of wss.clients) {
       client.terminate();
@@ -417,6 +418,16 @@ function waitUntil(predicate, { attempts = 20, delayMs = 10 } = {}) {
     };
     tick();
   });
+}
+
+function countRelayClients(wss, role) {
+  let count = 0;
+  for (const client of wss.clients) {
+    if (client._relayRole === role && client.readyState === WebSocket.OPEN) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function delay(milliseconds) {
