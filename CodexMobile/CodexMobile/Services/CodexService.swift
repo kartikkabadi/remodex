@@ -835,10 +835,6 @@ final class CodexService {
         monitor.start(queue: DispatchQueue(label: "CodexMobile.NetworkPathMonitor", qos: .utility))
     }
 
-    deinit {
-        networkPathMonitor?.cancel()
-    }
-
     // Persists per-thread plan-mode provenance so reconnect/relaunch keeps native vs fallback behavior stable.
     private func persistPlanSessionSources() {
         guard !suspendAutomaticMacScopedPersistence, !isApplyingMacScopedState else {
@@ -1058,6 +1054,7 @@ final class CodexService {
 
     deinit {
         MainActor.assumeIsolated {
+            networkPathMonitor?.cancel()
             trustedSessionResolveTask?.cancel()
             messagePersistenceDebounceTask?.cancel()
             coalescedRevertRefreshTask?.cancel()
