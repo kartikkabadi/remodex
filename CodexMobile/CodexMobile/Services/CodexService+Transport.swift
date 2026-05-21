@@ -17,7 +17,7 @@ let codexWebSocketMaximumMessageSizeBytes = 16 * 1024 * 1024
 private enum CodexWebSocketKeepAlivePolicy {
     static let intervalNanoseconds: UInt64 = 25_000_000_000
     static let foregroundProbeTimeoutNanoseconds: UInt64 = 1_500_000_000
-    static let constrainedIntervalNanoseconds: UInt64 = 45_000_000_000
+    static let constrainedIntervalNanoseconds: UInt64 = 35_000_000_000
 }
 
 private final class CodexForegroundProbeWaiter: @unchecked Sendable {
