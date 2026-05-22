@@ -208,6 +208,13 @@ const TELEGRAM_CONTROL_COMMANDS = [
     activeThreadSample: "/subagents Audit the Telegram integration",
   },
   { command: "stop", description: "Stop the active Remodex turn", requiresActiveThread: true, callbackAction: true, primary: true },
+  {
+    command: "queue",
+    description: "Show running turn, steered input, and pending prompts",
+    requiresActiveThread: false,
+    callbackAction: true,
+    primary: true,
+  },
   { command: "pending", description: "Reopen the current Codex prompt or approval", requiresActiveThread: true, callbackAction: true, primary: true },
   {
     command: "plan",
@@ -266,7 +273,7 @@ const TELEGRAM_COMMAND_HELP_GROUPS = Object.freeze([
     title: "Threads",
     slug: "threads",
     aliases: ["thread", "chats", "history"],
-    commands: ["threads", "resume", "thread", "archived", "archive", "unarchive", "rename", "title", "activity", "checkpoint", "compact", "context", "open", "pending", "stop"],
+    commands: ["threads", "resume", "thread", "archived", "archive", "unarchive", "rename", "title", "activity", "checkpoint", "compact", "context", "open", "queue", "pending", "stop"],
   },
   {
     title: "Projects",
@@ -318,7 +325,7 @@ const TELEGRAM_COMMAND_HELP_TOPICS = Object.freeze([
 const TELEGRAM_PRIMARY_COMMAND_HELP_GROUPS = Object.freeze([
   {
     title: "Chat",
-    commands: ["continue", "plan", "stop", "pending"],
+    commands: ["continue", "plan", "stop", "queue", "pending"],
   },
   {
     title: "Threads",

@@ -55,6 +55,7 @@ const {
   renderTelegramGitInitResult,
   renderTelegramLinkHelp,
   renderTelegramLoginResult,
+  renderTelegramCodexInputBlocked,
   renderTelegramLogoutConfirmation,
   renderTelegramLogoutResult,
   renderTelegramModelPreferences,
@@ -80,6 +81,7 @@ const {
   renderTelegramStashPopResult,
   renderTelegramStashResult,
   renderTelegramStatus,
+  renderTelegramQueueDetail,
   renderTelegramThreadEvent,
   renderTelegramUnarchiveResult,
   renderTelegramUserInputRequest,
@@ -88,8 +90,18 @@ const {
   renderTelegramWakeMacResult,
   renderTelegramWorktreeThreadResult,
   renderUnauthorizedTelegramChat,
+  shouldBlockTelegramCodexInput,
 } = require("./telegram-renderer");
 const { createTelegramBotApiClient } = require("./telegram-bot-api-client");
+const { renderTelegramTurnFileChangeSummary } = require("./telegram-file-change-summary");
+const { wrapTelegramBotClientWithOutboundQueue } = require("./telegram-outbound-queue");
+const { decideThreadNotification } = require("./telegram-notification-policy");
+const { resolveReplyMarkup } = require("./telegram-reply-policy");
+const {
+  createTelegramStreamingBubble,
+} = require("./telegram-streaming-bubble");
+const { createTelegramTimelineProjector } = require("./telegram-timeline-projector");
+const { telegramEnvelopeEvent } = require("./telegram-codex-envelope");
 const {
   TELEGRAM_DEFAULT_ACCESS_MODE,
   TELEGRAM_MODEL_CHOICES,
@@ -127,6 +139,25 @@ const TELEGRAM_BUTTON_TEXT_TRUNCATION_SUFFIX = "...";
 const DEFAULT_TELEGRAM_IMAGE_PROMPT = "Please inspect the attached Telegram image.";
 const TELEGRAM_SUBAGENTS_PROMPT = "Run subagents for different tasks. Delegate distinct work in parallel when helpful and then synthesize the results.";
 const TELEGRAM_RETRY_AFTER_MS = 1_000;
+const TELEGRAM_TYPING_REFRESH_MS = 4_000;
+const TELEGRAM_LINKED_START_TEXT = "Send a message to run Codex. /menu for controls.";
+
+// #region agent log
+function debugFaab31(hypothesisId, location, message, data = {}) {
+  fetch("http://127.0.0.1:7363/ingest/8a61d48d-bc77-4bb6-8b06-9a2596350233", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "faab31" },
+    body: JSON.stringify({
+      sessionId: "faab31",
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+// #endregion
 const SINGLE_USE_TELEGRAM_ACTION_TYPES = new Set([
   "approval.accept",
   "approval.reject",
@@ -250,6 +281,22 @@ function createTelegramAdapter({
   const agentMessageTurns = new Map();
   const pendingUserInputRequestsByChat = new Map();
   const pendingApprovalRequestsByChat = new Map();
+  const activeTypingByChat = new Map();
+  const steerQueueByChat = new Map();
+  const processedInboundMessageKeys = new Map();
+  const MAX_PROCESSED_INBOUND_MESSAGES = 2000;
+  const timelineProjector = createTelegramTimelineProjector();
+  const streamingBubble = createTelegramStreamingBubble({
+    botClient,
+    logger,
+    makeStopReplyMarkup: ({ chatId, threadId }) => resolveReplyMarkup({
+      surface: "running_turn",
+      phase: "active",
+      linkedChat: { chatId, activeThreadId: threadId },
+      event: { threadId },
+      keyboards: { makeActionButton },
+    }),
+  });
   let telegramBotUsername = normalizeTelegramBotUsername(botUsername);
 
   async function handleUpdate(update) {
@@ -263,22 +310,154 @@ function createTelegramAdapter({
   }
 
   async function sendServerRequest(rawRequest) {
-    const request = parseTelegramServerRequest(rawRequest);
-    if (request) {
-      return sendApprovalRequest(request);
+    const projection = timelineProjector.project(rawRequest);
+    if (!projection.handled) {
+      return false;
+    }
+    if (projection.duplicate) {
+      return false;
     }
 
-    const userInputRequest = parseTelegramUserInputRequest(rawRequest);
-    if (userInputRequest) {
-      return sendUserInputRequest(userInputRequest);
+    let didHandle = false;
+    for (const action of projection.controlActions) {
+      if (action.type === "approval") {
+        didHandle = await sendApprovalRequest(action.request) || didHandle;
+      } else if (action.type === "userInput") {
+        didHandle = await sendUserInputRequest(action.request) || didHandle;
+      }
     }
 
-    const event = parseTelegramThreadEvent(rawRequest);
-    if (event) {
-      return sendThreadEvent(event);
+    for (const action of projection.conversationActions) {
+      if (action.type === "streamingDelta") {
+        didHandle = await handleStreamingDelta(action) || didHandle;
+      } else if (action.type === "streamingLateDelta") {
+        didHandle = await handleStreamingLateDelta(action) || didHandle;
+      } else if (action.type === "streamingActivityFooter") {
+        didHandle = await handleStreamingActivityFooter(action) || didHandle;
+      } else if (action.type === "turnFileChangeSummary") {
+        didHandle = await sendTurnFileChangeSummary(action) || didHandle;
+      } else if (action.type === "threadEvent" || action.type === "threadEventLate") {
+        didHandle = await sendThreadEvent(action.event, {
+          late: action.type === "threadEventLate",
+        }) || didHandle;
+      }
     }
 
-    return false;
+    return didHandle;
+  }
+
+  async function handleStreamingDelta(delta) {
+    if (!telegramAccessAllowed()) {
+      return false;
+    }
+    const state = sessionState.read();
+    const targetChats = (state?.linkedChats || []).filter((chat) => (
+      normalizeChatId(chat.activeThreadId) === delta.threadId
+    ));
+    if (targetChats.length === 0) {
+      return false;
+    }
+
+    let didHandle = false;
+    for (const linkedChat of targetChats) {
+      await stopTypingIndicator(linkedChat.chatId);
+      await streamingBubble.appendDelta({
+        chatId: linkedChat.chatId,
+        threadId: delta.threadId,
+        turnId: delta.turnId,
+        linkedChat,
+        delta: delta.delta,
+      });
+      didHandle = true;
+    }
+    return didHandle;
+  }
+
+  async function handleStreamingActivityFooter(action) {
+    if (!telegramAccessAllowed()) {
+      return false;
+    }
+    const state = sessionState.read();
+    const targetChats = (state?.linkedChats || []).filter((chat) => (
+      normalizeChatId(chat.activeThreadId) === action.threadId
+    ));
+    if (targetChats.length === 0) {
+      return false;
+    }
+
+    let didHandle = false;
+    for (const linkedChat of targetChats) {
+      if (!streamingBubble.isLiveTurn(linkedChat.chatId, action.turnId)) {
+        continue;
+      }
+      await streamingBubble.setActivityFooter({
+        chatId: linkedChat.chatId,
+        turnId: action.turnId,
+        activity: action.activity,
+      });
+      didHandle = true;
+    }
+    return didHandle;
+  }
+
+  async function sendTurnFileChangeSummary(action) {
+    if (!telegramAccessAllowed()) {
+      return false;
+    }
+    const text = renderTelegramTurnFileChangeSummary(action.summary);
+    if (!text) {
+      return false;
+    }
+    const state = sessionState.read();
+    const targetChats = (state?.linkedChats || []).filter((chat) => (
+      normalizeChatId(chat.activeThreadId) === action.threadId
+    ));
+    if (targetChats.length === 0) {
+      return false;
+    }
+
+    let didSend = false;
+    for (const linkedChat of targetChats) {
+      await botClient.sendMessage({
+        chatId: linkedChat.chatId,
+        text,
+      });
+      didSend = true;
+    }
+    return didSend;
+  }
+
+  async function handleStreamingLateDelta(delta) {
+    if (!telegramAccessAllowed()) {
+      return false;
+    }
+    const state = sessionState.read();
+    const targetChats = (state?.linkedChats || []).filter((chat) => (
+      normalizeChatId(chat.activeThreadId) === delta.threadId
+    ));
+    if (targetChats.length === 0) {
+      return false;
+    }
+
+    let didHandle = false;
+    for (const linkedChat of targetChats) {
+      if (!streamingBubble.isLiveTurn(linkedChat.chatId, delta.turnId)) {
+        continue;
+      }
+      await streamingBubble.appendDelta({
+        chatId: linkedChat.chatId,
+        threadId: delta.threadId,
+        turnId: delta.turnId,
+        linkedChat,
+        delta: delta.delta,
+      });
+      didHandle = true;
+    }
+    return didHandle;
+  }
+
+  function resolveTelegramTurnId(threadId, turnId) {
+    return timelineProjector.resolveTurnId(threadId, turnId);
   }
 
   async function sendApprovalRequest(request) {
@@ -297,9 +476,11 @@ function createTelegramAdapter({
       return false;
     }
 
+    const approvalContext = await buildApprovalContextForThread(targetChats[0], threadId);
     const text = renderTelegramApprovalRequest({
       method: request.method,
       params: request.params,
+      context: approvalContext,
     });
     for (const linkedChat of targetChats) {
       if (telegramAccessModeFor(linkedChat) === "full-access") {
@@ -365,17 +546,17 @@ function createTelegramAdapter({
     return true;
   }
 
-  async function sendThreadEvent(event) {
+  async function sendThreadEvent(event, { late = false } = {}) {
     if (!telegramAccessAllowed()) {
       return false;
     }
-    const text = renderTelegramThreadEvent({
+    if (late) {
+      return false;
+    }
+    const renderedText = renderTelegramThreadEvent({
       method: event.method,
       params: event.params,
     });
-    if (!text) {
-      return false;
-    }
 
     const state = sessionState.read();
     const targetChats = (state?.linkedChats || []).filter((chat) => (
@@ -387,23 +568,177 @@ function createTelegramAdapter({
 
     let didSend = false;
     for (const linkedChat of targetChats) {
-      if (shouldSkipThreadEventForChat(linkedChat.chatId, event)) {
+      const resolvedTurnId = resolveTelegramTurnId(event.threadId, event.turnId);
+      const skipNotification = shouldSkipThreadEventForChat(linkedChat.chatId, event);
+      if (skipNotification) {
+        if (event.method === "turn/completed") {
+          await streamingBubble.handleTurnCompleted({
+            chatId: linkedChat.chatId,
+            turnId: resolvedTurnId,
+          });
+          stopTypingIndicator(linkedChat.chatId);
+        }
         continue;
       }
+      const streamingActive = streamingBubble.isLiveTurn(linkedChat.chatId, resolvedTurnId);
+      const decision = decideThreadNotification({
+        method: event.method,
+        params: event.params,
+        linkedChat,
+        renderedText,
+        streamingActive,
+      });
+
+      if (decision.showTyping) {
+        // #region agent log
+        debugFaab31("H5", "telegram-adapter.js:sendThreadEvent-typing", "turn/started → typing", {
+          chatId: linkedChat.chatId,
+          threadId: event.threadId || "",
+          turnId: resolvedTurnId || "",
+        });
+        // #endregion
+        await startTypingIndicator(linkedChat.chatId);
+        await streamingBubble.handleTurnStarted({
+          chatId: linkedChat.chatId,
+          threadId: event.threadId,
+          turnId: resolvedTurnId,
+        });
+        rememberSentThreadEvent(linkedChat.chatId, event);
+        didSend = true;
+        continue;
+      }
+
+      if (decision.mergeWithStreamingBubble && decision.text) {
+        await streamingBubble.appendDelta({
+          chatId: linkedChat.chatId,
+          threadId: event.threadId,
+          turnId: resolvedTurnId,
+          linkedChat,
+          fullText: decision.text,
+          finalizeTurn: true,
+        });
+        stopTypingIndicator(linkedChat.chatId);
+        rememberSentThreadEvent(linkedChat.chatId, event);
+        didSend = true;
+        continue;
+      }
+
+      if (decision.deferStreamingFinalize) {
+        await streamingBubble.markTurnCompleted({
+          chatId: linkedChat.chatId,
+          turnId: resolvedTurnId,
+        });
+        stopTypingIndicator(linkedChat.chatId);
+        rememberSentThreadEvent(linkedChat.chatId, event);
+        didSend = true;
+        continue;
+      }
+
+      if (decision.finalizeStreaming) {
+        await streamingBubble.handleTurnCompleted({
+          chatId: linkedChat.chatId,
+          turnId: resolvedTurnId,
+        });
+        stopTypingIndicator(linkedChat.chatId);
+      }
+
+      if (decision.suppress || !decision.text) {
+        if (event.method === "turn/completed" || decision.finalizeStreaming || decision.deferStreamingFinalize) {
+          rememberSentThreadEvent(linkedChat.chatId, event);
+          didSend = true;
+        }
+        continue;
+      }
+
+      const replyMarkup = resolveReplyMarkup({
+        surface: decision.markupSurface || "turn_output",
+        phase: event.method === "turn/started" ? "active" : "assistant",
+        linkedChat,
+        event,
+        keyboards: { makeActionButton, buildMissingThreadReplyMarkup },
+      });
       await botClient.sendMessage({
         chatId: linkedChat.chatId,
-        text,
-        replyMarkup: buildThreadEventReplyMarkup(linkedChat.chatId, event),
+        text: decision.text,
+        replyMarkup,
       });
+      stopTypingIndicator(linkedChat.chatId);
       rememberSentThreadEvent(linkedChat.chatId, event);
       didSend = true;
     }
     return didSend;
   }
 
+  async function startTypingIndicator(chatId) {
+    if (typeof botClient?.sendChatAction !== "function") {
+      return;
+    }
+    const normalizedChatId = normalizeChatId(chatId);
+    stopTypingIndicator(normalizedChatId);
+    try {
+      await botClient.sendChatAction({ chatId: normalizedChatId, action: "typing" });
+    } catch (error) {
+      logger.warn?.(`[remodex] Telegram typing indicator failed: ${error.message}`);
+    }
+    const interval = setInterval(() => {
+      botClient.sendChatAction?.({ chatId: normalizedChatId, action: "typing" })?.catch?.(() => {});
+    }, TELEGRAM_TYPING_REFRESH_MS);
+    if (typeof interval?.unref === "function") {
+      interval.unref();
+    }
+    activeTypingByChat.set(normalizedChatId, interval);
+  }
+
+  function stopTypingIndicator(chatId) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const interval = activeTypingByChat.get(normalizedChatId);
+    if (!interval) {
+      return;
+    }
+    clearInterval(interval);
+    activeTypingByChat.delete(normalizedChatId);
+    clearSteerQueue(normalizedChatId);
+  }
+
+  function buildInboundMessageDedupKey(chatId, message) {
+    const messageId = message?.message_id;
+    if (!Number.isInteger(messageId)) {
+      return "";
+    }
+    return `${normalizeChatId(chatId)}:${messageId}`;
+  }
+
+  function wasInboundMessageProcessed(dedupKey) {
+    if (!dedupKey) {
+      return false;
+    }
+    return processedInboundMessageKeys.has(dedupKey);
+  }
+
+  function markInboundMessageProcessed(dedupKey) {
+    if (!dedupKey) {
+      return;
+    }
+    processedInboundMessageKeys.set(dedupKey, Date.now());
+    while (processedInboundMessageKeys.size > MAX_PROCESSED_INBOUND_MESSAGES) {
+      const oldestKey = processedInboundMessageKeys.keys().next().value;
+      processedInboundMessageKeys.delete(oldestKey);
+    }
+  }
+
   async function handleMessage(message) {
     const chat = message.chat || {};
     const chatId = normalizeChatId(chat.id);
+    const inboundDedupKey = buildInboundMessageDedupKey(chatId, message);
+    if (wasInboundMessageProcessed(inboundDedupKey)) {
+      // #region agent log
+      debugFaab31("H7", "telegram-adapter.js:handleMessage-dedup", "skipped duplicate inbound message", {
+        inboundDedupKey,
+      });
+      // #endregion
+      return;
+    }
+    markInboundMessageProcessed(inboundDedupKey);
     const text = readTelegramMessageText(message);
     if (isTelegramCommandAddressedToAnotherBot(text, telegramBotUsername)) {
       return;
@@ -443,7 +778,10 @@ function createTelegramAdapter({
           await sendHelp(chatId, linkedChat, command.arg);
           return;
         case "start":
-          await sendHelp(chatId, linkedChat);
+          await sendLinkedStart(chatId, linkedChat, command.arg);
+          return;
+        case "queue":
+          await sendQueue(chatId, linkedChat);
           return;
         case "status":
           await sendStatus(chatId, linkedChat);
@@ -655,6 +993,13 @@ function createTelegramAdapter({
             return;
           }
           if (shouldRouteUnknownMessageAsCodexInput(text, attachments, voiceAttachment)) {
+            // #region agent log
+            debugFaab31("H4", "telegram-adapter.js:implicit-codex-input", "routing plain text to continueActiveThread", {
+              chatId,
+              textLen: String(text || "").length,
+              activeThreadId: linkedChat?.activeThreadId || "",
+            });
+            // #endregion
             await continueActiveThread(chatId, linkedChat, text, { implicit: true, attachments, voiceAttachment });
             return;
           }
@@ -664,6 +1009,12 @@ function createTelegramAdapter({
       const commandName = command.name === "unknown" && shouldRouteUnknownMessageAsCodexInput(text, attachments, voiceAttachment)
         ? "continue"
         : command.name;
+      // #region agent log
+      debugFaab31("H2", "telegram-adapter.js:handleMessage-catch", "handleMessage error", {
+        commandName,
+        errorMessage: String(error?.message || error).slice(0, 200),
+      });
+      // #endregion
       await botClient.sendMessage({ chatId, text: renderCommandError(commandName, error) });
     }
   }
@@ -682,11 +1033,95 @@ function createTelegramAdapter({
     await botClient.sendMessage({ chatId, text: "Unlinked this Telegram chat from Remodex." });
   }
 
+  function readSteerQueue(chatId) {
+    return steerQueueByChat.get(normalizeChatId(chatId)) || [];
+  }
+
+  function rememberSteerInput(chatId, text) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (!normalizedChatId || !trimmed) {
+      return;
+    }
+    const current = readSteerQueue(normalizedChatId);
+    current.push({
+      text: trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed,
+      steeredAt: now(),
+    });
+    while (current.length > 5) {
+      current.shift();
+    }
+    steerQueueByChat.set(normalizedChatId, current);
+  }
+
+  function clearSteerQueue(chatId) {
+    steerQueueByChat.delete(normalizeChatId(chatId));
+  }
+
+  function isTurnRunningForChat(chatId) {
+    return activeTypingByChat.has(normalizeChatId(chatId));
+  }
+
+  function queueStateForChat(chatId) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const pendingApprovals = (pendingApprovalRequestsByChat.get(normalizedChatId) || []).length;
+    const pendingUserInput = readPendingUserInputRequest(normalizedChatId) ? 1 : 0;
+    const outboundQueued = Number(botClient?.__telegramOutboundQueue?.pendingCount?.(normalizedChatId)) || 0;
+    const steerQueued = readSteerQueue(normalizedChatId).length;
+    const runningTurn = isTurnRunningForChat(normalizedChatId);
+    return {
+      pendingApprovals,
+      pendingUserInput,
+      outboundQueued,
+      steerQueued,
+      runningTurn,
+    };
+  }
+
+  async function sendQueue(chatId, linkedChat) {
+    const queueText = renderTelegramQueueDetail({
+      queueState: queueStateForChat(chatId),
+      steerQueue: readSteerQueue(chatId),
+      activeThreadTitle: linkedChat?.title || linkedChat?.activeThreadTitle || "",
+    });
+    await botClient.sendMessage({
+      chatId,
+      text: queueText,
+      replyMarkup: buildChatHubReplyMarkup(chatId, linkedChat),
+    });
+  }
+
   async function sendStatus(chatId, linkedChat) {
     const status = await controlSurface.readStatus?.();
+    const activeThread = await activeThreadFor(linkedChat);
+    let gitStatus = null;
+    let contextWindow = null;
+    if (linkedChat?.activeThreadId) {
+      try {
+        gitStatus = await controlSurface.readGitStatus?.({
+          threadId: linkedChat.activeThreadId,
+          cwd: linkedChat.activeThreadCwd,
+        });
+      } catch {
+        gitStatus = null;
+      }
+      try {
+        contextWindow = await controlSurface.readContextWindow?.({
+          threadId: linkedChat.activeThreadId,
+        });
+      } catch {
+        contextWindow = {};
+      }
+    }
     const statusText = renderTelegramStatus({
       bridgeStatus: status?.bridgeStatus,
-      activeThread: await activeThreadFor(linkedChat),
+      macName: status?.macName,
+      activeThread,
+      gitStatus,
+      contextWindow,
+      runtimePreferences: linkedChat,
+      queueState: queueStateForChat(chatId),
+      access: telegramAccessState,
     });
     await botClient.sendMessage({
       chatId,
@@ -737,6 +1172,53 @@ function createTelegramAdapter({
       text: labels[hub],
       replyMarkup: build(chatId, linkedChat),
     });
+  }
+
+  async function sendLinkedStart(chatId, linkedChat, deepLinkArg = "") {
+    const normalizedArg = typeof deepLinkArg === "string" ? deepLinkArg.trim() : "";
+    if (normalizedArg.toLowerCase().startsWith("resume_")) {
+      await botClient.sendMessage({
+        chatId,
+        text: [
+          "Deep-link resume is not available yet.",
+          "Use /threads or /resume to pick the active Remodex thread.",
+          linkedChat?.activeThreadId
+            ? `Current thread: ${linkedChat.title || linkedChat.activeThreadId}`
+            : "No active thread selected.",
+        ].join("\n"),
+      });
+      return;
+    }
+    await botClient.sendMessage({
+      chatId,
+      text: TELEGRAM_LINKED_START_TEXT,
+    });
+  }
+
+  async function buildApprovalContextForThread(linkedChat, threadId) {
+    const normalizedThreadId = normalizeChatId(threadId);
+    const activeThread = linkedChat ? await activeThreadFor(linkedChat) : null;
+    const threadTitle = normalizeChatId(activeThread?.title)
+      || normalizeChatId(linkedChat?.title)
+      || normalizedThreadId;
+    let branch = "";
+    if (linkedChat?.activeThreadId) {
+      try {
+        const gitStatus = await controlSurface.readGitStatus?.({
+          threadId: linkedChat.activeThreadId,
+          cwd: linkedChat.activeThreadCwd,
+        });
+        branch = normalizeChatId(gitStatus?.branch) || "";
+      } catch {
+        branch = "";
+      }
+    }
+    return {
+      threadId: normalizedThreadId,
+      threadTitle,
+      branch,
+      cwd: normalizeChatId(linkedChat?.activeThreadCwd) || "",
+    };
   }
 
   async function sendHelp(chatId, linkedChat, topic = "") {
@@ -1065,12 +1547,14 @@ function createTelegramAdapter({
     }
 
     const approvals = readPendingApprovalRequestsForThread(chatId, linkedChat);
+    const approvalContext = await buildApprovalContextForThread(linkedChat, linkedChat?.activeThreadId);
     for (const approval of approvals) {
       await botClient.sendMessage({
         chatId,
         text: renderTelegramApprovalRequest({
           method: approval.request.method,
           params: approval.request.params,
+          context: approvalContext,
         }),
         replyMarkup: buildApprovalReplyMarkup(chatId, approval.request),
       });
@@ -1201,8 +1685,7 @@ function createTelegramAdapter({
     const selection = await createThreadSelection(chatId, linkedChat, cwd);
     await botClient.sendMessage({
       chatId,
-      text: `New active thread: ${selection.title}`,
-      replyMarkup: buildContinueReplyMarkup(chatId, selection),
+      text: `New thread: ${selection.title}`,
     });
   }
 
@@ -1828,7 +2311,11 @@ function createTelegramAdapter({
     if (!await requireActiveThread(chatId, linkedChat)) {
       return;
     }
-    await controlSurface.stopThread?.(linkedChat.activeThreadId);
+    const threadId = normalizeChatId(linkedChat.activeThreadId);
+    await controlSurface.stopThread?.(threadId, {
+      turnId: timelineProjector.getActiveTurnId(threadId),
+      protectedRunningFallback: timelineProjector.hasProtectedRunningFallback(threadId),
+    });
     await botClient.sendMessage({ chatId, text: "Stop requested for the active Remodex thread." });
   }
 
@@ -1855,8 +2342,36 @@ function createTelegramAdapter({
     });
   }
 
+  async function ensureCodexAccountReadyForInput(chatId) {
+    if (typeof controlSurface.readAccountStatus !== "function") {
+      return true;
+    }
+    const status = await controlSurface.readAccountStatus();
+    const blocked = shouldBlockTelegramCodexInput(status);
+    // #region agent log
+    debugFaab31("H1", "telegram-adapter.js:ensureCodexAccountReady", "account gate", {
+      blocked,
+      status: status?.status || "",
+      needsReauth: Boolean(status?.needsReauth),
+      tokenReady: Boolean(status?.tokenReady),
+      loginInFlight: Boolean(status?.loginInFlight),
+      authMethod: status?.authMethod || "",
+    });
+    // #endregion
+    if (!blocked) {
+      return true;
+    }
+    await botClient.sendMessage({
+      chatId,
+      text: renderTelegramCodexInputBlocked(status),
+      replyMarkup: buildAccountReplyMarkup(chatId, status),
+    });
+    return false;
+  }
+
   async function continueActiveThread(chatId, linkedChat, text, {
     implicit = false,
+    threadJustCreated = false,
     attachments = [],
     voiceAttachment = null,
     collaborationMode = "",
@@ -1877,16 +2392,18 @@ function createTelegramAdapter({
       });
       return;
     }
+    if (!(await ensureCodexAccountReadyForInput(chatId))) {
+      return;
+    }
     if (!linkedChat.activeThreadId) {
       const nextLinkedChat = await createThreadSelection(chatId, linkedChat);
       await continueActiveThread(chatId, nextLinkedChat, trimmedText, {
         implicit,
+        threadJustCreated: true,
         attachments: normalizedAttachments,
         voiceAttachment,
         collaborationMode,
-        confirmationText: confirmationText || (collaborationMode === "plan"
-          ? `Created new active thread: ${nextLinkedChat.title}\nSent plan-mode request to the active Remodex thread.`
-          : `Created new active thread: ${nextLinkedChat.title}\nSent to the active Remodex thread.`),
+        confirmationText: confirmationText || `Started: ${nextLinkedChat.title}`,
       });
       return;
     }
@@ -1900,6 +2417,17 @@ function createTelegramAdapter({
     if (!trimmedText && inputAttachments.length > 0) {
       trimmedText = DEFAULT_TELEGRAM_IMAGE_PROMPT;
     }
+    if (implicit && isTurnRunningForChat(chatId) && trimmedText) {
+      rememberSteerInput(chatId, trimmedText);
+    }
+    // #region agent log
+    debugFaab31("H2", "telegram-adapter.js:continueActiveThread-before", "calling continueThread", {
+      chatId,
+      threadId: linkedChat.activeThreadId || "",
+      implicit,
+      textLen: trimmedText.length,
+    });
+    // #endregion
     await controlSurface.continueThread?.({
       threadId: linkedChat.activeThreadId,
       text: trimmedText,
@@ -1907,13 +2435,35 @@ function createTelegramAdapter({
       runtimePreferences: telegramRuntimePreferencesFor(linkedChat),
       collaborationMode,
     });
+    // #region agent log
+    debugFaab31("H2", "telegram-adapter.js:continueActiveThread-after", "continueThread returned", {
+      chatId,
+      threadId: linkedChat.activeThreadId || "",
+    });
+    // #endregion
+    if (threadJustCreated) {
+      await botClient.sendMessage({
+        chatId,
+        text: confirmationText || `Started: ${linkedChat.title || "thread"}`,
+      });
+      return;
+    }
+    if (implicit) {
+      return;
+    }
+    const ackText = confirmationText || (collaborationMode === "plan"
+      ? "Sent plan-mode request to the active Remodex thread."
+      : "Sent to the active Remodex thread.");
     await botClient.sendMessage({
       chatId,
-      text: confirmationText || (collaborationMode === "plan"
-        ? "Sent plan-mode request to the active Remodex thread."
-        : "Sent to the active Remodex thread."),
-      replyMarkup: buildContinueReplyMarkup(chatId, linkedChat),
-      });
+      text: ackText,
+      replyMarkup: resolveReplyMarkup({
+        surface: "codex_input",
+        phase: "ack",
+        linkedChat,
+        keyboards: { makeActionButton },
+      }),
+    });
   }
 
   async function transcribeTelegramVoiceAttachment(attachment) {
@@ -2192,6 +2742,11 @@ function createTelegramAdapter({
         }
         await sendThreadActivity(chatId, linkedChat, action.payload?.limit);
         await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Activity refreshed." });
+        return;
+      }
+      if (action.type === "command.queue") {
+        await sendQueue(chatId, linkedChat);
+        await botClient.answerCallbackQuery({ callbackQueryId: callbackQuery.id, text: "Queue refreshed." });
         return;
       }
       if (action.type === "command.pending") {
@@ -2565,6 +3120,7 @@ function createTelegramAdapter({
   async function start() {
     stopped = false;
     await refreshTelegramBotIdentity();
+    await ensureTelegramLongPollingMode();
     await registerCommandMenu();
     await pollOnce();
   }
@@ -2573,6 +3129,9 @@ function createTelegramAdapter({
     stopped = true;
     pendingUserInputRequestsByChat.clear();
     pendingApprovalRequestsByChat.clear();
+    for (const chatId of activeTypingByChat.keys()) {
+      stopTypingIndicator(chatId);
+    }
     if (pollTimer) {
       clearTimeout(pollTimer);
       pollTimer = null;
@@ -2598,6 +3157,17 @@ function createTelegramAdapter({
   }
 
   async function processTelegramUpdates(updates = []) {
+    // #region agent log
+    if ((updates || []).length > 0) {
+      const first = updates[0];
+      const msgText = readTelegramMessageText(first?.message || {});
+      debugFaab31("H3", "telegram-adapter.js:processTelegramUpdates", "received updates batch", {
+        count: updates.length,
+        hasMessage: Boolean(first?.message),
+        textPrefix: String(msgText || "").slice(0, 40),
+      });
+    }
+    // #endregion
     for (const update of updates || []) {
       const nextUpdateOffset = Number.isInteger(update?.update_id)
         ? update.update_id + 1
@@ -2699,6 +3269,23 @@ function createTelegramAdapter({
       telegramBotUsername = normalizeTelegramBotUsername(me?.username);
     } catch (error) {
       logger.warn?.(`[remodex] Telegram bot identity lookup failed: ${error.message}`);
+    }
+  }
+
+  async function ensureTelegramLongPollingMode() {
+    if (typeof botClient?.getWebhookInfo !== "function") {
+      return;
+    }
+    try {
+      const webhookInfo = await botClient.getWebhookInfo();
+      const webhookUrl = normalizeChatId(webhookInfo?.url);
+      if (!webhookUrl || typeof botClient?.deleteWebhook !== "function") {
+        return;
+      }
+      await botClient.deleteWebhook({ dropPendingUpdates: false });
+      logger.warn?.("[remodex] Cleared Telegram webhook so long-polling can receive updates.");
+    } catch (error) {
+      logger.warn?.(`[remodex] Telegram webhook cleanup failed: ${error.message}`);
     }
   }
 
@@ -2972,8 +3559,9 @@ function createTelegramAdapterFromBridgeConfig({
   if (!config.telegramBotToken) {
     throw new Error("REMODEX_TELEGRAM_BOT_TOKEN is required when REMODEX_TELEGRAM_ENABLED is set.");
   }
+  const rawBotClient = createBotClient({ botToken: config.telegramBotToken });
   return createAdapter({
-    botClient: createBotClient({ botToken: config.telegramBotToken }),
+    botClient: wrapTelegramBotClientWithOutboundQueue(rawBotClient),
     controlSurface,
     telegramAccess: access,
     botUsername: config.telegramBotUsername,
@@ -3339,8 +3927,11 @@ function parseTelegramThreadEvent(rawMessage) {
     turnId,
     itemId: normalizeChatId(params.itemId || params.item_id),
   };
-  if (method === "codex/event/agent_message" && !normalizeChatId(params.message || params.text)) {
-    return null;
+  if (method === "codex/event/agent_message") {
+    const envelope = telegramEnvelopeEvent(params);
+    if (!normalizeChatId(params.message || params.text || envelope?.message || envelope?.text)) {
+      return null;
+    }
   }
   return event;
 }
@@ -3364,17 +3955,25 @@ function requestIdKey(value) {
 }
 
 function readTelegramThreadId(params = {}) {
+  const envelope = telegramEnvelopeEvent(params);
   return normalizeChatId(
     params.threadId
     || params.thread_id
+    || params.conversationId
+    || params.conversation_id
     || params.turn?.threadId
     || params.turn?.thread_id
     || params.item?.threadId
     || params.item?.thread_id
+    || envelope?.threadId
+    || envelope?.thread_id
+    || envelope?.conversationId
+    || envelope?.conversation_id
   );
 }
 
 function readTelegramTurnId(params = {}) {
+  const envelope = telegramEnvelopeEvent(params);
   return normalizeChatId(
     params.turnId
     || params.turn_id
@@ -3382,6 +3981,9 @@ function readTelegramTurnId(params = {}) {
     || params.turn?.id
     || params.turn?.turnId
     || params.turn?.turn_id
+    || envelope?.turnId
+    || envelope?.turn_id
+    || envelope?.id
   );
 }
 

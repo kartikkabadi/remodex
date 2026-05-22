@@ -17,8 +17,11 @@ The high-bandwidth Remodex client for rich timeline inspection, sensitive payloa
 _Avoid_: Main app, iOS only
 
 **Secondary Client**:
-A Remodex client that can control and summarize local Codex work without replacing the Native Remodex App.
-_Avoid_: Notification channel, companion alert
+A Remodex client that can control and summarize local Codex work without replacing the Native Remodex App. Secondary means lower rendering bandwidth than the Native Remodex App, not lower product priority.
+_Avoid_: Notification channel, companion alert, offline fallback
+
+**Co-equal Client Surface (remote control)**:
+Remodex Telegram is a first-class Client Surface for always-on remote control — same bridge capabilities, trust model, and turn/thread semantics as the Native Remodex App, expressed through conversation-first chat UX.
 
 **Linked Chat**:
 A Telegram chat that has been explicitly paired with a local Remodex installation.
@@ -44,6 +47,14 @@ _Avoid_: Navigation, browsing
 A Codex turn that is currently active and can still be stopped or receive live updates.
 _Avoid_: Job, task
 
+**Conversation mode**:
+Default Telegram behavior for **Codex Input** and **Running Turn** updates — plain text, typing indicator, minimal inline markup.
+_Avoid_: Chat mode, silent mode
+
+**Control mode**:
+Telegram behavior for **Control Commands**, hubs, pickers, approvals, and error hints — inline keyboards and structured navigation.
+_Avoid_: Admin mode, panel mode
+
 **Runtime Access Mode**:
 The per-client runtime permission setting that controls whether Codex asks before sensitive actions or runs with full local access.
 _Avoid_: Trust level, admin mode
@@ -54,8 +65,9 @@ _Avoid_: Trust level, admin mode
 - One local Remodex installation may have multiple **Linked Chats**.
 - A **Linked Chat** may have zero or one **Active Thread**.
 - A **Linked Chat** cannot control multiple local Remodex installations at the same time.
-- The **Native Remodex App** and **Remodex Telegram** are **Client Surfaces**.
-- **Remodex Telegram** is a **Secondary Client**.
+- The **Native Remodex App** and **Remodex Telegram** are **Client Surfaces** and **Co-equal Client Surfaces** for remote control.
+- **Remodex Telegram** is a **Secondary Client** (bandwidth, not priority).
+- **Remodex Telegram** is **private-DM-only**: link and operate in a one-to-one chat with the bot, not in groups or channels.
 - A **Linked Chat** has its own **Active Thread**, independent from the Native Remodex App's selected thread.
 - A **Thread Choice** can be made through numbered recent threads or explicit thread identifiers.
 - A **Control Command** can select or change the **Active Thread**.
@@ -64,6 +76,7 @@ _Avoid_: Trust level, admin mode
 - **Codex Input** starts a new Codex turn when the **Active Thread** is idle.
 - **Codex Input** steers the **Running Turn** when the **Active Thread** has a steerable turn.
 - A **Running Turn** belongs to one Remodex thread and is the target of stop controls for that thread.
+- **Conversation mode** applies to implicit **Codex Input** and live turn output; **Control mode** applies to slash commands, hubs, and approvals.
 - A **Linked Chat** may choose its own **Runtime Access Mode** without changing the Native Remodex App's current setting.
 
 ## Example dialogue

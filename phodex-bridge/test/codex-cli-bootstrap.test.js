@@ -18,6 +18,7 @@ test("ensureCodexCLI installs Codex when it is missing", () => {
   let codexVersion = null;
 
   const result = ensureCodexCLI({
+    env: {},
     platform: "darwin",
     execFileSyncImpl(command, args, options) {
       commands.push([command, args, options?.stdio || null]);
@@ -65,6 +66,7 @@ test("ensureCodexCLI updates Codex when it is already installed", () => {
   let codexVersion = "0.118.0";
 
   const result = ensureCodexCLI({
+    env: {},
     platform: "darwin",
     execFileSyncImpl(command, args) {
       if (command === "codex" && args[0] === "--version") {
@@ -103,6 +105,7 @@ test("ensureCodexCLI stops gracefully when npm is unavailable", () => {
   const warnings = [];
 
   const result = ensureCodexCLI({
+    env: {},
     platform: "darwin",
     execFileSyncImpl(command, args) {
       if (command === "codex" && args[0] === "--version") {

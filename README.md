@@ -144,28 +144,45 @@ If you only want to try Remodex, you can install it from npm and run it without 
 
 ## Telegram (optional)
 
-Remodex Telegram controls the same local bridge from a linked chat. See [Docs/telegram-ux.md](Docs/telegram-ux.md) for hub navigation and keyboard limits.
+Remodex Telegram is a **first-class Client Surface** for remote control — same local bridge and Codex runtime as the iOS app, optimized for always-on chat UX. It is **private-DM-only**: link and use the bot in a one-to-one chat, not in groups or channels. See [Docs/telegram-ux.md](Docs/telegram-ux.md) for conversation vs control mode, the excellence ladder, and keyboard limits.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
-2. Export env vars before starting the bridge (or add them to your launch agent plist):
+2. Enable Telegram in bridge config or environment.
 
-```sh
-export REMODEX_TELEGRAM_ENABLED=1
-export REMODEX_TELEGRAM_BOT_TOKEN="<bot-token>"
-# optional:
-export REMODEX_TELEGRAM_POLL_INTERVAL_MS=2500
+**Daemon / launch agent:** add vars to `~/.remodex/daemon-config.json` (merged by the macOS bridge service) or export them before `remodex up`:
+
+```json
+{
+  "REMODEX_TELEGRAM_ENABLED": "1",
+  "REMODEX_TELEGRAM_BOT_TOKEN": "<bot-token>",
+  "REMODEX_TELEGRAM_POLL_INTERVAL_MS": "1000"
+}
 ```
 
-3. Start the bridge (`remodex up` or `cd phodex-bridge && npm start`).
-4. Link the chat from the Mac:
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `REMODEX_TELEGRAM_ENABLED` | yes | off | Set `1` to start the Telegram adapter with the bridge |
+| `REMODEX_TELEGRAM_BOT_TOKEN` | yes | — | From BotFather; never commit |
+| `REMODEX_TELEGRAM_POLL_INTERVAL_MS` | no | `1000` | Milliseconds **between** `getUpdates` rounds when idle |
+| `REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED` | no | on | Same Pro gate as other surfaces |
+| `REMODEX_TELEGRAM_PRO_ENTITLED` | no | off | Dev override when entitlement checks are enabled |
+
+Long-polling uses Telegram's `getUpdates` with **`timeout: 20`** (seconds) per request. `REMODEX_TELEGRAM_POLL_INTERVAL_MS` is not that timeout — it only spaces idle poll loops. Lower values (for example `500`) feel snappier; higher values reduce Mac load.
+
+3. Start the bridge (`remodex up` or `cd phodex-bridge && npm start`). On start, the adapter calls `deleteWebhook` when a webhook URL is set so long-polling is exclusive.
+4. Link from the Mac CLI:
 
 ```sh
-remodex telegram link
+remodex telegram link    # print /link <code>
+remodex telegram status  # linked chats (JSON)
+remodex telegram unlink [chatId]
 ```
 
-Paste the `/link <code>` message into Telegram. Use `/menu` for hub buttons and `/status` for bridge + thread summary.
+Paste `/link <code>` into your **private** chat with the bot. Send plain text for **Codex Input**; use `/menu` or `/status` for hubs.
 
-Pro gating is unchanged: Telegram requires the same local Remodex Pro entitlement as other surfaces (`REMODEX_TELEGRAM_PRO_ENTITLEMENT_REQUIRED` / `REMODEX_TELEGRAM_PRO_ENTITLED`).
+**Media limits (Telegram Bot API):** downloads up to 20 MB; Remodex caps inbound images at 8 MB and routes voice notes through local `ffmpeg` transcription on the Mac — see [Docs/telegram-ux.md](Docs/telegram-ux.md).
+
+Pro gating is unchanged: Telegram requires the same local Remodex Pro entitlement as other surfaces unless you override with `REMODEX_TELEGRAM_PRO_ENTITLED=1` for local dev.
 
 ## Quick Start
 

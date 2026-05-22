@@ -33,3 +33,9 @@ jobs:
         working-directory: phodex-bridge
         run: |
           node -e "const mod = require('./src'); const names = ['startBridge', 'openLastActiveThread', 'watchThreadRollout']; for (const name of names) { if (typeof mod[name] !== 'function') { throw new Error('Missing export: ' + name); } }"
+
+      - name: Run bridge unit tests
+        working-directory: phodex-bridge
+        env:
+          REMODEX_SKIP_CODEX_BOOTSTRAP: "1"
+        run: npm test

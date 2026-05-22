@@ -60,6 +60,7 @@ const {
   projectQuickLocations,
   projectSearchDirectories,
   projectValidatePath,
+  projectCreateRootlessChatRoot,
 } = require("./project-handler");
 const { handlePetMethod, handlePetRequest } = require("./pet-handler");
 const { createNotificationsHandler } = require("./notifications-handler");
@@ -565,7 +566,8 @@ function startBridge({
   function isTelegramRedundantRolloutLifecycle(rawMessage) {
     const message = safeParseJSON(rawMessage);
     const method = normalizeNonEmptyString(message?.method);
-    return method === "turn/started" || method === "turn/completed";
+    // Keep turn/completed so streaming bubbles can clear live Stop controls.
+    return method === "turn/started";
   }
 
   codex.onClose(() => {
@@ -1309,10 +1311,12 @@ function startBridge({
   }
 
   function buildBridgeManagedInitializeParams(includeExperimentalApi) {
+    const clientName = config.telegramEnabled ? "remodex_telegram" : "remodex_bridge";
+    const clientTitle = config.telegramEnabled ? "Remodex Telegram" : "Remodex Bridge";
     const params = {
       clientInfo: {
-        name: "remodex_telegram",
-        title: "Remodex Telegram",
+        name: clientName,
+        title: clientTitle,
         version: bridgePackageVersion,
       },
     };
@@ -1478,9 +1482,11 @@ function startBridge({
   function createTelegramControlSurface() {
     return {
       readStatus: async () => ({
+        macName: normalizeNonEmptyString(os.hostname()),
         bridgeStatus: {
           ...bridgeStatusPublisher.latest(),
           bridgeVersion: normalizeVersionString(bridgePackageVersion) || bridgePackageVersion,
+          macName: normalizeNonEmptyString(os.hostname()),
         },
       }),
       readAccountStatus: async () => readSanitizedAuthStatus(),
@@ -1579,7 +1585,7 @@ function startBridge({
         cwd,
         runtimePreferences,
       } = {}) => forkTelegramThread({ threadId, cwd, runtimePreferences }),
-      stopThread: async (threadId) => stopTelegramThread(threadId),
+      stopThread: async (threadId, options) => stopTelegramThread(threadId, options),
       continueThread: async ({
         threadId,
         text,
@@ -1976,6 +1982,20 @@ function startBridge({
       runtimePreferences,
       collaborationMode,
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7363/ingest/8a61d48d-bc77-4bb6-8b06-9a2596350233", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "faab31" },
+      body: JSON.stringify({
+        sessionId: "faab31",
+        hypothesisId: "H5",
+        location: "bridge.js:continueTelegramThread",
+        message: "codex input request built",
+        data: { method: request.method, threadId: normalizedThreadId },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (request.method === "turn/start") {
       return sendTelegramRuntimeRequest(request.method, request.params, {
         accessMode: telegramRuntimeAccessMode(runtimePreferences),
@@ -2002,13 +2022,55 @@ function startBridge({
     }));
   }
 
-  async function stopTelegramThread(threadId) {
+  async function readTelegramInterruptTurnId(threadId, { includeTurns = false } = {}) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      return "";
+    }
+    const params = { threadId: normalizedThreadId };
+    if (includeTurns) {
+      params.includeTurns = true;
+    }
+    try {
+      const threadPayload = await sendCodexRequest("thread/read", params);
+      return findActiveTurnId(threadPayload);
+    } catch (error) {
+      if (!includeTurns || !shouldRetryTelegramThreadReadWithSnakeCase(error)) {
+        throw error;
+      }
+      const threadPayload = await sendCodexRequest("thread/read", {
+        thread_id: normalizedThreadId,
+        include_turns: true,
+      });
+      return findActiveTurnId(threadPayload);
+    }
+  }
+
+  function shouldRetryTelegramThreadReadWithSnakeCase(error) {
+    const message = normalizeErrorMessage(error);
+    return message.includes("invalid params")
+      || message.includes("invalid request")
+      || message.includes("unknown field")
+      || message.includes("include_turns")
+      || message.includes("includeturns");
+  }
+
+  async function stopTelegramThread(threadId, {
+    turnId: hintTurnId = "",
+    protectedRunningFallback = false,
+  } = {}) {
     const normalizedThreadId = normalizeNonEmptyString(threadId);
     if (!normalizedThreadId) {
       throw new Error("A Telegram active thread is required before stop.");
     }
-    const threadPayload = await sendCodexRequest("thread/read", { threadId: normalizedThreadId });
-    const turnId = findActiveTurnId(threadPayload);
+
+    let turnId = normalizeNonEmptyString(hintTurnId);
+    if (!turnId) {
+      turnId = await readTelegramInterruptTurnId(normalizedThreadId);
+    }
+    if (!turnId && protectedRunningFallback) {
+      turnId = await readTelegramInterruptTurnId(normalizedThreadId, { includeTurns: true });
+    }
     if (!turnId) {
       throw new Error("No active turn found for the selected Telegram thread.");
     }
@@ -2266,6 +2328,11 @@ function startBridge({
       } catch {
         // Try the next recent thread before giving up on first-run Telegram /new.
       }
+    }
+    const rootless = await projectCreateRootlessChatRoot({}, { env: process.env });
+    const rootlessPath = normalizeNonEmptyString(rootless?.path);
+    if (rootlessPath) {
+      return rootlessPath;
     }
     throw new Error("No recent Remodex thread has a local project path. Select a thread with /threads first.");
   }

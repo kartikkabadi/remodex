@@ -15,10 +15,17 @@ const {
   telegramReasoningEffortLabel,
   telegramServiceTierLabel,
 } = require("./telegram-runtime-preferences");
+const { TELEGRAM_MESSAGE_TEXT_MAX_CHARS } = require("./telegram-bot-api-client");
 
 function renderTelegramStatus({
   bridgeStatus = null,
   activeThread = null,
+  macName = "",
+  gitStatus = null,
+  contextWindow = null,
+  runtimePreferences = null,
+  queueState = null,
+  access = null,
 } = {}) {
   const bridgeLabel = normalizeNonEmptyString(bridgeStatus?.connectionStatus)
     || normalizeNonEmptyString(bridgeStatus?.state)
@@ -29,15 +36,147 @@ function renderTelegramStatus({
     || normalizeNonEmptyString(bridgeStatus?.codexLaunchState?.state)
     || normalizeNonEmptyString(bridgeStatus?.codexLaunchState)
     || "unknown";
+  const macLabel = normalizeNonEmptyString(macName)
+    || normalizeNonEmptyString(bridgeStatus?.macName)
+    || normalizeNonEmptyString(bridgeStatus?.displayName)
+    || "Mac";
   const activeTitle = normalizeNonEmptyString(activeThread?.title)
     || normalizeNonEmptyString(activeThread?.name)
     || "none";
+  const lines = [
+    "Remodex status",
+    `${macLabel} · ${bridgeLabel}`,
+    `Bridge ${bridgeVersion || "unknown"} · Codex ${codexLabel}`,
+    "",
+    `Thread: ${truncateTelegramLine(activeTitle, 120)}`,
+  ];
 
-  return [
-    `Bridge: ${bridgeLabel}${bridgeVersion ? ` (${bridgeVersion})` : ""}`,
-    `Codex: ${codexLabel}`,
-    `Active: ${activeTitle}`,
-  ].join("\n");
+  const branch = normalizeNonEmptyString(gitStatus?.branch)
+    || normalizeNonEmptyString(gitStatus?.currentBranch);
+  if (gitStatus?.isRepo === false) {
+    lines.push("Branch: not a git repository");
+  } else if (branch) {
+    lines.push(`Branch: ${truncateTelegramLine(branch, 96)}`);
+  } else {
+    lines.push("Branch: unavailable");
+  }
+
+  lines.push(renderTelegramContextWindow(contextWindow));
+
+  if (runtimePreferences) {
+    const runtime = normalizeTelegramRuntimePreferences(runtimePreferences);
+    const accessMode = normalizeTelegramAccessMode(
+      runtimePreferences.runtimeAccessMode || runtimePreferences.accessMode,
+    ) || "on-request";
+    const speedLabel = runtime.serviceTier
+      ? telegramServiceTierLabel(runtime.serviceTier)
+      : "Normal";
+    lines.push(
+      `Model: ${telegramModelLabel(runtime.model)} · ${telegramReasoningEffortLabel(runtime.reasoningEffort)} · ${speedLabel}`,
+    );
+    lines.push(`Access mode: ${telegramAccessModeLabel(accessMode)}`);
+  }
+
+  const queueLabel = renderTelegramQueueState(queueState);
+  if (queueLabel) {
+    lines.push(queueLabel);
+  }
+
+  const accessLabel = renderTelegramAccessStateLine(access);
+  if (accessLabel) {
+    lines.push(accessLabel);
+  }
+
+  return lines.join("\n");
+}
+
+function renderTelegramQueueState(queueState = {}) {
+  const pendingApprovals = Number.isFinite(queueState?.pendingApprovals)
+    ? queueState.pendingApprovals
+    : 0;
+  const pendingUserInput = Number.isFinite(queueState?.pendingUserInput)
+    ? queueState.pendingUserInput
+    : 0;
+  const outboundQueued = Number.isFinite(queueState?.outboundQueued)
+    ? queueState.outboundQueued
+    : 0;
+  const steerQueued = Number.isFinite(queueState?.steerQueued)
+    ? queueState.steerQueued
+    : 0;
+  const runningTurn = queueState?.runningTurn === true;
+
+  const parts = [];
+  if (runningTurn) {
+    parts.push("turn running");
+  }
+  if (steerQueued > 0) {
+    parts.push(`${steerQueued} steered`);
+  }
+  if (pendingApprovals > 0) {
+    parts.push(`${pendingApprovals} approval${pendingApprovals === 1 ? "" : "s"}`);
+  }
+  if (pendingUserInput > 0) {
+    parts.push(`${pendingUserInput} prompt${pendingUserInput === 1 ? "" : "s"}`);
+  }
+  if (outboundQueued > 0) {
+    parts.push(`${outboundQueued} outbound`);
+  }
+
+  if (parts.length === 0) {
+    return "Queue: idle";
+  }
+  return `Queue: ${parts.join(", ")}`;
+}
+
+function renderTelegramQueueDetail({
+  queueState = {},
+  steerQueue = [],
+  activeThreadTitle = "",
+} = {}) {
+  const lines = ["Remodex queue"];
+  if (activeThreadTitle) {
+    lines.push(`Thread: ${truncateTelegramLine(activeThreadTitle, 80)}`);
+  }
+  const summary = renderTelegramQueueState(queueState);
+  if (summary) {
+    lines.push(summary);
+  }
+
+  const steered = Array.isArray(steerQueue) ? steerQueue : [];
+  if (steered.length > 0) {
+    lines.push("");
+    lines.push("Steered while running:");
+    for (const [index, entry] of steered.entries()) {
+      const preview = normalizeNonEmptyString(entry?.text);
+      if (!preview) {
+        continue;
+      }
+      lines.push(`${index + 1}. ${truncateTelegramLine(preview, 160)}`);
+    }
+  }
+
+  if (
+    !queueState?.runningTurn
+    && (queueState?.pendingApprovals || 0) === 0
+    && (queueState?.pendingUserInput || 0) === 0
+    && (queueState?.outboundQueued || 0) === 0
+    && steered.length === 0
+  ) {
+    lines.push("Nothing queued. Send text during a run to steer, or wait for Codex to ask.");
+  } else if ((queueState?.pendingApprovals || 0) > 0 || (queueState?.pendingUserInput || 0) > 0) {
+    lines.push("Use /pending to reopen prompts and approvals.");
+  }
+
+  return lines.join("\n");
+}
+
+function renderTelegramAccessStateLine(access = {}) {
+  const allowed = access?.allowed !== false;
+  const status = normalizeNonEmptyString(access?.status);
+  if (allowed) {
+    return status ? `Entitlement: ${status}` : "Entitlement: Pro active";
+  }
+  return status ? `Entitlement: ${status}` : "Entitlement: requires Pro";
 }
 
 function renderTelegramAccountStatus(status = {}) {
@@ -58,7 +197,9 @@ function renderTelegramAccountStatus(status = {}) {
     lines.push(`Auth: ${authMethod}${status.tokenReady ? " (token ready)" : ""}`);
   }
   if (status.needsReauth) {
-    lines.push("Reauth required.");
+    lines.push(status.tokenReady
+      ? "Reauth recommended when convenient (Codex input still works)."
+      : "Reauth required.");
   }
   if (status.loginInFlight) {
     lines.push("Login is in progress on this Mac.");
@@ -354,7 +495,8 @@ function renderTelegramStashPopResult(result = {}) {
 }
 
 function renderTelegramContextWindow(result = {}) {
-  const usage = result.usage || {};
+  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
+  const usage = source.usage || {};
   const tokensUsed = Number.isFinite(usage.tokensUsed) ? usage.tokensUsed : null;
   const tokenLimit = Number.isFinite(usage.tokenLimit) ? usage.tokenLimit : null;
   if (tokensUsed == null || tokenLimit == null || tokenLimit <= 0) {
@@ -496,6 +638,36 @@ function renderTelegramLoginResult(result = {}) {
   return result.success || result.openedOnMac
     ? "Opened ChatGPT sign-in on the Mac."
     : "Could not open ChatGPT sign-in on the Mac.";
+}
+
+function shouldBlockTelegramCodexInput(status = {}) {
+  if (!status || typeof status !== "object") {
+    return false;
+  }
+  if (status.loginInFlight) {
+    return true;
+  }
+  // Bridge has a usable auth token — Codex turns can run even when refresh is recommended.
+  if (status.tokenReady) {
+    return false;
+  }
+  if (status.needsReauth || normalizeNonEmptyString(status.status) === "expired") {
+    return true;
+  }
+  return normalizeNonEmptyString(status.status) === "not_logged_in";
+}
+
+function renderTelegramCodexInputBlocked(status = {}) {
+  if (status.loginInFlight) {
+    return "ChatGPT sign-in is in progress on this Mac. Send your message again after completing login.";
+  }
+  if (status.needsReauth || normalizeNonEmptyString(status.status) === "expired") {
+    return "Your ChatGPT login expired. Reauth on this Mac before chatting with Codex from Telegram. Tap Open Login below.";
+  }
+  if (normalizeNonEmptyString(status.status) === "not_logged_in") {
+    return "Sign in to ChatGPT on this Mac before chatting with Codex from Telegram. Tap Open Login below.";
+  }
+  return "ChatGPT sign-in is required before chatting with Codex from Telegram. Tap Open Login below.";
 }
 
 function renderTelegramCancelLoginResult(result = {}) {
@@ -792,12 +964,23 @@ function renderTelegramReviewStartResult(result = {}) {
   return lines.join("\n");
 }
 
-function renderTelegramApprovalRequest({ method = "", params = {} } = {}) {
+function renderTelegramApprovalRequest({ method = "", params = {}, context = {} } = {}) {
   const kind = approvalKind(method);
-  const lines = [`Approval requested: ${kind}`];
+  const lines = [`Approval needed: ${kind}`];
+
+  const threadTitle = normalizeNonEmptyString(context.threadTitle);
+  const threadId = normalizeNonEmptyString(context.threadId);
+  if (threadTitle || threadId) {
+    lines.push(`Thread: ${truncateTelegramLine(threadTitle || threadId, 80)}`);
+  }
+  const branch = normalizeNonEmptyString(context.branch);
+  if (branch) {
+    lines.push(`Branch: ${truncateTelegramLine(branch, 80)}`);
+  }
+
   const reason = normalizeNonEmptyString(params.reason);
   if (reason) {
-    lines.push(`Reason: ${truncateTelegramLine(reason, 180)}`);
+    lines.push(`Why: ${truncateTelegramLine(reason, 180)}`);
   }
 
   const command = normalizeNonEmptyString(params.command);
@@ -812,7 +995,7 @@ function renderTelegramApprovalRequest({ method = "", params = {} } = {}) {
     }
   }
 
-  lines.push("Review carefully before approving.");
+  lines.push("Approve or decline below — works from your lock screen.");
   return lines.join("\n");
 }
 
@@ -854,7 +1037,7 @@ function renderTelegramUserInputRequest({ params = {} } = {}) {
 function renderTelegramThreadEvent({ method = "", params = {} } = {}) {
   const normalizedMethod = normalizeNonEmptyString(method);
   if (normalizedMethod === "turn/started") {
-    return "Remodex started working on the active thread.";
+    return "";
   }
   if (normalizedMethod === "turn/completed") {
     const status = normalizeNonEmptyString(params.status || params.state || params.turn?.status || params.turn?.state);
@@ -867,7 +1050,7 @@ function renderTelegramThreadEvent({ method = "", params = {} } = {}) {
     if (!message) {
       return "";
     }
-    return `Assistant:\n${truncateTelegramLine(message, 1400)}`;
+    return truncateTelegramLine(message, TELEGRAM_MESSAGE_TEXT_MAX_CHARS);
   }
   return "";
 }
@@ -1407,6 +1590,7 @@ module.exports = {
   renderTelegramLinkInstructions,
   renderTelegramLinkHelp,
   renderTelegramLoginResult,
+  renderTelegramCodexInputBlocked,
   renderTelegramLogoutConfirmation,
   renderTelegramLogoutResult,
   renderTelegramModelPreferences,
@@ -1431,6 +1615,8 @@ module.exports = {
   renderTelegramStashPopResult,
   renderTelegramStashResult,
   renderTelegramStatus,
+  renderTelegramQueueState,
+  renderTelegramQueueDetail,
   renderTelegramThreadActivity,
   renderTelegramThreadEvent,
   renderTelegramUnarchiveResult,
@@ -1440,4 +1626,5 @@ module.exports = {
   renderTelegramVersionStatus,
   renderTelegramWakeMacResult,
   renderTelegramWorktreeThreadResult,
+  shouldBlockTelegramCodexInput,
 };

@@ -104,6 +104,32 @@ test("parseTelegramCommand recognizes supported commands including continue", ()
   assert.deepEqual(parseTelegramCommand("/unlink"), { name: "unlink", arg: "" });
 });
 
+test("telegram adapter clears webhook before polling when one is configured", async () => {
+  const webhookCalls = [];
+  const adapter = createTelegramAdapter({
+    botClient: {
+      ...fakeBot([], []),
+      getWebhookInfo: async () => {
+        webhookCalls.push("getWebhookInfo");
+        return { url: "https://example.com/hook" };
+      },
+      deleteWebhook: async (options) => {
+        webhookCalls.push(["deleteWebhook", options]);
+        return true;
+      },
+    },
+    pollIntervalMs: 60_000,
+  });
+
+  await adapter.start();
+  adapter.stop();
+
+  assert.deepEqual(webhookCalls, [
+    "getWebhookInfo",
+    ["deleteWebhook", { dropPendingUpdates: false }],
+  ]);
+});
+
 test("telegram adapter registers the bot command menu on start", async () => {
   const commandMenus = [];
   const adapter = createTelegramAdapter({
@@ -153,7 +179,8 @@ test("telegram adapter discovers its bot username and ignores commands addressed
   assert.deepEqual(commandMenus, [TELEGRAM_COMMAND_MENU]);
   assert.deepEqual(calls, ["readStatus"]);
   assert.equal(messages.length, 1);
-  assert.match(messages[0].text, /Bridge: connected/);
+  assert.match(messages[0].text, /Remodex status/);
+  assert.match(messages[0].text, /connected/);
 });
 
 test("telegram adapter can use a configured bot username before polling starts", async () => {
@@ -178,7 +205,7 @@ test("telegram adapter can use a configured bot username before polling starts",
 
   assert.deepEqual(calls, ["readStatus"]);
   assert.equal(messages.length, 1);
-  assert.match(messages[0].text, /Bridge: connected/);
+  assert.match(messages[0].text, /connected/);
 });
 
 test("telegram help stays aligned with the command picker source", async () => {
@@ -654,7 +681,7 @@ test("telegram adapter handles read-only commands and active thread selection", 
   await adapter.handleUpdate(messageUpdate({ text: "/checkpoint", chatId: 42 }));
   await adapter.handleUpdate(messageUpdate({ text: "/branches", chatId: 42 }));
 
-  assert.match(messages[0].text, /Bridge: connected/);
+  assert.match(messages[0].text, /connected/);
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Chat");
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Threads");
   assert.equal(messages[0].replyMarkup.inline_keyboard[1][0].text, "Git");
@@ -904,7 +931,7 @@ test("telegram adapter selects explicit thread identifiers outside the recent li
   assert.equal(messages[0].text, "Active thread: 019e2f0f-12a2-7263-8936-9a74f86972ec");
   assert.equal(callbackDataForButton(messages[0], "Menu").startsWith("a:"), true);
   assert.equal(callbackDataForButton(messages[0], "Activity").startsWith("a:"), true);
-  assert.match(messages[1].text, /Active: 019e2f0f-12a2-7263-8936-9a74f86972ec/);
+  assert.match(messages[1].text, /Thread: 019e2f0f-12a2-7263-8936-9a74f86972ec/);
 });
 
 test("telegram adapter archives active threads and restores archived threads", async () => {
@@ -1040,7 +1067,10 @@ test("telegram adapter handles inline thread and status control buttons", async 
   await adapter.handleUpdate(messageUpdate({ text: "/status", chatId: 42 }));
   await adapter.handleUpdate(messageUpdate({ text: "/git", chatId: 42 }));
 
-  assert.deepEqual(gitCalls, [{ threadId: "thread-2", cwd: "/tmp/two" }]);
+  assert.deepEqual(gitCalls, [
+    { threadId: "thread-2", cwd: "/tmp/two" },
+    { threadId: "thread-2", cwd: "/tmp/two" },
+  ]);
   assert.equal(messages[3].text, "Git: 0 files changed on feature/telegram. 0 staged, 0 unstaged.");
 
   await adapter.handleUpdate(messageUpdate({ text: "/branches", chatId: 42 }));
@@ -1155,9 +1185,8 @@ test("telegram adapter lists project choices and creates a new thread in a selec
   ]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-project");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/Users/user/Documents/Projects/remodex");
-  assert.equal(messages[1].text, "New active thread: Project thread");
-  assert.equal(callbackDataForButton(messages[1], "Menu").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[1], "Activity").startsWith("a:"), true);
+  assert.equal(messages[1].text, "New thread: Project thread");
+  assert.equal(messages[1].replyMarkup, undefined);
   assert.deepEqual(callbacks, [{ callbackQueryId: "cb-project-new", text: "New project thread created." }]);
 });
 
@@ -1257,9 +1286,8 @@ test("telegram adapter browses local project folders and creates a thread from a
   ]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-browse");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/Users/user/Documents/Projects/remodex");
-  assert.equal(messages[3].text, "New active thread: Browsed project");
-  assert.equal(callbackDataForButton(messages[3], "Menu").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[3], "Activity").startsWith("a:"), true);
+  assert.equal(messages[3].text, "New thread: Browsed project");
+  assert.equal(messages[3].replyMarkup, undefined);
   assert.deepEqual(callbacks, [
     { callbackQueryId: "cb-browse-docs", text: "Folder opened." },
     { callbackQueryId: "cb-new-remodex", text: "New project thread created." },
@@ -1339,9 +1367,8 @@ test("telegram adapter creates a new thread from an explicit /new folder", async
     sourceCwd: "/tmp/current",
     cwd: "/Users/user/Documents/Projects/remodex/phodex-bridge",
   }]);
-  assert.equal(messages[0].text, "New active thread: Explicit project");
-  assert.equal(callbackDataForButton(messages[0], "Menu").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[0], "Activity").startsWith("a:"), true);
+  assert.equal(messages[0].text, "New thread: Explicit project");
+  assert.equal(messages[0].replyMarkup, undefined);
   assert.equal(state.linkedChats[0].activeThreadCwd, "/Users/user/Documents/Projects/remodex/phodex-bridge");
 });
 
@@ -2510,13 +2537,87 @@ test("telegram adapter creates a new active thread from command and inline butto
   ]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-new-2");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/new-2");
-  assert.equal(messages[0].text, "New active thread: New 1");
-  assert.equal(callbackDataForButton(messages[0], "Menu").startsWith("a:"), true);
-  assert.equal(messages[3].text, "New active thread: New 2");
+  assert.equal(messages[0].text, "New thread: New 1");
+  assert.equal(messages[0].replyMarkup, undefined);
+  assert.equal(messages[3].text, "New thread: New 2");
   assert.deepEqual(callbacks, [
     { callbackQueryId: "cb-threads-hub", text: "Hub opened." },
     { callbackQueryId: "cb-new", text: "New thread created." },
   ]);
+});
+
+test("telegram adapter rootless /new creates thread without source selection", async () => {
+  const messages = [];
+  const state = {
+    linkedChats: [{ chatId: "42", chatTitle: "Kartik" }],
+    pendingLinkCode: null,
+  };
+  const createCalls = [];
+  const adapter = createTelegramAdapter({
+    botClient: fakeBot(messages),
+    sessionState: {
+      read: () => state,
+      setActiveThread: ({ threadId, cwd }) => {
+        state.linkedChats[0].activeThreadId = threadId;
+        state.linkedChats[0].activeThreadCwd = cwd;
+        return state;
+      },
+    },
+    controlSurface: {
+      createThread: async ({ sourceThreadId, sourceCwd, cwd }) => {
+        createCalls.push({ sourceThreadId, sourceCwd, cwd });
+        return {
+          threadId: "thread-rootless",
+          thread: {
+            id: "thread-rootless",
+            title: "Rootless chat",
+            cwd: "/Users/user/Chats/2026-05-20/new-chat",
+          },
+        };
+      },
+    },
+  });
+
+  await adapter.handleUpdate(messageUpdate({ text: "/new", chatId: 42 }));
+
+  assert.deepEqual(createCalls, [{
+    sourceThreadId: undefined,
+    sourceCwd: undefined,
+    cwd: "",
+  }]);
+  assert.equal(state.linkedChats[0].activeThreadCwd, "/Users/user/Chats/2026-05-20/new-chat");
+  assert.equal(messages[0].text, "New thread: Rootless chat");
+});
+
+test("telegram adapter sends post-turn file-change summary after turn/completed", async () => {
+  const messages = [];
+  const adapter = createTelegramAdapter({
+    botClient: fakeBot(messages),
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+  });
+
+  await adapter.sendServerRequest(JSON.stringify({
+    method: "turn/started",
+    params: { threadId: "thread-1", turnId: "turn-1" },
+  }));
+  await adapter.sendServerRequest(JSON.stringify({
+    method: "item/fileChange/outputDelta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      delta: "Edited src/auth.ts +18 -3\n",
+    },
+  }));
+  await adapter.sendServerRequest(JSON.stringify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turnId: "turn-1" },
+  }));
+
+  const summary = messages.find((entry) => entry.text?.startsWith("Edited 1 file"));
+  assert.ok(summary);
+  assert.match(summary.text, /auth\.ts  \+18 \/ -3/);
 });
 
 test("telegram adapter creates a first active thread without an existing selection", async () => {
@@ -2571,8 +2672,8 @@ test("telegram adapter creates a first active thread without an existing selecti
   ]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-new-2");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/fresh-2");
-  assert.equal(messages[2].text, "New active thread: Fresh 1");
-  assert.equal(messages[3].text, "New active thread: Fresh 2");
+  assert.equal(messages[2].text, "New thread: Fresh 1");
+  assert.equal(messages[3].text, "New thread: Fresh 2");
   assert.deepEqual(callbacks, [
     { callbackQueryId: "cb-threads-hub", text: "Hub opened." },
     { callbackQueryId: "cb-new", text: "New thread created." },
@@ -2620,7 +2721,7 @@ test("telegram adapter sends approval buttons only to linked chats on the active
   assert.equal(didSkip, false);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].chatId, "42");
-  assert.match(messages[0].text, /Approval requested: command/);
+  assert.match(messages[0].text, /Approval needed: command/);
   assert.match(messages[0].text, /Command: npm test/);
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Approve");
   assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Decline");
@@ -2674,8 +2775,8 @@ test("telegram adapter reopens pending approval requests with fresh buttons", as
   await adapter.handleUpdate(messageUpdate({ text: "/pending", chatId: 42 }));
 
   assert.equal(messages.length, 2);
-  assert.match(messages[1].text, /Approval requested: file change/);
-  assert.match(messages[1].text, /Reason: Apply local edits/);
+  assert.match(messages[1].text, /Approval needed: file change/);
+  assert.match(messages[1].text, /Why: Apply local edits/);
   assert.equal(callbackDataForButton(messages[1], "Approve").startsWith("a:"), true);
 
   await adapter.handleUpdate(callbackUpdate({
@@ -3305,11 +3406,217 @@ test("telegram adapter auto-approves active-thread requests in full access mode"
   }]);
 });
 
-test("telegram adapter mirrors compact active-thread events to matching linked chats", async () => {
+test("telegram adapter gives linked /start onboarding without control keyboards", async () => {
   const messages = [];
-  const actions = createFakeActionRegistry();
   const adapter = createTelegramAdapter({
     botClient: fakeBot(messages),
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+  });
+
+  await adapter.handleUpdate(messageUpdate({ text: "/start", chatId: 42 }));
+
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].text, /Send a message to run Codex/);
+  assert.match(messages[0].text, /\/menu for controls/);
+  assert.equal(messages[0].replyMarkup, undefined);
+});
+
+test("telegram adapter streams assistant deltas into one live bubble", async () => {
+  const messages = [];
+  const edits = [];
+  const adapter = createTelegramAdapter({
+    botClient: {
+      ...fakeBot(messages),
+      sendMessage: async ({ chatId, text, replyMarkup }) => {
+        messages.push({ chatId: String(chatId), text, replyMarkup });
+        return { message_id: messages.length };
+      },
+      editMessageText: async (payload) => {
+        edits.push(payload);
+        return true;
+      },
+      editMessageReplyMarkup: async () => true,
+    },
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+  });
+
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "codex/event/agent_message_content_delta",
+    params: { threadId: "thread-1", turnId: "turn-1", delta: "Hel" },
+  })), true);
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "codex/event/agent_message",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      message: "Hello from stream.",
+    },
+  })), true);
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turnId: "turn-1" },
+  })), false);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].text, "Hel");
+  assert.equal(edits.at(-1).text, "Hello from stream.");
+  assert.deepEqual(edits.at(-1).replyMarkup, { inline_keyboard: [] });
+});
+
+test("telegram adapter streams legacy codex envelopes without per-chunk sendMessage", async () => {
+  const messages = [];
+  const edits = [];
+  const adapter = createTelegramAdapter({
+    botClient: {
+      ...fakeBot(messages),
+      sendMessage: async ({ chatId, text, replyMarkup }) => {
+        messages.push({ chatId: String(chatId), text, replyMarkup });
+        return { message_id: messages.length };
+      },
+      editMessageText: async (payload) => {
+        edits.push(payload);
+        return true;
+      },
+      editMessageReplyMarkup: async (payload) => {
+        edits.push({ ...payload, kind: "markup" });
+        return true;
+      },
+      sendChatAction: async () => true,
+    },
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+  });
+
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "turn/started",
+    params: { threadId: "thread-1", turnId: "turn-1" },
+  })), true);
+
+  for (const delta of ["Hey", " there"]) {
+    assert.equal(await adapter.sendServerRequest(JSON.stringify({
+      method: "codex/event/agent_message_content_delta",
+      params: {
+        conversationId: "thread-1",
+        id: "turn-1",
+        msg: { delta },
+      },
+    })), true);
+  }
+
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "codex/event/agent_message",
+    params: {
+      conversationId: "thread-1",
+      id: "turn-1",
+      msg: { message: "Hey there" },
+    },
+  })), true);
+
+  assert.equal(await adapter.sendServerRequest(JSON.stringify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turnId: "turn-1" },
+  })), false);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].text, "Hey");
+  assert.ok(edits.some((edit) => edit.text === "Hey there"));
+  const markupClears = edits.filter((edit) => edit.kind === "markup");
+  assert.ok(markupClears.length >= 1);
+  assert.ok(markupClears.every((edit) => deepEqual(edit.replyMarkup, { inline_keyboard: [] })));
+  assert.equal(messages.some((entry) => entry.text === "Remodex finished the active turn."), false);
+});
+
+function deepEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+test("telegram adapter uses a fresh bubble for each consecutive turn", async () => {
+  const messages = [];
+  const edits = [];
+  const adapter = createTelegramAdapter({
+    botClient: {
+      ...fakeBot(messages),
+      sendMessage: async ({ chatId, text, replyMarkup }) => {
+        messages.push({ chatId: String(chatId), text, replyMarkup });
+        return { message_id: messages.length };
+      },
+      editMessageText: async (payload) => {
+        edits.push(payload);
+        return true;
+      },
+      editMessageReplyMarkup: async (payload) => {
+        edits.push({ ...payload, kind: "markup" });
+        return true;
+      },
+      sendChatAction: async () => true,
+    },
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+  });
+
+  async function runTurn({ turnId, deltas, snapshot }) {
+    assert.equal(await adapter.sendServerRequest(JSON.stringify({
+      method: "turn/started",
+      params: { threadId: "thread-1", turnId },
+    })), true);
+    for (const delta of deltas) {
+      assert.equal(await adapter.sendServerRequest(JSON.stringify({
+        method: "codex/event/agent_message_content_delta",
+        params: { threadId: "thread-1", turnId, delta },
+      })), true);
+    }
+    if (snapshot) {
+      assert.equal(await adapter.sendServerRequest(JSON.stringify({
+        method: "codex/event/agent_message",
+        params: { threadId: "thread-1", turnId, itemId: `${turnId}-final`, message: snapshot },
+      })), true);
+    }
+    assert.equal(await adapter.sendServerRequest(JSON.stringify({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turnId },
+    })), false);
+  }
+
+  await runTurn({
+    turnId: "turn-1",
+    deltas: ["One"],
+    snapshot: "Turn one done.",
+  });
+  const turnOneMessageCount = messages.length;
+  const turnOneMarkupClears = edits.filter((edit) => edit.kind === "markup").length;
+  edits.length = 0;
+
+  await runTurn({
+    turnId: "turn-2",
+    deltas: ["Two"],
+    snapshot: "Turn two done.",
+  });
+
+  assert.equal(messages.length, turnOneMessageCount + 1);
+  assert.equal(messages.at(-1).text, "Two");
+  assert.ok(edits.some((edit) => edit.text === "Turn two done."));
+  assert.ok(turnOneMarkupClears >= 1);
+  assert.ok(edits.filter((edit) => edit.kind === "markup").length >= 1);
+  assert.equal(messages.some((entry) => entry.text === "Turn one done."), false);
+  assert.equal(messages.some((entry) => entry.text === "Turn two done."), false);
+});
+
+test("telegram adapter mirrors compact active-thread events to matching linked chats", async () => {
+  const messages = [];
+  const chatActions = [];
+  const actions = createFakeActionRegistry();
+  const adapter = createTelegramAdapter({
+    botClient: {
+      ...fakeBot(messages),
+      sendChatAction: async ({ chatId, action }) => chatActions.push({ chatId: String(chatId), action }),
+    },
     actionRegistry: actions.registry,
     sessionState: {
       read: () => ({
@@ -3348,24 +3655,14 @@ test("telegram adapter mirrors compact active-thread events to matching linked c
     params: { threadId: "thread-2", turnId: "turn-2" },
   })), true);
 
-  assert.equal(messages.length, 3);
+  assert.equal(messages.length, 2);
+  assert.deepEqual(chatActions, [{ chatId: "42", action: "typing" }]);
   assert.equal(messages[0].chatId, "42");
-  assert.equal(messages[0].text, "Remodex started working on the active thread.");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Stop");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Status");
-  assert.equal(callbackDataForButton(messages[0], "Stop").startsWith("a:"), true);
-  assert.equal(messages[1].chatId, "42");
-  assert.equal(messages[1].text, "Assistant:\nReady from Telegram.");
-  assert.equal(messages[1].replyMarkup.inline_keyboard[0][0].text, "Activity");
-  assert.equal(messages[1].replyMarkup.inline_keyboard[0][1].text, "Pending");
-  assert.equal(messages[1].replyMarkup.inline_keyboard[1][0].text, "Menu");
-  assert.equal(messages[1].replyMarkup.inline_keyboard[1][1].text, "Open Mac");
-  assert.equal(callbackDataForButton(messages[1], "Activity").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[1], "Pending").startsWith("a:"), true);
-  assert.equal(messages[2].chatId, "99");
-  assert.equal(messages[2].text, "Remodex finished the active turn.");
-  assert.equal(callbackDataForButton(messages[2], "Activity").startsWith("a:"), true);
-  assert.equal(callbackDataForButton(messages[2], "Menu").startsWith("a:"), true);
+  assert.equal(messages[0].text, "Ready from Telegram.");
+  assert.equal(messages[0].replyMarkup?.inline_keyboard?.[0]?.[0]?.text, "Stop");
+  assert.equal(messages[1].chatId, "99");
+  assert.equal(messages[1].text, "Remodex finished the active turn.");
+  assert.equal(messages[1].replyMarkup, undefined);
 });
 
 test("telegram adapter refuses stale thread-scoped post-turn buttons", async () => {
@@ -3389,20 +3686,18 @@ test("telegram adapter refuses stale thread-scoped post-turn buttons", async () 
     },
   });
 
-  assert.equal(await adapter.sendServerRequest(JSON.stringify({
-    method: "codex/event/agent_message",
-    params: {
-      threadId: "thread-1",
-      turnId: "turn-1",
-      itemId: "item-1",
-      message: "Ready from Telegram.",
-    },
-  })), true);
+  await adapter.handleUpdate(messageUpdate({ text: "/menu", chatId: 42 }));
+  const chatHubCallback = callbackDataForButton(messages[0], "Chat");
+  await adapter.handleUpdate(callbackUpdate({
+    callbackData: chatHubCallback,
+    chatId: 42,
+    callbackQueryId: "cb-chat-hub",
+  }));
   state.linkedChats[0].activeThreadId = "thread-2";
 
   for (const label of ["Activity", "Pending", "Open Mac"]) {
     await adapter.handleUpdate(callbackUpdate({
-      callbackData: callbackDataForButton(messages[0], label),
+      callbackData: callbackDataForButton(messages[1], label),
       chatId: 42,
       callbackQueryId: `cb-stale-${label}`,
     }));
@@ -3410,6 +3705,7 @@ test("telegram adapter refuses stale thread-scoped post-turn buttons", async () 
 
   assert.deepEqual(calls, []);
   assert.deepEqual(callbacks, [
+    { callbackQueryId: "cb-chat-hub", text: "Hub opened." },
     { callbackQueryId: "cb-stale-Activity", text: "Thread changed. Run /status." },
     { callbackQueryId: "cb-stale-Pending", text: "Thread changed. Run /status." },
     { callbackQueryId: "cb-stale-Open Mac", text: "Thread changed. Run /status." },
@@ -3426,7 +3722,15 @@ test("telegram adapter refuses stale stop buttons after the active thread change
   };
   const stopCalls = [];
   const adapter = createTelegramAdapter({
-    botClient: fakeBot(messages, callbacks),
+    botClient: {
+      ...fakeBot(messages, callbacks),
+      sendMessage: async ({ chatId, text, replyMarkup }) => {
+        messages.push({ chatId: String(chatId), text, replyMarkup });
+        return { message_id: messages.length };
+      },
+      editMessageText: async () => true,
+      editMessageReplyMarkup: async () => true,
+    },
     actionRegistry: actions.registry,
     sessionState: {
       read: () => state,
@@ -3437,8 +3741,8 @@ test("telegram adapter refuses stale stop buttons after the active thread change
   });
 
   await adapter.sendServerRequest(JSON.stringify({
-    method: "turn/started",
-    params: { threadId: "thread-1", turnId: "turn-1" },
+    method: "codex/event/agent_message_content_delta",
+    params: { threadId: "thread-1", turnId: "turn-1", delta: "Working" },
   }));
   const stopCallback = callbackDataForButton(messages[0], "Stop");
   state.linkedChats[0].activeThreadId = "thread-2";
@@ -3538,11 +3842,7 @@ test("telegram adapter continues the active thread with explicit text only", asy
 
   assert.deepEqual(continued, [{ threadId: "thread-1", text: "Ship the Telegram slice" }]);
   assert.equal(messages[0].text, "Sent to the active Remodex thread.");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Stop");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][1].text, "Status");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[1][0].text, "Activity");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][0].text, "Menu");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[2][1].text, "Open Mac");
+  assert.equal(messages[0].replyMarkup, undefined);
   assert.equal(messages[1].text, "Usage: /continue <message>");
 });
 
@@ -3699,10 +3999,9 @@ test("telegram adapter treats ordinary chat text and captions as active-thread i
     { threadId: "thread-1", text: "Ship the Telegram slice" },
     { threadId: "thread-1", text: "Use this screenshot as context" },
   ]);
-  assert.equal(messages[0].text, "Sent to the active Remodex thread.");
-  assert.equal(messages[1].text, "Sent to the active Remodex thread.");
-  assert.match(messages[2].text, /^Remodex Telegram\nType a message to chat with Codex\./);
-  assert.match(messages[2].text, /Chat: .*\/continue <message>/);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].text, /^Remodex Telegram\nType a message to chat with Codex\./);
+  assert.match(messages[0].text, /Chat: .*\/continue <message>/);
 });
 
 test("telegram adapter sends Telegram photos and image documents as Codex image input", async () => {
@@ -3778,8 +4077,8 @@ test("telegram adapter sends Telegram photos and image documents as Codex image 
       ],
     },
   ]);
+  assert.equal(messages.length, 1);
   assert.equal(messages[0].text, "Sent to the active Remodex thread.");
-  assert.equal(messages[1].text, "Sent to the active Remodex thread.");
 });
 
 test("telegram adapter does not treat unknown slash captions with attachments as Codex input", async () => {
@@ -3877,7 +4176,7 @@ test("telegram adapter transcribes Telegram voice notes into active-thread input
     text: "please summarize the latest diff",
     attachments: [],
   }]);
-  assert.equal(messages[0].text, "Sent to the active Remodex thread.");
+  assert.equal(messages.length, 0);
 });
 
 test("telegram adapter combines voice transcripts with captions", async () => {
@@ -3912,7 +4211,7 @@ test("telegram adapter combines voice transcripts with captions", async () => {
     threadId: "thread-voice",
     text: "Context for this voice note\n\nVoice transcript: run the tests",
   }]);
-  assert.equal(messages[0].text, "Sent to the active Remodex thread.");
+  assert.equal(messages.length, 0);
 });
 
 test("telegram adapter creates a first active thread for explicit continue input", async () => {
@@ -3956,8 +4255,8 @@ test("telegram adapter creates a first active thread for explicit continue input
   }]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-fresh");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/fresh");
-  assert.equal(messages[0].text, "Created new active thread: Fresh chat\nSent to the active Remodex thread.");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Stop");
+  assert.equal(messages[0].text, "Started: Fresh chat");
+  assert.equal(messages[0].replyMarkup, undefined);
 });
 
 test("telegram adapter creates a first active thread for explicit plan input", async () => {
@@ -4006,7 +4305,7 @@ test("telegram adapter creates a first active thread for explicit plan input", a
     runtimePreferences: { model: "gpt-5.4-mini", reasoningEffort: "high" },
     collaborationMode: "plan",
   }]);
-  assert.equal(messages[0].text, "Created new active thread: Planning chat\nSent plan-mode request to the active Remodex thread.");
+  assert.equal(messages[0].text, "Started: Planning chat");
 });
 
 test("telegram adapter creates a first active thread for implicit chat input", async () => {
@@ -4050,8 +4349,8 @@ test("telegram adapter creates a first active thread for implicit chat input", a
   }]);
   assert.equal(state.linkedChats[0].activeThreadId, "thread-implicit");
   assert.equal(state.linkedChats[0].activeThreadCwd, "/tmp/telegram");
-  assert.equal(messages[0].text, "Created new active thread: Telegram chat\nSent to the active Remodex thread.");
-  assert.equal(messages[0].replyMarkup.inline_keyboard[0][0].text, "Stop");
+  assert.equal(messages[0].text, "Started: Telegram chat");
+  assert.equal(messages[0].replyMarkup, undefined);
 });
 
 test("telegram adapter replies when command handling fails", async () => {
@@ -4090,6 +4389,37 @@ test("telegram adapter labels implicit chat failures as continue failures", asyn
   await adapter.handleUpdate(messageUpdate({ text: "Ship it", chatId: 42 }));
 
   assert.deepEqual(messages, [{ chatId: "42", text: "Remodex could not complete /continue: Codex request timed out: turn/start" }]);
+});
+
+test("telegram adapter replies immediately when implicit chat input needs reauth", async () => {
+  const messages = [];
+  const continueCalls = [];
+  const adapter = createTelegramAdapter({
+    botClient: fakeBot(messages),
+    sessionState: {
+      read: () => ({ linkedChats: [{ chatId: "42", activeThreadId: "thread-1" }], pendingLinkCode: null }),
+    },
+    controlSurface: {
+      readAccountStatus: async () => ({
+        status: "expired",
+        needsReauth: true,
+        authMethod: "chatgpt",
+        tokenReady: false,
+      }),
+      continueThread: async () => {
+        continueCalls.push("continue");
+        return { success: true };
+      },
+    },
+  });
+
+  await adapter.handleUpdate(messageUpdate({ text: "Hey", chatId: 42 }));
+
+  assert.deepEqual(continueCalls, []);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].text, /login expired/i);
+  assert.match(messages[0].text, /Open Login/i);
+  assert.equal(messages[0].replyMarkup?.inline_keyboard?.[0]?.[0]?.text, "Open Login");
 });
 
 test("telegram adapter reports not-initialized commands as bridge still warming", async () => {
@@ -4171,7 +4501,7 @@ test("telegram adapter keeps Telegram conversational but blocks Codex controls w
   assert.doesNotMatch(messages[0].text, /Telegram Payments|Unlock routes/);
   assert.equal(callbackDataForButton(messages[0], "Help").startsWith("a:"), true);
   assert.equal(callbackDataForButton(messages[0], "Account").startsWith("a:"), true);
-  assert.match(messages[1].text, /Bridge: connected/);
+  assert.match(messages[1].text, /connected/);
   assert.match(messages[1].text, /Access: requires_pro/);
   assert.match(messages[2].text, /no in-chat checkout/i);
   assert.equal(callbackDataForButton(messages[2], "Upgrade").startsWith("a:"), true);
@@ -4344,7 +4674,7 @@ test("telegram adapter keeps processing a polling batch after one update handler
 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].chatId, "42");
-  assert.match(messages[0].text, /Bridge: connected/);
+  assert.match(messages[0].text, /connected/);
   assert.deepEqual(warnings, [
     "[remodex] Telegram update handling failed: simulated send failure",
   ]);
@@ -4448,12 +4778,8 @@ test("telegram adapter polling flow links chat and routes plain text to Codex fi
       },
     ]);
     assert.equal(messages[0].text, "Linked this Telegram chat to Remodex.");
-    assert.equal(messages[1].text, "Created new active thread: Telegram chat\nSent to the active Remodex thread.");
-    assert.equal(messages[2].text, "Sent to the active Remodex thread.");
-    assert.deepEqual(
-      callbackButtonsForMessage(messages[2]).map((button) => button.text),
-      ["Stop", "Status", "Activity", "Pending", "Menu", "Open Mac"]
-    );
+    assert.equal(messages[1].text, "Started: Telegram chat");
+    assert.equal(messages.length, 2);
   } finally {
     global.setTimeout = originalSetTimeout;
     fs.rmSync(rootDir, { recursive: true, force: true });

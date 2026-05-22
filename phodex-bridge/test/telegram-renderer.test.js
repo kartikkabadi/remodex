@@ -33,6 +33,8 @@ const {
   renderTelegramLinkHelp,
   renderTelegramLinkInstructions,
   renderTelegramLoginResult,
+  renderTelegramCodexInputBlocked,
+  shouldBlockTelegramCodexInput,
   renderTelegramLogoutConfirmation,
   renderTelegramLogoutResult,
   renderTelegramModelPreferences,
@@ -56,6 +58,7 @@ const {
   renderTelegramStashPopResult,
   renderTelegramStashResult,
   renderTelegramStatus,
+  renderTelegramQueueDetail,
   renderTelegramThreadActivity,
   renderTelegramThreadEvent,
   renderTelegramUnarchiveResult,
@@ -70,19 +73,50 @@ const {
 
 test("telegram renderer summarizes bridge status without leaking relay sessions", () => {
   const message = renderTelegramStatus({
+    macName: "studio-mac",
     bridgeStatus: {
       connectionStatus: "connected",
       codexLaunchState: { status: "ready" },
       bridgeVersion: "1.5.2-beta.0",
     },
     activeThread: { title: "Remodex Telegram plan", id: "thread-sensitive" },
+    gitStatus: { branch: "feat/telegram-bridge", isRepo: true },
+    contextWindow: {
+      usage: { tokensUsed: 12_400, tokenLimit: 128_000 },
+    },
+    runtimePreferences: {
+      runtimeModel: "gpt-5.5",
+      reasoningEffort: "medium",
+      runtimeAccessMode: "on-request",
+    },
+    queueState: { pendingApprovals: 1, runningTurn: true },
+    access: { allowed: true, status: "available" },
     relaySessionId: "session-sensitive-long-value",
   });
 
-  assert.match(message, /Bridge: connected \(1\.5\.2-beta\.0\)/);
-  assert.match(message, /Codex: ready/);
-  assert.match(message, /Active: Remodex Telegram plan/);
+  assert.match(message, /Remodex status/);
+  assert.match(message, /studio-mac · connected/);
+  assert.match(message, /Bridge 1\.5\.2-beta\.0 · Codex ready/);
+  assert.match(message, /Thread: Remodex Telegram plan/);
+  assert.match(message, /Branch: feat\/telegram-bridge/);
+  assert.match(message, /Context: 12,400 \/ 128,000 tokens \(10%\)/);
+  assert.match(message, /Model: GPT-5\.5 · Medium · Normal/);
+  assert.match(message, /Queue: turn running, 1 approval/);
   assert.doesNotMatch(message, /session-sensitive|thread-sensitive/);
+});
+
+test("telegram renderer lists steered input in queue detail", () => {
+  const message = renderTelegramQueueDetail({
+    queueState: { runningTurn: true, steerQueued: 1, pendingApprovals: 0 },
+    steerQueue: [{ text: "Also fix the tests" }],
+    activeThreadTitle: "Telegram polish",
+  });
+
+  assert.match(message, /Remodex queue/);
+  assert.match(message, /Thread: Telegram polish/);
+  assert.match(message, /turn running, 1 steered/);
+  assert.match(message, /Steered while running/);
+  assert.match(message, /Also fix the tests/);
 });
 
 test("telegram renderer accepts string Codex launch state from bridge status", () => {
@@ -93,7 +127,7 @@ test("telegram renderer accepts string Codex launch state from bridge status", (
     },
   });
 
-  assert.match(message, /Codex: connected/);
+  assert.match(message, /Codex connected/);
 });
 
 test("telegram renderer summarizes sanitized account status", () => {
@@ -543,6 +577,22 @@ test("telegram renderer summarizes login and rename results", () => {
   assert.equal(renderTelegramLoginResult({ success: true }), "Opened ChatGPT sign-in on the Mac.");
   assert.equal(renderTelegramLoginResult({ success: false }), "Could not open ChatGPT sign-in on the Mac.");
   assert.equal(
+    shouldBlockTelegramCodexInput({ status: "expired", needsReauth: true, tokenReady: false }),
+    true,
+  );
+  assert.equal(
+    shouldBlockTelegramCodexInput({ status: "expired", needsReauth: true, tokenReady: true }),
+    false,
+  );
+  assert.equal(
+    shouldBlockTelegramCodexInput({ status: "authenticated", tokenReady: true }),
+    false,
+  );
+  assert.match(
+    renderTelegramCodexInputBlocked({ status: "expired", needsReauth: true }),
+    /login expired/i,
+  );
+  assert.equal(
     renderTelegramRenameResult({ title: "Ship Telegram controls" }),
     "Renamed active thread: Ship Telegram controls"
   );
@@ -778,12 +828,19 @@ test("telegram renderer keeps approval requests compact but actionable", () => {
       reason: "Verify the Telegram bridge before shipping",
       cwd: "/private/project",
     },
+    context: {
+      threadTitle: "Telegram bridge",
+      threadId: "thread-1",
+      branch: "feat/telegram-bridge",
+    },
   });
 
-  assert.match(message, /Approval requested: command/);
-  assert.match(message, /Reason: Verify the Telegram bridge/);
+  assert.match(message, /Approval needed: command/);
+  assert.match(message, /Thread: Telegram bridge/);
+  assert.match(message, /Branch: feat\/telegram-bridge/);
+  assert.match(message, /Why: Verify the Telegram bridge/);
   assert.match(message, /Command: npm test/);
-  assert.match(message, /Review carefully/);
+  assert.match(message, /lock screen/);
   assert.doesNotMatch(message, /private\/project/);
 });
 
@@ -841,7 +898,7 @@ test("telegram renderer tells chats how to answer multi-question user input", ()
 test("telegram renderer keeps active-thread events compact", () => {
   assert.equal(
     renderTelegramThreadEvent({ method: "turn/started", params: { threadId: "thread-1" } }),
-    "Remodex started working on the active thread."
+    ""
   );
   assert.equal(
     renderTelegramThreadEvent({ method: "turn/completed", params: { threadId: "thread-1" } }),
@@ -852,7 +909,7 @@ test("telegram renderer keeps active-thread events compact", () => {
       method: "codex/event/agent_message",
       params: { message: "Done without leaking relay session ids." },
     }),
-    "Assistant:\nDone without leaking relay session ids."
+    "Done without leaking relay session ids."
   );
 });
 

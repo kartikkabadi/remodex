@@ -180,10 +180,10 @@ function createTelegramKeyboards({
     if (linkedChat?.activeThreadId) {
       rows.push([
         makeActionButton(chatId, "Stop", "command.stop", { threadId: linkedChat.activeThreadId }),
-        makeActionButton(chatId, "Pending", "command.pending", { threadId: linkedChat.activeThreadId }),
+        makeActionButton(chatId, "Queue", "command.queue", { threadId: linkedChat.activeThreadId }),
       ]);
       rows.push([
-        makeActionButton(chatId, "Plan", "command.help", { topic: "plan" }),
+        makeActionButton(chatId, "Pending", "command.pending", { threadId: linkedChat.activeThreadId }),
         makeActionButton(chatId, "Activity", "command.activity", { threadId: linkedChat.activeThreadId }),
       ]);
       rows.push([

@@ -45,5 +45,9 @@ $TMP_PLACEHOLDER
 # Claude project config (local only)
 .claude/
 
+# Cursor / agent scratch (local only)
+.cursor/
+.sisyphus/
+
 # VS Code
 .vscode/

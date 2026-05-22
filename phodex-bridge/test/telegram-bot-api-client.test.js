@@ -31,6 +31,29 @@ test("telegram bot api client sends messages without exposing the token in error
   assert.deepEqual(JSON.parse(requests[0].options.body), { chat_id: "42", text: "Bridge: connected" });
 });
 
+test("telegram bot api client reads and deletes webhooks for long polling", async () => {
+  const requests = [];
+  const client = createTelegramBotApiClient({
+    botToken: "123456:secret-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/deleteWebhook")) {
+        return jsonResponse({ ok: true, result: true });
+      }
+      return jsonResponse({ ok: true, result: { url: "https://example.com/hook", has_custom_certificate: false } });
+    },
+  });
+
+  const info = await client.getWebhookInfo();
+  const cleared = await client.deleteWebhook({ dropPendingUpdates: false });
+
+  assert.deepEqual(info, { url: "https://example.com/hook", has_custom_certificate: false });
+  assert.equal(cleared, true);
+  assert.equal(requests[0].url, "https://api.telegram.org/bot123456:secret-token/getWebhookInfo");
+  assert.equal(requests[1].url, "https://api.telegram.org/bot123456:secret-token/deleteWebhook");
+  assert.deepEqual(JSON.parse(requests[1].options.body), { drop_pending_updates: false });
+});
+
 test("telegram bot api client registers the command menu", async () => {
   const requests = [];
   const client = createTelegramBotApiClient({
@@ -64,6 +87,42 @@ test("telegram bot api client reads the bot identity", async () => {
   assert.deepEqual(result, { id: 123456, username: "RemodexBot" });
   assert.equal(requests[0].url, "https://api.telegram.org/bot123456:secret-token/getMe");
   assert.deepEqual(JSON.parse(requests[0].options.body), {});
+});
+
+test("telegram bot api client sends typing action and edits reply markup", async () => {
+  const requests = [];
+  const client = createTelegramBotApiClient({
+    botToken: "123456:secret-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return jsonResponse({ ok: true, result: true });
+    },
+  });
+
+  await client.sendChatAction({ chatId: "42", action: "typing" });
+  await client.editMessageReplyMarkup({ chatId: "42", messageId: 7 });
+
+  assert.equal(requests[0].url.endsWith("/sendChatAction"), true);
+  assert.deepEqual(JSON.parse(requests[0].options.body), { chat_id: "42", action: "typing" });
+  assert.equal(requests[1].url.endsWith("/editMessageReplyMarkup"), true);
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    chat_id: "42",
+    message_id: 7,
+    reply_markup: { inline_keyboard: [] },
+  });
+});
+
+test("telegram bot api client ignores message-not-modified edit failures", async () => {
+  const client = createTelegramBotApiClient({
+    botToken: "123456:secret-token",
+    fetchImpl: async () => jsonResponse({
+      ok: false,
+      description: "Bad Request: MESSAGE_NOT_MODIFIED",
+    }, { status: 400 }),
+  });
+
+  const result = await client.editMessageText({ chatId: "42", messageId: 7, text: "same" });
+  assert.equal(result, null);
 });
 
 test("telegram bot api client bounds message and edit text", async () => {

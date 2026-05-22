@@ -8,6 +8,7 @@ const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const TELEGRAM_CALLBACK_ANSWER_TEXT_MAX_CHARS = 200;
 const TELEGRAM_MESSAGE_TEXT_MAX_CHARS = 4096;
 const TELEGRAM_TRUNCATION_SUFFIX = "\n[truncated by Remodex Telegram]";
+const TELEGRAM_EMPTY_REPLY_MARKUP = Object.freeze({ inline_keyboard: [] });
 
 function createTelegramBotApiClient({
   botToken,
@@ -42,9 +43,26 @@ function createTelegramBotApiClient({
     return body.result;
   }
 
+  async function callIgnoringNotModified(method, payload = {}) {
+    try {
+      return await call(method, payload);
+    } catch (error) {
+      if (isTelegramMessageNotModifiedError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   return {
     getMe() {
       return call("getMe");
+    },
+    getWebhookInfo() {
+      return call("getWebhookInfo");
+    },
+    deleteWebhook({ dropPendingUpdates = false } = {}) {
+      return call("deleteWebhook", { drop_pending_updates: dropPendingUpdates === true });
     },
     getUpdates({ offset = 0, timeout = 20, limit = 100 } = {}) {
       return call("getUpdates", { offset, timeout, limit });
@@ -88,6 +106,12 @@ function createTelegramBotApiClient({
       }
       return call("sendMessage", payload);
     },
+    sendChatAction({ chatId, action = "typing" }) {
+      return call("sendChatAction", {
+        chat_id: normalizeRequiredString(chatId, "Telegram chat id is required."),
+        action: normalizeRequiredString(action, "Telegram chat action is required."),
+      });
+    },
     editMessageText({ chatId, messageId, text, replyMarkup }) {
       const payload = {
         chat_id: normalizeRequiredString(chatId, "Telegram chat id is required."),
@@ -97,7 +121,15 @@ function createTelegramBotApiClient({
       if (replyMarkup) {
         payload.reply_markup = replyMarkup;
       }
-      return call("editMessageText", payload);
+      return callIgnoringNotModified("editMessageText", payload);
+    },
+    editMessageReplyMarkup({ chatId, messageId, replyMarkup = TELEGRAM_EMPTY_REPLY_MARKUP }) {
+      const payload = {
+        chat_id: normalizeRequiredString(chatId, "Telegram chat id is required."),
+        message_id: messageId,
+        reply_markup: replyMarkup || TELEGRAM_EMPTY_REPLY_MARKUP,
+      };
+      return callIgnoringNotModified("editMessageReplyMarkup", payload);
     },
     answerCallbackQuery({ callbackQueryId, text = "" }) {
       return call("answerCallbackQuery", {
@@ -109,6 +141,10 @@ function createTelegramBotApiClient({
       return call("setMyCommands", { commands });
     },
   };
+}
+
+function isTelegramMessageNotModifiedError(error) {
+  return /MESSAGE_NOT_MODIFIED/i.test(String(error?.message || ""));
 }
 
 function sanitizeTelegramErrorMessage(message) {
@@ -156,7 +192,9 @@ function truncateTelegramMessageText(value) {
 
 module.exports = {
   TELEGRAM_CALLBACK_ANSWER_TEXT_MAX_CHARS,
+  TELEGRAM_EMPTY_REPLY_MARKUP,
   TELEGRAM_MESSAGE_TEXT_MAX_CHARS,
   TELEGRAM_TRUNCATION_SUFFIX,
   createTelegramBotApiClient,
+  isTelegramMessageNotModifiedError,
 };
