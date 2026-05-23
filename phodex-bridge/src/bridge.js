@@ -69,6 +69,8 @@ const {
   readThreadTurnsListPageFromSessionJsonl,
 } = require("./session-jsonl-history");
 const { buildApplyPatchFileChangeItem } = require("./apply-patch-changes");
+const { createAgentRuntimeRegistry } = require("./agent-runtime-registry");
+const { createThreadAgentStateStore } = require("./thread-agent-state");
 
 const execFileAsync = promisify(execFile);
 const RELAY_WATCHDOG_PING_INTERVAL_MS = 10_000;
@@ -242,6 +244,13 @@ function startBridge({
     env: process.env,
     appPath: config.codexAppPath,
     logPrefix: "[remodex]",
+  });
+  const agentRuntimeRegistry = createAgentRuntimeRegistry({
+    threadAgentState: createThreadAgentStateStore(),
+    logPrefix: "[remodex]",
+  });
+  void agentRuntimeRegistry.refreshInitializeCache().catch((error) => {
+    console.warn(`[remodex] Failed to refresh agent runtime status: ${error?.message || error}`);
   });
   const voiceHandler = createVoiceHandler({
     sendCodexRequest,
@@ -503,12 +512,22 @@ function startBridge({
       return;
     }
     updatePendingAuthLoginFromCodexMessage(message);
+    const parsedOutbound = safeParseJSON(message);
+    const isForwardedInitialize = parsedOutbound?.id != null
+      && forwardedInitializeRequestIds.has(String(parsedOutbound.id));
     trackCodexHandshakeState(message);
     desktopRefresher.handleOutbound(message);
     pushNotificationTracker.handleOutbound(message);
+    agentRuntimeRegistry.observeOutboundMessage(message);
     rememberThreadFromMessage("codex", message);
+    let outboundMessage = message;
+    if (isForwardedInitialize && parsedOutbound?.result != null) {
+      outboundMessage = agentRuntimeRegistry.enrichOutboundResponse(outboundMessage, {
+        method: "initialize",
+      });
+    }
     secureTransport.queueOutboundApplicationMessage(
-      sanitizeRelayBoundCodexMessage(message),
+      sanitizeRelayBoundCodexMessage(outboundMessage),
       sendRelayWireMessage
     );
   });
@@ -590,6 +609,22 @@ function startBridge({
       return;
     }
     if (handleBridgeManagedThreadTurnsListRequest(rawMessage, sendApplicationResponse)) {
+      return;
+    }
+    if (agentRuntimeRegistry.handleInboundRequest(rawMessage, sendApplicationResponse)) {
+      return;
+    }
+    const threadStartValidation = agentRuntimeRegistry.validateThreadStartRequest(rawMessage);
+    if (!threadStartValidation.allowed) {
+      const parsedRequest = safeParseJSON(rawMessage);
+      sendApplicationResponse(createJsonRpcErrorResponse(
+        parsedRequest?.id,
+        {
+          message: threadStartValidation.message,
+          errorCode: threadStartValidation.errorCode,
+        },
+        threadStartValidation.errorCode
+      ));
       return;
     }
     const codexRequest = disableUnsupportedReasoningSummaryForTurnStart(rawMessage);
@@ -940,7 +975,11 @@ function startBridge({
     }
     relaySanitizedResponseMethodsById.delete(String(responseId));
 
-    return sanitizeThreadHistoryImagesForRelay(normalizedMessage, trackedRequest.method, trackedRequest);
+    const enrichedMessage = agentRuntimeRegistry.enrichOutboundResponse(
+      normalizedMessage,
+      trackedRequest
+    );
+    return sanitizeThreadHistoryImagesForRelay(enrichedMessage, trackedRequest.method, trackedRequest);
   }
 
   function updatePendingAuthLoginFromCodexMessage(rawMessage) {
@@ -1121,9 +1160,7 @@ function startBridge({
 
       sendResponse(JSON.stringify({
         id: parsed.id,
-        result: {
-          bridgeManaged: true,
-        },
+        result: agentRuntimeRegistry.buildWarmInitializeResult(),
       }));
       return true;
     }
