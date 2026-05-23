@@ -50,6 +50,7 @@ We want OpenCode as the first second agent while keeping Codex as the default. i
 
 - Handoff: `remodex-opencode-handoff-2026-05-22.md`
 - Master plan: [Docs/plans/multi-agent-runtime.md](../plans/multi-agent-runtime.md)
-- Local PRD: `.scratch/opencode-agent-runtime/PRD.md`
+- Parent PRD issue: https://github.com/kartikkabadi/remodex/issues/16
+- Implementation blueprint: [Docs/plans/multi-agent-runtime-implementation.md](../plans/multi-agent-runtime-implementation.md)
 - OpenCode server API: https://opencode.ai/docs/server
 - Upstream context: Emanuele-web04/remodex PR #141 (compatibility only)

@@ -3,6 +3,7 @@
 **Status:** Active (2026-05-23)  
 **Branch:** `feat/multi-agent-runtime` on [kartikkabadi/remodex](https://github.com/kartikkabadi/remodex) from `origin/main`  
 **Parent issue:** https://github.com/kartikkabadi/remodex/issues/16  
+**Implementation blueprint:** [multi-agent-runtime-implementation.md](multi-agent-runtime-implementation.md)
 **Domain language:** [CONTEXT.md](../../CONTEXT.md)  
 **Architecture:** [ADR 002](../adr/002-agent-runtime-and-canonical-events.md), [ADR 003](../adr/003-cursor-agent-runtime.md)  
 **Agent config:** [docs/agents/](../../docs/agents/)
