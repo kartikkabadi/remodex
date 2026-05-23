@@ -2,7 +2,7 @@
 
 **Status:** Active (2026-05-23)  
 **Branch:** `feat/multi-agent-runtime` on [kartikkabadi/remodex](https://github.com/kartikkabadi/remodex) from `origin/main`  
-**Parent issue:** https://github.com/kartikkabadi/remodex/issues/PARENT (replace after publish)  
+**Parent issue:** https://github.com/kartikkabadi/remodex/issues/16  
 **Domain language:** [CONTEXT.md](../../CONTEXT.md)  
 **Architecture:** [ADR 002](../adr/002-agent-runtime-and-canonical-events.md), [ADR 003](../adr/003-cursor-agent-runtime.md)  
 **Agent config:** [docs/agents/](../../docs/agents/)
@@ -50,19 +50,20 @@ Do not merge upstream `modelProvider` router branches wholesale. Mine patterns; 
 
 | Slice | GitHub issue |
 |-------|----------------|
-| Wave 0 — hygiene | TBD |
-| 01 — bridge registry | TBD |
-| 03 — canonical + Codex adapter | TBD |
-| 02 — OpenCode spawn | TBD |
-| 04 — OpenCode adapter | TBD |
-| 05 — iOS agent UX | TBD |
-| 06 — iOS RemodexEventAdapter | TBD |
-| 07 — OpenCode E2E iPhone | TBD |
-| 10 — Cursor ACP | TBD |
-| 11 — Cursor canonical | TBD |
-| 07b — Cursor E2E iPhone | TBD |
-| 12 — RemodexPad | TBD |
-| 09 — upstream PR prep | TBD |
+| **Epic** | [#16](https://github.com/kartikkabadi/remodex/issues/16) |
+| Wave 0 — hygiene | [#17](https://github.com/kartikkabadi/remodex/issues/17) |
+| 01 — bridge registry | [#18](https://github.com/kartikkabadi/remodex/issues/18) |
+| 03 — canonical + Codex adapter | [#19](https://github.com/kartikkabadi/remodex/issues/19) |
+| 02 — OpenCode spawn | [#20](https://github.com/kartikkabadi/remodex/issues/20) |
+| 04 — OpenCode adapter | [#22](https://github.com/kartikkabadi/remodex/issues/22) |
+| 05 — iOS agent UX | [#21](https://github.com/kartikkabadi/remodex/issues/21) |
+| 06 — iOS RemodexEventAdapter | [#23](https://github.com/kartikkabadi/remodex/issues/23) |
+| 07 — OpenCode E2E iPhone | [#24](https://github.com/kartikkabadi/remodex/issues/24) |
+| 10 — Cursor ACP | [#25](https://github.com/kartikkabadi/remodex/issues/25) |
+| 11 — Cursor canonical | [#26](https://github.com/kartikkabadi/remodex/issues/26) |
+| 07b — Cursor E2E iPhone | [#27](https://github.com/kartikkabadi/remodex/issues/27) |
+| 12 — RemodexPad | [#28](https://github.com/kartikkabadi/remodex/issues/28) |
+| 09 — upstream PR prep | [#29](https://github.com/kartikkabadi/remodex/issues/29) |
 
 ---
 
