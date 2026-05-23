@@ -34,6 +34,10 @@ Do not merge upstream `modelProvider` router branches wholesale. Mine patterns; 
 | Delivery | Three stacked upstream PRs: PR1 OpenCode → PR2 Cursor → PR3 iPad |
 | QA | PR1/PR2 = iPhone (`CodexMobile`); PR3 = iPad (`RemodexPad`) |
 | Telegram / Grok | Out of multi-agent V1 |
+| Merge gate | `#17` CI must run real bridge + relay tests before merging `#18+` |
+| Initialize contract | Warm reconnect returns full runtime payload, not `{ bridgeManaged: true }` only |
+| iOS naming | **Agent Runtime** (transport) vs existing **Codex model runtime** types stay separate |
+| Thread sync | Bridge `thread-agent-state.json` is source of truth; `thread/list` projects agent fields |
 
 ---
 

@@ -1,6 +1,6 @@
 # Multi-agent runtime implementation blueprint
 
-**Status:** Planning complete for implementation handoff (2026-05-23)  
+**Status:** Planning complete for implementation handoff (2026-05-23; contracts patched 2026-05-23)  
 **Branch:** `feat/multi-agent-runtime`  
 **Issue tracker:** [kartikkabadi/remodex #16-#29](https://github.com/kartikkabadi/remodex/issues/16)  
 **Primary decisions:** [ADR 002](../adr/002-agent-runtime-and-canonical-events.md), [ADR 003](../adr/003-cursor-agent-runtime.md)
@@ -62,6 +62,17 @@ Bridge runtime state should live under `~/.remodex/thread-agent-state.json`:
 
 Legacy threads with no runtime metadata backfill as `codex` with `agentSessionId = thread.id`.
 
+### Thread list sync (bridge authority)
+
+Bridge file `~/.remodex/thread-agent-state.json` and iOS `CodexThread` fields must stay aligned:
+
+1. **Bridge is source of truth** for `agentRuntime`, `agentSessionId`, and OpenCode agent names.
+2. **`thread/list` must project runtime fields** from `thread-agent-state.json` when upstream Codex payloads omit them.
+3. **iOS merge precedence:** in `mergedThread()`, server/agent fields always win; local state may only fill display-only gaps (title, preview). Never preserve stale local `agentRuntime` over server values.
+4. **Runtime lock:** after the first successful `thread/start`, `agentRuntime` is immutable. Bridge rejects runtime-change RPCs; iOS disables the Agent pill.
+5. **Legacy backfill:** threads without metadata become `agentRuntime: "codex"` and `agentSessionId = thread.id` on both bridge and iOS.
+6. **Reconnect:** a fresh `thread/list` overwrites local agent identity; do not keep optimistic pre-start composer runtime after sync.
+
 ## Bridge architecture
 
 ### New modules
@@ -113,6 +124,71 @@ All statuses are sanitized and safe for iOS:
 | `error` | Last attempt failed unexpectedly | Redacted message and stable code |
 
 OpenCode discovery uses `opencode --version` and server handshake. Cursor discovery checks an explicit env/config override, `/Users/user/.local/bin/agent`, `agent`, `cursor-agent`, the app-bundled `cursor agent` command, and any documented Cursor.app embedded candidates; only if all verified candidates fail should status become `not_installed`.
+
+### Initialize response schema (#18 contract)
+
+Both **cold start** and **warm reconnect** must return the same bridge-owned runtime payload. Today warm reconnect returns only `{ bridgeManaged: true }`; that is insufficient for iOS gating.
+
+```json
+{
+  "bridgeManaged": true,
+  "defaultAgentRuntime": "codex",
+  "agentRuntimes": [
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "status": "ready",
+      "capabilities": {
+        "queue": true,
+        "steer": true,
+        "photos": true,
+        "planMode": true,
+        "permissions": true,
+        "desktopHandoff": true,
+        "subagents": true
+      }
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "status": "not_installed | needs_auth | ready | starting | degraded | error",
+      "statusMessage": "optional user-safe hint",
+      "capabilities": {
+        "queue": false,
+        "steer": false,
+        "photos": false,
+        "planMode": true,
+        "permissions": true,
+        "desktopHandoff": false,
+        "subagents": false
+      },
+      "defaultBuildAgentName": "build",
+      "defaultPlanAgentName": "plan"
+    },
+    {
+      "id": "cursor",
+      "displayName": "Cursor",
+      "status": "not_installed",
+      "capabilities": {
+        "queue": false,
+        "steer": false,
+        "photos": false,
+        "planMode": true,
+        "permissions": true,
+        "desktopHandoff": false,
+        "subagents": false
+      }
+    }
+  ]
+}
+```
+
+Rules:
+
+- iOS parses this once in `initializeSession()` and stores it on `CodexService`.
+- **Capabilities are bridge facts.** iOS applies `bridgeCapabilities ∩ productPolicy` (for example PR2 hides Cursor queue/steer/photos even if a future bridge reports them).
+- Status changes mid-session may arrive via a bridge push notification or on the next reconnect initialize; iOS must not invent a local capability matrix.
+- Telegram and other Codex-only secondary clients stay on the existing Codex initialize path; do not require canonical events on those surfaces.
 
 ## Canonical event schema
 
@@ -172,6 +248,44 @@ Add runtime identity to `CodexThread`:
 
 `CodexThreadRuntimeOverride` currently means model/reasoning/service tier. Do not overload that type. Add a separate runtime-selection state or rename the current type before extending it. Fork/continue code in `CodexService+ThreadFork.swift` and merge helpers in `CodexService+Helpers.swift` must preserve runtime fields.
 
+### iOS naming (Agent Runtime vs Codex model runtime)
+
+The word **runtime** already means Codex model/reasoning/speed in iOS (`TurnComposerRuntimeState`, `CodexService+RuntimeConfig`, `SettingsRuntimeDefaultsCard`). New Agent Runtime work must use distinct names:
+
+| Concept | Swift / code name | UI label |
+|---------|-------------------|----------|
+| Agent Runtime (transport) | `AgentRuntime` enum, `agentRuntime` field | **Agent** pill |
+| Codex model / reasoning / tier | keep `TurnComposerRuntimeState`, `CodexThreadRuntimeOverride` | rename settings card to **Codex defaults** (or split cards) |
+| OpenCode persona inside OpenCode runtime | `opencodeBuildAgentName`, `opencodePlanAgentName` | submenu under Agent when OpenCode selected |
+
+Do not extend `CodexThreadRuntimeOverride` with `agentRuntime`. Do not route OpenCode/Cursor through `modelProvider`.
+
+### Session identity (`sessionId` trap)
+
+`CodexThread.sessionId` currently aliases `id` for Codex rollout semantics. That is correct for Codex only.
+
+- Add explicit `agentSessionId: String?` on `CodexThread`.
+- Bridge registry routes turns via `(agentRuntime, agentSessionId)`, not `thread.id` alone.
+- OpenCode and Cursor must never reuse `sessionId` for runtime session identity.
+- Document on `sessionId`: Codex rollout alias only; use `agentSessionId` for multi-runtime routing.
+- Audit resume/stop/history paths so they go through the registry, not `CodexThread.sessionId`.
+
+Three different "session" concepts stay separate: relay pairing session, Remodex thread id, runtime `agentSessionId`.
+
+### Outbound RPC params (#21 contract)
+
+`thread/start` and `thread/resume` from iOS must include:
+
+```json
+{
+  "agentRuntime": "codex | opencode | cursor",
+  "opencodeBuildAgentName": "build",
+  "opencodePlanAgentName": "plan"
+}
+```
+
+OpenCode agent names apply only when `agentRuntime === "opencode"`. After the first successful start, runtime fields are locked and omitted from change attempts.
+
 ### RemodexEventAdapter
 
 Place `RemodexEventAdapter` at `CodexService+Incoming.handleIncomingRPCMessage`, before state mutation. It should:
@@ -206,19 +320,47 @@ Runtime capability matrix:
 
 Readiness gating belongs in `TurnViewModel` send validation and the composer host state, not only in button styling. For a not-ready runtime, keep send disabled and show a short inline runtime status; do not silently fall back to Codex.
 
+### Capability gating (#21 contract)
+
+Introduce one `AgentRuntimeCapabilities` (or equivalent) on `CodexService`, parsed from initialize and keyed by selected `agentRuntime`. Effective UI capability = `bridgeCapabilities ∩ productPolicy`.
+
+Wire the same object everywhere:
+
+| Surface | Today | Required behavior |
+|---------|-------|-------------------|
+| `TurnComposerSendAvailability` / `buildValidatedPendingSend()` | gates on `isConnected` only | also require runtime `ready` and inline status when not |
+| `ComposerBottomBar` attachment menu | photos/camera always visible | hide when `!capabilities.photos` |
+| `TurnComposerHostView` steer | `isThreadRunning && activeTurnID != nil` | also require `capabilities.steer` |
+| Plan mode toggle | silently dropped at send when unsupported | hide toggle when `!capabilities.planMode` |
+| Queue controls | always available for Codex | hide when `!capabilities.queue` |
+| Subagent rows / desktop handoff | Codex paths | hide when capability false |
+
+Sidebar/thread rows: show **Agent Runtime** badge for non-Codex threads; do not show misleading `modelDisplayLabel` / `modelProvider` as the primary badge.
+
+### Big-bang cutover rollback note (#19 + #23)
+
+PR1 ships bridge canonical output and iOS `RemodexEventAdapter` together. That is intentional. Document a rollback strategy before implementation:
+
+- Prefer a bridge-side feature flag or build-time switch to emit raw Codex events for emergency rollback during development; production PR1 remains big-bang.
+- Adapter tests must cover permission mapping (`remodex/request/permission` → existing approval queue), desktop mirror guardrails, and late reasoning merge before removing raw production parsers.
+
 ## Issue-by-issue build order
 
-1. **#17 Wave 0 — bridge hygiene and CI tests**
+1. **#17 Wave 0 — bridge hygiene and CI tests (merge gate)**
    - Update `.github/workflows/bridge-check.yml` to run `phodex-bridge npm test` and relay tests when present.
    - Add `private` and Node engine floor to `phodex-bridge/package.json`.
    - Add baseline tests for `session-state`, `workspace-checkpoints`, and apply-patch helpers.
    - Verify relay server logs redact live relay `sessionId`; keep QR/debug pairing surfaces out of that criterion because they intentionally display pairing data.
+   - Adjudicate tracked root JS artifacts (`main-Bw7nouYH.js`, `deeplinks-D8FzxbSB.js`, `preload.js`): remove, relocate, or document.
+   - **Merge gate:** do not merge `#18` or later bridge refactors until `#17` CI runs real tests. Local-only green (368 bridge + 39 relay on 2026-05-23) is not sufficient protection.
 
 2. **#18 Bridge agent registry and transports**
    - Introduce registry, runtime capabilities, and thread runtime state.
    - Wrap Codex as the first runtime adapter with no behavior change.
    - Add OpenCode status stub and process-failure isolation.
-   - `initialize` returns `defaultAgentRuntime`, runtime capabilities, OpenCode defaults, and sanitized runtime statuses.
+   - `initialize` returns the schema above on both cold start and warm reconnect.
+   - Project runtime fields into `thread/list` from `thread-agent-state.json`.
+   - Enforce runtime lock after first successful `thread/start`.
 
 3. **#19 Canonical schema and Codex adapter**
    - Add canonical event builders and Codex adapter fixtures.
@@ -233,9 +375,12 @@ Readiness gating belongs in `TurnViewModel` send validation and the composer hos
 
 5. **#21 iOS Agent UX and send gating**
    - Add runtime fields to `CodexThread`; add settings default; add composer/sidebar runtime badges.
-   - Persist OpenCode build/plan agent names.
-   - Implement readiness gating and runtime capability hiding.
+   - Use `AgentRuntime` naming; do not overload existing Codex model "runtime" types.
+   - Persist OpenCode build/plan agent names; send them on `thread/start` / `thread/resume`.
+   - Implement capability gating (hide + send validation + inline status) from initialize payload.
+   - Lock Agent pill after first successful start; merge/server sync rules above.
    - Keep Cursor hidden until PR2.
+   - UI scaffolding may land before `#22`; iPhone E2E (`#24`) remains blocked until `#22` + `#23`.
 
 6. **#22 OpenCode adapter and turn mapping**
    - Implement `thread/start`/`thread/resume` to OpenCode session creation.
