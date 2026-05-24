@@ -663,13 +663,19 @@ private struct ComposerPreviewContent: View {
                 selectedReasoningEffort: "high",
                 reasoningMenuDisabled: false,
                 selectedServiceTier: .fast,
-                supportsFastMode: true
+                supportsFastMode: true,
+                selectedAgentRuntimeID: "codex",
+                agentRuntimeOptions: [.codex],
+                agentRuntimeCapabilities: .codex,
+                isAgentRuntimeLocked: false
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },
+                selectProvider: { _ in },
                 selectAutomaticReasoning: {},
                 selectReasoning: { _ in },
-                selectServiceTier: { _ in }
+                selectServiceTier: { _ in },
+                selectAgentRuntime: { _ in }
             ),
             voiceButtonPresentation: TurnComposerVoiceButtonPresentation(
                 systemImageName: "mic",

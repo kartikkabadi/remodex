@@ -8,6 +8,9 @@ const {
   buildRuntimeListEntry,
   getAgentRuntimeCapabilities,
 } = require("./agent-runtime-capabilities");
+const {
+  createCodexModelCatalog,
+} = require("./agent-runtime-model-catalog");
 
 function createCodexRuntimeAdapter({
   id = "codex",
@@ -24,10 +27,21 @@ function createCodexRuntimeAdapter({
         id,
         status: "ready",
         capabilities: getAgentRuntimeCapabilities(id),
+        modelCatalog: createCodexModelCatalog(),
       });
     },
     shouldHandleRuntime(agentRuntime) {
       return agentRuntime === id;
+    },
+    async handleRuntimeRequest({
+      rawMessage,
+      sendToRuntime,
+    } = {}) {
+      if (typeof sendToRuntime !== "function") {
+        throw new Error("Codex runtime adapter requires a sendToRuntime callback.");
+      }
+      sendToRuntime(rawMessage);
+      return { forwarded: true };
     },
   };
 }

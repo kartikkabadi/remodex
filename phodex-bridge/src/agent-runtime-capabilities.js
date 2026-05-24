@@ -70,6 +70,7 @@ function buildRuntimeListEntry({
   status,
   statusMessage = "",
   capabilities = getAgentRuntimeCapabilities(id),
+  modelCatalog = null,
 }) {
   const entry = {
     id,
@@ -80,6 +81,10 @@ function buildRuntimeListEntry({
 
   if (statusMessage) {
     entry.statusMessage = statusMessage;
+  }
+
+  if (modelCatalog && typeof modelCatalog === "object") {
+    entry.modelCatalog = modelCatalog;
   }
 
   if (id === "opencode") {

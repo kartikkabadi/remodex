@@ -125,6 +125,24 @@ All statuses are sanitized and safe for iOS:
 
 OpenCode discovery uses `opencode --version` and server handshake. Cursor discovery checks an explicit env/config override, `/Users/user/.local/bin/agent`, `agent`, `cursor-agent`, the app-bundled `cursor agent` command, and any documented Cursor.app embedded candidates; only if all verified candidates fail should status become `not_installed`.
 
+### Runtime Model Discovery contract
+
+Runtime model/provider choice is a separate runtime-owned concern. Do not hardcode OpenCode models in iOS, and do not reuse `modelProvider` for Agent Runtime routing.
+
+Each Agent Runtime adapter owns a model catalog interface with:
+
+- provider groups when the runtime exposes provider identity
+- model entries with display labels, native provider id, native model id, defaults, featured hints, and unavailable/status hints
+- a selected model id that can be validated before dispatch
+- a native dispatch payload shape private to that adapter
+- honest unavailable/managed status when the runtime cannot support Remodex-controlled model selection
+
+OpenCode must discover provider/model choices from the local OpenCode setup (for example verified `opencode models` output or stable server/config metadata for the installed version). Hardcoded DeepSeek/Qwen entries are allowed only as last-resort recovery hints, not as the normal catalog.
+
+The Native Remodex App should render provider and model as separate controls for provider-grouped catalogs. Codex keeps its existing flat model/reasoning/service-tier behavior. Cursor stays honest until ACP model dispatch is verified.
+
+Running Turn state must remain active after prompt acceptance until a terminal canonical completion/failure/cancel event arrives. OpenCode response gaps must not clear thinking state or flip the composer from Stop back to Send.
+
 ### Initialize response schema (#18 contract)
 
 Both **cold start** and **warm reconnect** must return the same bridge-owned runtime payload. Today warm reconnect returns only `{ bridgeManaged: true }`; that is insufficient for iOS gating.

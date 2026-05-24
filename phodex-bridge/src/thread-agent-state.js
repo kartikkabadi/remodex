@@ -152,6 +152,29 @@ function createThreadAgentStateStore(options = {}) {
     });
   }
 
+  function inherit(fromThreadId, toThreadId, { agentSessionId = "" } = {}) {
+    const normalizedSourceId = normalizeNonEmptyString(fromThreadId);
+    const normalizedDestinationId = normalizeNonEmptyString(toThreadId);
+    if (!normalizedSourceId || !normalizedDestinationId || normalizedSourceId === normalizedDestinationId) {
+      return null;
+    }
+
+    const source = get(normalizedSourceId);
+    if (!source) {
+      return null;
+    }
+
+    return upsert(normalizedDestinationId, {
+      agentRuntime: source.agentRuntime,
+      agentSessionId: normalizeNonEmptyString(agentSessionId) || normalizedDestinationId,
+      cwd: source.cwd,
+      opencodeBuildAgentName: source.opencodeBuildAgentName,
+      opencodePlanAgentName: source.opencodePlanAgentName,
+      runtimeLocked: source.runtimeLocked,
+      createdAt: source.createdAt,
+    });
+  }
+
   function isRuntimeLocked(threadId) {
     return get(threadId)?.runtimeLocked === true;
   }
@@ -164,6 +187,7 @@ function createThreadAgentStateStore(options = {}) {
     get,
     getOrBackfillCodex,
     upsert,
+    inherit,
     lockRuntime,
     isRuntimeLocked,
     reload,

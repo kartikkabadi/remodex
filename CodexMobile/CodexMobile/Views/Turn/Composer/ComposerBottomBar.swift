@@ -82,6 +82,7 @@ struct ComposerBottomBar: View {
             attachmentMenu
                 .padding(.leading, 8)
             inlineAccessMenuLabel
+            agentRuntimeMenuControl
             Spacer(minLength: 0)
 
             inlineStatusControl
@@ -249,6 +250,43 @@ struct ComposerBottomBar: View {
         .equatable()
     }
 
+    private var agentRuntimeMenuControl: some View {
+        Menu {
+            ForEach(runtimeState.agentRuntimeOptions) { runtime in
+                Button {
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    runtimeActions.selectAgentRuntime(runtime.id)
+                } label: {
+                    if runtimeState.selectedAgentRuntimeID == runtime.id {
+                        Label(runtime.displayName, systemImage: "checkmark")
+                    } else if runtime.isReady {
+                        Text(runtime.displayName)
+                    } else {
+                        Label(runtime.displayName, systemImage: "exclamationmark.triangle")
+                    }
+                }
+                .disabled(runtimeState.isAgentRuntimeLocked || !runtime.isReady)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                RemodexIcon.image(systemName: "cpu", size: 14)
+                Text(runtimeState.selectedAgentRuntimeTitle)
+                    .font(AppFont.caption(weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(runtimeState.isAgentRuntimeLocked ? Color(.secondaryLabel) : Color(.label))
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(
+                Capsule().fill(Color(.secondarySystemBackground))
+            )
+            .contentShape(Capsule())
+        }
+        .menuIndicator(.hidden)
+        .disabled(runtimeState.isAgentRuntimeLocked)
+        .accessibilityLabel("Agent")
+    }
+
     private var inlineStatusControl: some View {
         ContextWindowProgressRing(
             usage: contextWindowUsage,
@@ -267,14 +305,16 @@ struct ComposerBottomBar: View {
             // `RemodexIcon.menuLabel` keeps Central artwork in SwiftUI Menus
             // by routing through `Label(_, image:)` for mapped assets and
             // falling back to `Label(_, systemImage:)` for plain SF Symbols.
-            Toggle(isOn: Binding(
-                get: { isPlanModeArmed },
-                set: { newValue in
-                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                    onSetPlanModeArmed(newValue)
+            if runtimeState.agentRuntimeCapabilities.planMode {
+                Toggle(isOn: Binding(
+                    get: { isPlanModeArmed },
+                    set: { newValue in
+                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                        onSetPlanModeArmed(newValue)
+                    }
+                )) {
+                    RemodexIcon.menuLabel("Plan mode", systemName: "remodex.plan-mode")
                 }
-            )) {
-                RemodexIcon.menuLabel("Plan mode", systemName: "remodex.plan-mode")
             }
 
             if runtimeState.supportsFastMode {
@@ -288,22 +328,24 @@ struct ComposerBottomBar: View {
                 }
             }
 
-            Section {
-                Button {
-                    HapticFeedback.shared.triggerImpactFeedback()
-                    onTapAddImage()
-                } label: {
-                    RemodexIcon.menuLabel("Photo library", systemName: "photo")
-                }
-                .disabled(remainingAttachmentSlots == 0)
+            if runtimeState.agentRuntimeCapabilities.photos {
+                Section {
+                    Button {
+                        HapticFeedback.shared.triggerImpactFeedback()
+                        onTapAddImage()
+                    } label: {
+                        RemodexIcon.menuLabel("Photo library", systemName: "photo")
+                    }
+                    .disabled(remainingAttachmentSlots == 0)
 
-                Button {
-                    HapticFeedback.shared.triggerImpactFeedback()
-                    onTapTakePhoto()
-                } label: {
-                    RemodexIcon.menuLabel("Take a photo", systemName: "camera.fill")
+                    Button {
+                        HapticFeedback.shared.triggerImpactFeedback()
+                        onTapTakePhoto()
+                    } label: {
+                        RemodexIcon.menuLabel("Take a photo", systemName: "camera.fill")
+                    }
+                    .disabled(remainingAttachmentSlots == 0)
                 }
-                .disabled(remainingAttachmentSlots == 0)
             }
         } label: {
             RemodexIcon.image(systemName: "plus")
@@ -363,7 +405,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
-    private let maxInlineRuntimeLabelWidth: CGFloat = 108
+    private let maxInlineRuntimeLabelWidth: CGFloat = 176
 
     static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
         lhs.orderedModelOptions == rhs.orderedModelOptions
@@ -492,6 +534,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                 .font(metaTextFont)
                 .fontWeight(.regular)
                 .lineLimit(1)
+                .minimumScaleFactor(0.82)
                 .truncationMode(.tail)
         }
         .padding(.vertical, 6)
@@ -587,6 +630,11 @@ private struct AllModelsSheet: View {
                     Text(model.description)
                         .font(AppFont.subheadline())
                         .foregroundStyle(Color(.secondaryLabel))
+                }
+                if let providerName = model.providerDisplayName, !providerName.isEmpty {
+                    Text(providerName)
+                        .font(AppFont.caption())
+                        .foregroundStyle(Color(.tertiaryLabel))
                 }
             }
 

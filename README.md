@@ -8,29 +8,29 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [Follow on X](https://x.com/emanueledpt)
 
-Control [Codex](https://openai.com/index/codex/) from your iPhone. Remodex is a local-first open-source bridge + iOS app that keeps the Codex runtime on your Mac and lets your phone connect through a paired secure session.
+Control multiple **Agent Runtimes** (primarily **Codex** with full parity; partial **OpenCode** including selectable **OpenCode Agent** personas such as build/plan; **Cursor** in Core scope) from your iPhone or iPad (Native Remodex App and co-equal client surfaces). Remodex is a local-first open-source bridge + clients that keeps the chosen **Agent Runtime** executing on your Mac (bridge owns processes/credentials via registry + adapters); phones/clients connect through a paired secure session.
+
+**Multi-agent V1 status (partial but real on this branch):** Codex retains full existing parity. OpenCode + Cursor use the shared `agent-runtime-registry`, runtime adapters, `canonical-events.js` layer (`remodex/event/*` + `plan.*`) and `RemodexEventAdapter` on iOS for one timeline pipeline. See [CONTEXT.md](CONTEXT.md) (exact glossary) and [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md) (locked decisions, PR map, issue tracker at https://github.com/kartikkabadi/remodex — epic https://github.com/kartikkabadi/remodex/issues/16; slices e.g. #18–#27 for registry/canonical/OpenCode/Cursor). Cursor V1 is Core-only per ADR 003 (hides queue/steer/photos). Implementation blueprint: [Docs/plans/multi-agent-runtime-implementation.md](Docs/plans/multi-agent-runtime-implementation.md). Legacy threads backfill as `agentRuntime: "codex"`.
 
 ## Key App Features
 
-- End-to-end encrypted pairing and chats between your iPhone and Mac
-- Fast mode for lower-latency turns
-- Plan mode for structured planning before execution
-- Subagents from iPhone with the `/subagents` command
-- Steer active runs without starting over
-- Queue follow-up prompts while a turn is still running
-- In-app notifications when turns finish or need attention
-- Git actions from your phone, including commit, push, pull, and branch switching
-- Reasoning controls to tune how much thinking Codex uses
-- Access controls with On-Request or Full access
-- Photo attachments from camera or library
+- End-to-end encrypted pairing and chats between your iPhone/iPad and Mac
+- **Agent Runtime** selection (Codex / OpenCode / Cursor) via pill in composer (V1 partial; see TurnComposerRuntimeState.swift + agent runtime capabilities; locked after first successful `thread/start` per CONTEXT.md)
+- Per-**Agent Runtime** capabilities (V1): Codex supports full (including queue, steer, photos, subagents via `/subagents`, reasoning controls, Fast mode); OpenCode and Cursor Core support plan mode + permissions only (no queue/steer/photos/subagents on those threads)
+- **OpenCode Agent** personas (build/chat vs. plan selections stored as `opencodeBuildAgentName`/`opencodePlanAgentName`; distinct from **Agent Runtime** per CONTEXT.md:66–69)
+- Plan mode for structured planning before execution (available across supported **Agent Runtimes** per capabilities matrix)
+- Steer active runs / queue follow-ups / in-app notifications (Codex threads; gated by runtime capabilities on others)
+- Git actions from your phone (commit, push, pull, branch switching) — shared bridge logic independent of **Agent Runtime**
+- Runtime Access Mode (On-Request or Full access) with canonical permission prompts (V1 for OpenCode/Cursor)
+- Photo attachments (Codex threads only in V1 per capabilities)
 - One-time QR bootstrap with trusted Mac reconnects
 - macOS-only background bridge service via `launchd`
-- Live streaming on your phone while Codex runs on your Mac
-- Shared thread history with Codex on your Mac
+- Live streaming on your phone while the chosen **Agent Runtime** runs on your Mac
+- Shared thread history (persisted per-runtime under `~/.remodex/thread-agent-state.json` + runtime-native locations; **Agent Session** ids owned by the runtime per CONTEXT.md)
 
-The repo stays local-first and self-host friendly: the iOS app source does not embed a public hosted endpoint, and the transport layer remains inspectable for anyone who wants to run their own setup.
+The repo stays local-first and self-host friendly: the iOS app source does not embed a public hosted endpoint, and the transport layer remains inspectable for anyone who wants to run their own setup. Multi-agent work (registry, adapters, canonical events) follows the same model — Mac bridge owns all runtime processes/credentials.
 
-Today, the background daemon / trusted auto-reconnect flow is implemented for macOS. Self-hosted relay setups still work on other OSes, but they currently use the foreground bridge flow instead of the macOS `launchd` service path.
+Today, the background daemon / trusted auto-reconnect flow is implemented for macOS. Self-hosted relay setups still work on other OSes, but they currently use the foreground bridge flow instead of the macOS `launchd` service path. Multi-agent status and per-runtime notes: see [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md) and CONTEXT.md.
 
 If you want the public-repo distribution model explained clearly, read [SELF_HOSTING_MODEL.md](SELF_HOSTING_MODEL.md).
 
@@ -48,13 +48,15 @@ If you scan the pairing QR with a generic camera or QR reader before installing 
 
 ## Architecture
 
+The diagram below shows the classic **Codex** path. Multi-agent support adds an `agent-runtime-registry` that dispatches by `agentRuntime` (`codex` | `opencode` | `cursor`) to peer adapters (Codex app-server JSON-RPC wrapped; OpenCode `opencode serve` HTTP/SSE loopback; Cursor ACP JSON-RPC stdio). All runtimes translate to one canonical event vocabulary (`remodex/event/*` + `plan.*`) before reaching iOS via `RemodexEventAdapter`. **Agent Session** ids are runtime-native. Thread state (including `agentRuntime` + `agentSessionId` + OpenCode agent names) is source of truth in `~/.remodex/thread-agent-state.json` (legacy backfills as `codex`).
+
 ```
-┌──────────────┐       Paired session   ┌───────────────┐       stdin/stdout       ┌─────────────┐
-│  Remodex iOS │ ◄────────────────────► │ remodex (Mac) │ ◄──────────────────────► │ codex       │
-│  app         │    WebSocket bridge    │ bridge        │    JSON-RPC              │ app-server  │
-└──────────────┘                        └───────────────┘                          └─────────────┘
+┌──────────────┐       Paired session   ┌───────────────┐       (per-runtime)      ┌─────────────────┐
+│  Remodex iOS │ ◄────────────────────► │ remodex (Mac) │ ◄──────────────────────► │ Agent Runtime   │
+│  app (+pad)  │    WebSocket bridge    │ bridge        │    (registry + adapters) │ (Codex / OpenCode / Cursor)
+└──────────────┘                        └───────────────┘                          └─────────────────┘
                                                │                                         │
-                                               │  AppleScript route bounce                │ JSONL rollout
+                                               │  (Codex: AppleScript; OpenCode: attach) │ (Codex: JSONL; others: runtime-native)
                                                ▼                                         ▼
                                         ┌─────────────┐                           ┌─────────────┐
                                         │  Codex.app  │ ◄─── reads from ──────── │  ~/.codex/  │
@@ -62,13 +64,10 @@ If you scan the pairing QR with a generic camera or QR reader before installing 
                                         └─────────────┘                           └─────────────┘
 ```
 
-1. Run `remodex up` on your Mac
-2. On macOS, Remodex installs/starts a lightweight background bridge service and prints a QR for first-time pairing or recovery
-3. Scan the QR once with the Remodex iOS app to trust that Mac
-4. After the first handshake, the iPhone can resolve the Mac's live session through the configured relay and reconnect automatically
-5. Your phone sends instructions to Codex through the bridge and receives responses in real-time
-6. The bridge handles git operations and local session persistence on your Mac
-7. `Codex.app` can read the same thread history from disk, but it is not a true live mirror unless you enable the optional refresh workaround
+(Full mermaid + module ownership in [Docs/plans/multi-agent-runtime-implementation.md](Docs/plans/multi-agent-runtime-implementation.md). See also ADRs 002/003 and https://github.com/kartikkabadi/remodex/issues/16+ slices.)
+
+1. Run `remodex up` on your Mac (bridge starts registry + any needed runtime servers on loopback for OpenCode/Cursor).
+2–7. (Codex path unchanged for backward compat; multi-agent threads use same pairing/QR/daemon/relay but route via registry. `Codex.app` integration remains Codex-runtime specific; OpenCode handoff uses `opencode attach` per plans.)
 
 ## Repository Structure
 
@@ -92,16 +91,17 @@ This repo contains the local bridge, the iOS app target, and their tests:
 ## Prerequisites
 
 - **Node.js** v18+
-- **[Codex CLI](https://github.com/openai/codex)** installed and in your PATH
-- **Codex CLI authenticated on the Mac** (`codex login status` should succeed)
-- **[Codex desktop app](https://openai.com/index/codex/)** (optional — for viewing threads on your Mac)
+- **Codex CLI** (for **Codex** Agent Runtime) installed and in PATH; `codex login status` succeeds for Codex threads. See "Codex Runtime Authentication" below.
+- For **OpenCode** Agent Runtime: OpenCode installed (discovered via `opencode --version`); auth in `~/.local/share/opencode/auth.json` (local-only; never proxied).
+- For **Cursor** Agent Runtime: Cursor Agent / `agent acp` (or documented equivalent) available in PATH or known locations (discovered by bridge; Core scope in V1).
+- **[Codex desktop app](https://openai.com/index/codex/)** (optional — for viewing **Codex** runtime threads on your Mac)
 - **A signed Remodex iOS build** installed on your iPhone or iPad before scanning the pairing QR
-- **macOS** (for desktop refresh features — the core bridge works on any OS)
+- **macOS** (for desktop refresh + full daemon; core bridge + other runtimes work on any OS with the runtime installed)
 - **Xcode 16+** (only if building the iOS app from source)
 
-## Codex Authentication
+## Codex Runtime Authentication
 
-Remodex does not manage OpenAI credentials. It expects the local Codex CLI to be installed and authenticated before the bridge starts:
+Remodex does not manage OpenAI (or other runtime) credentials. For **Codex** threads it expects the local Codex CLI installed and authenticated before the bridge starts (see commands above). Other **Agent Runtimes** use their own local auth (e.g. OpenCode `auth.json`).
 
 ```sh
 codex login status

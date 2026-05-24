@@ -13,55 +13,89 @@ const {
   buildRuntimeListEntry,
   normalizeAgentRuntimeId,
 } = require("./agent-runtime-capabilities");
+const {
+  createCodexModelCatalog,
+  createCursorModelCatalog,
+  createOpenCodeModelCatalog,
+} = require("./agent-runtime-model-catalog");
 const { createCodexRuntimeAdapter } = require("./codex-runtime-adapter");
 const { createThreadAgentStateStore } = require("./thread-agent-state");
 
 const execFileAsync = promisify(execFile);
 
+const RUNTIME_REQUEST_METHOD_PREFIXES = [
+  "thread/",
+  "turn/",
+];
+
 function createAgentRuntimeRegistry({
   threadAgentState = createThreadAgentStateStore(),
   codexAdapter = createCodexRuntimeAdapter(),
+  runtimeAdapters = [],
   execFileImpl = execFileAsync,
   logPrefix = "[remodex]",
   logImpl = console,
 } = {}) {
-  let cachedOpenCodeStatus = null;
+  let cachedRuntimeStatuses = new Map();
   let cachedInitializeResult = null;
   const pendingThreadStartRequestIds = new Set();
+  const pendingForkSourceByRequestId = new Map();
+  const adaptersByRuntime = new Map();
+  for (const adapter of [codexAdapter, ...runtimeAdapters]) {
+    const runtimeId = normalizeAgentRuntimeId(adapter?.id);
+    if (runtimeId) {
+      adaptersByRuntime.set(runtimeId, adapter);
+    }
+  }
 
   async function resolveOpenCodeStatus({ forceRefresh = false } = {}) {
-    if (!forceRefresh && cachedOpenCodeStatus) {
-      return cachedOpenCodeStatus;
+    const openCodeAdapter = adaptersByRuntime.get("opencode");
+    if (openCodeAdapter && typeof openCodeAdapter.getRuntimeListEntry === "function") {
+      if (!forceRefresh && cachedRuntimeStatuses.has("opencode")) {
+        return cachedRuntimeStatuses.get("opencode");
+      }
+      const entry = await openCodeAdapter.getRuntimeListEntry();
+      cachedRuntimeStatuses.set("opencode", entry);
+      return entry;
     }
 
+    if (!forceRefresh && cachedRuntimeStatuses.has("opencode")) {
+      return cachedRuntimeStatuses.get("opencode");
+    }
+
+    let openCodeStatus;
     try {
       await execFileImpl("opencode", ["--version"], {
         timeout: 3_000,
         maxBuffer: 256 * 1024,
       });
-      cachedOpenCodeStatus = buildRuntimeListEntry({
+      openCodeStatus = buildRuntimeListEntry({
         id: "opencode",
         status: "degraded",
-        statusMessage: "OpenCode is installed; bridge spawn support lands in a later update.",
+        statusMessage: "OpenCode is installed; status reported via runtime adapter when registered.",
+        modelCatalog: createOpenCodeModelCatalog(),
       });
     } catch (error) {
       if (isMissingCommandError(error)) {
-        cachedOpenCodeStatus = buildRuntimeListEntry({
+        openCodeStatus = buildRuntimeListEntry({
           id: "opencode",
           status: "not_installed",
           statusMessage: "Install OpenCode on this Mac to enable the OpenCode runtime.",
+          modelCatalog: createOpenCodeModelCatalog(),
         });
       } else {
         logImpl.warn?.(`${logPrefix} OpenCode status probe failed without affecting Codex: ${error?.message || error}`);
-        cachedOpenCodeStatus = buildRuntimeListEntry({
+        openCodeStatus = buildRuntimeListEntry({
           id: "opencode",
           status: "error",
           statusMessage: "Could not determine OpenCode status on this Mac.",
+          modelCatalog: createOpenCodeModelCatalog(),
         });
       }
     }
 
-    return cachedOpenCodeStatus;
+    cachedRuntimeStatuses.set("opencode", openCodeStatus);
+    return openCodeStatus;
   }
 
   async function refreshInitializeCache() {
@@ -83,33 +117,56 @@ function createAgentRuntimeRegistry({
         buildRuntimeListEntry({ id: "codex", status: "ready" }),
         buildRuntimeListEntry({
           id: "opencode",
-          status: "degraded",
-          statusMessage: "Checking OpenCode status on this Mac.",
+          status: "not_installed",
+          statusMessage: "Install OpenCode on this Mac to enable the OpenCode runtime.",
+          modelCatalog: createOpenCodeModelCatalog(),
         }),
         buildRuntimeListEntry({
           id: "cursor",
           status: "not_installed",
-          statusMessage: "Cursor runtime support lands in a later bridge update.",
+          statusMessage: "Install Cursor Agent on this Mac to enable the Cursor runtime.",
+          modelCatalog: createCursorModelCatalog(),
         }),
       ],
     };
   }
 
   async function listAgentRuntimes() {
-    const [codexEntry, openCodeEntry] = await Promise.all([
-      codexAdapter.getRuntimeListEntry(),
+    const [codexEntry, openCodeEntry, cursorEntry] = await Promise.all([
+      resolveRuntimeListEntry("codex"),
       resolveOpenCodeStatus(),
+      resolveRuntimeListEntry("cursor"),
     ]);
 
     return [
       codexEntry,
       openCodeEntry,
-      buildRuntimeListEntry({
+      cursorEntry,
+    ];
+  }
+
+  async function resolveRuntimeListEntry(runtimeId) {
+    const adapter = adaptersByRuntime.get(runtimeId);
+    if (adapter && typeof adapter.getRuntimeListEntry === "function") {
+      const entry = await adapter.getRuntimeListEntry();
+      cachedRuntimeStatuses.set(runtimeId, entry);
+      return entry;
+    }
+
+    if (runtimeId === "cursor") {
+      return buildRuntimeListEntry({
         id: "cursor",
         status: "not_installed",
-        statusMessage: "Cursor runtime support lands in a later bridge update.",
-      }),
-    ];
+        statusMessage: "Install Cursor Agent on this Mac to enable the Cursor runtime.",
+        modelCatalog: createCursorModelCatalog(),
+      });
+    }
+
+    return buildRuntimeListEntry({
+      id: runtimeId,
+      status: "ready",
+      modelCatalog: runtimeId === "codex" ? createCodexModelCatalog() : null,
+    });
   }
 
   function buildInitializePayload() {
@@ -124,6 +181,9 @@ function createAgentRuntimeRegistry({
   }
 
   function buildWarmInitializeResult() {
+    if (cachedInitializeResult) {
+      return cachedInitializeResult;
+    }
     return buildCachedInitializeResult();
   }
 
@@ -167,6 +227,99 @@ function createAgentRuntimeRegistry({
     return true;
   }
 
+  async function handleRuntimeRequest(rawMessage, {
+    sendResponse,
+    sendToRuntime,
+  } = {}) {
+    const parsed = parseJsonRpcMessage(rawMessage);
+    const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+    if (!isRuntimeRequestMethod(method)) {
+      return false;
+    }
+
+    const routing = resolveRuntimeRouting(parsed);
+    if (!routing.routed) {
+      return false;
+    }
+
+    if (method === "thread/start") {
+      const validation = validateThreadStartRequest(rawMessage);
+      if (!validation.allowed) {
+        sendRuntimeError(sendResponse, validation.requestId, validation.message, validation.errorCode);
+        return true;
+      }
+      routing.agentRuntime = validation.requestedRuntime || routing.agentRuntime;
+    }
+
+    const adapter = adaptersByRuntime.get(routing.agentRuntime);
+    if (!adapter || typeof adapter.handleRuntimeRequest !== "function") {
+      sendRuntimeError(
+        sendResponse,
+        parsed.id,
+        `Agent runtime "${routing.agentRuntime}" is not available on this bridge yet.`,
+        "agent_runtime_unavailable"
+      );
+      return true;
+    }
+
+    try {
+      await adapter.handleRuntimeRequest({
+        rawMessage,
+        parsed,
+        agentRuntime: routing.agentRuntime,
+        threadId: routing.threadId,
+        sendResponse,
+        sendToRuntime: (message) => {
+          if (typeof sendToRuntime !== "function") {
+            throw new Error("Runtime dispatch requires a sendToRuntime callback.");
+          }
+          sendToRuntime(routing.agentRuntime, message);
+        },
+      });
+    } catch (error) {
+      logImpl.warn?.(`${logPrefix} ${routing.agentRuntime} runtime request failed: ${error?.message || error}`);
+      sendRuntimeError(
+        sendResponse,
+        parsed.id,
+        `Agent runtime "${routing.agentRuntime}" failed to handle ${method}.`,
+        "agent_runtime_dispatch_failed"
+      );
+    }
+
+    return true;
+  }
+
+  async function handleRuntimeResponse(rawMessage, {
+    sendResponse,
+  } = {}) {
+    const parsed = parseJsonRpcMessage(rawMessage);
+    if (!parsed || parsed.method || parsed.id == null) {
+      return false;
+    }
+
+    for (const adapter of adaptersByRuntime.values()) {
+      if (typeof adapter.handleRuntimeResponse !== "function") {
+        continue;
+      }
+      try {
+        if (await adapter.handleRuntimeResponse({ rawMessage, parsed, sendResponse })) {
+          return true;
+        }
+      } catch (error) {
+        logImpl.warn?.(`${logPrefix} runtime response routing failed: ${error?.message || error}`);
+        sendRuntimeError(
+          sendResponse,
+          parsed.id,
+          "Agent runtime failed to handle this response.",
+          "agent_runtime_response_failed"
+        );
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function extractRequestedAgentRuntime(params = {}) {
     return normalizeAgentRuntimeId(params.agentRuntime)
       || normalizeAgentRuntimeId(params.agent_runtime)
@@ -186,6 +339,57 @@ function createAgentRuntimeRegistry({
       || readString(params.workingDirectory)
       || readString(params.working_directory)
       || readString(params.thread?.cwd);
+  }
+
+  function isRuntimeRequestMethod(method) {
+    return RUNTIME_REQUEST_METHOD_PREFIXES.some((prefix) => method.startsWith(prefix));
+  }
+
+  function resolveRuntimeRouting(parsed) {
+    const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+    const params = parsed?.params && typeof parsed.params === "object" ? parsed.params : {};
+    if (!isRuntimeRequestMethod(method)) {
+      return { routed: false };
+    }
+
+    if (method === "thread/list") {
+      return {
+        routed: true,
+        agentRuntime: DEFAULT_AGENT_RUNTIME,
+        threadId: "",
+      };
+    }
+
+    if (method === "thread/start") {
+      return {
+        routed: true,
+        agentRuntime: extractRequestedAgentRuntime(params),
+        threadId: extractThreadIdFromParams(params),
+      };
+    }
+
+    const threadId = extractThreadIdFromParams(params);
+    const runtimeRecord = threadId ? threadAgentState.getOrBackfillCodex(threadId, {
+      cwd: extractThreadCwd(params),
+    }) : null;
+
+    return {
+      routed: true,
+      agentRuntime: runtimeRecord?.agentRuntime || DEFAULT_AGENT_RUNTIME,
+      threadId,
+    };
+  }
+
+  function sendRuntimeError(sendResponse, requestId, message, errorCode) {
+    if (typeof sendResponse !== "function" || requestId == null) {
+      return;
+    }
+    sendResponse(createJsonRpcErrorResponse(requestId, message, errorCode));
+  }
+
+  function hasRuntimeAdapter(agentRuntime) {
+    const adapter = adaptersByRuntime.get(agentRuntime);
+    return Boolean(adapter && typeof adapter.handleRuntimeRequest === "function");
   }
 
   function validateThreadStartRequest(rawMessage) {
@@ -218,7 +422,7 @@ function createAgentRuntimeRegistry({
       }
     }
 
-    if (!codexAdapter.shouldHandleRuntime(requestedRuntime)) {
+    if (!hasRuntimeAdapter(requestedRuntime)) {
       return {
         allowed: false,
         requestId: parsed.id,
@@ -255,6 +459,23 @@ function createAgentRuntimeRegistry({
     return { allowed: true, requestedRuntime, threadId };
   }
 
+  function trackForwardedRequest(rawMessage) {
+    const parsed = parseJsonRpcMessage(rawMessage);
+    const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+    if (method !== "thread/fork" || parsed?.id == null) {
+      return;
+    }
+
+    const params = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+    const sourceThreadId = readString(params.sourceThreadId)
+      || readString(params.source_thread_id)
+      || readString(params.threadId)
+      || readString(params.thread_id);
+    if (sourceThreadId) {
+      pendingForkSourceByRequestId.set(String(parsed.id), sourceThreadId);
+    }
+  }
+
   function observeOutboundMessage(rawMessage) {
     const parsed = parseJsonRpcMessage(rawMessage);
     if (!parsed) {
@@ -266,6 +487,25 @@ function createAgentRuntimeRegistry({
       pendingThreadStartRequestIds.delete(responseId);
       if (parsed.result != null) {
         lockRuntimeFromThreadStartResult(parsed.result);
+      }
+    }
+
+    if (responseId && pendingForkSourceByRequestId.has(responseId) && parsed.result != null) {
+      const sourceThreadId = pendingForkSourceByRequestId.get(responseId);
+      pendingForkSourceByRequestId.delete(responseId);
+      const forkedThread = parsed.result?.thread && typeof parsed.result.thread === "object"
+        ? parsed.result.thread
+        : parsed.result;
+      const destinationThreadId = readString(forkedThread?.id)
+        || readString(forkedThread?.threadId)
+        || readString(forkedThread?.thread_id)
+        || readString(parsed.result?.threadId)
+        || readString(parsed.result?.thread_id);
+      const agentSessionId = readString(forkedThread?.agentSessionId)
+        || readString(forkedThread?.agent_session_id)
+        || destinationThreadId;
+      if (sourceThreadId && destinationThreadId) {
+        threadAgentState.inherit(sourceThreadId, destinationThreadId, { agentSessionId });
       }
     }
 
@@ -376,7 +616,7 @@ function createAgentRuntimeRegistry({
   }
 
   function simulateOpenCodeStatusFailureForTests() {
-    cachedOpenCodeStatus = null;
+    cachedRuntimeStatuses.delete("opencode");
     return resolveOpenCodeStatus({
       forceRefresh: true,
     });
@@ -388,8 +628,11 @@ function createAgentRuntimeRegistry({
     buildWarmInitializeResult,
     enrichOutboundResponse,
     handleInboundRequest,
+    handleRuntimeResponse,
+    handleRuntimeRequest,
     listAgentRuntimes,
     observeOutboundMessage,
+    trackForwardedRequest,
     projectRuntimeFieldsIntoThread,
     refreshInitializeCache,
     resolveOpenCodeStatus,
