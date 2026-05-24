@@ -10,6 +10,7 @@ struct ComposerBottomBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(UserBubbleColor.storageKey) private var userBubbleColorRawValue = UserBubbleColor.defaultStoredRawValue
     @State private var showsAllModelsSheet = false
+    @State private var bottomBarWidth: CGFloat = 0
 
     // Data
     let orderedModelOptions: [CodexModelOption]
@@ -155,6 +156,17 @@ struct ComposerBottomBar: View {
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
         .padding(.top, 2)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: ComposerBottomBarWidthPreferenceKey.self, value: proxy.size.width)
+            }
+        }
+        .onPreferenceChange(ComposerBottomBarWidthPreferenceKey.self) { width in
+            let roundedWidth = width.rounded()
+            if abs(bottomBarWidth - roundedWidth) > 0.5 {
+                bottomBarWidth = roundedWidth
+            }
+        }
         .sheet(isPresented: $showsAllModelsSheet) {
             AllModelsSheet(
                 models: orderedModelOptions,
@@ -245,6 +257,7 @@ struct ComposerBottomBar: View {
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,
+            availableBottomBarWidth: bottomBarWidth,
             showsAllModelsSheet: $showsAllModelsSheet
         )
         .equatable()
@@ -400,12 +413,16 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     let isRuntimeSelectionLoading: Bool
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
+    let availableBottomBarWidth: CGFloat
     @Binding var showsAllModelsSheet: Bool
 
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
-    private let maxInlineRuntimeLabelWidth: CGFloat = 176
+    private var inlineRuntimeLabelWidth: CGFloat {
+        let measuredWidth = availableBottomBarWidth > 0 ? availableBottomBarWidth : 760
+        return min(max(measuredWidth * 0.18, 124), 210)
+    }
 
     static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
         lhs.orderedModelOptions == rhs.orderedModelOptions
@@ -414,6 +431,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             && lhs.isLoadingModels == rhs.isLoadingModels
             && lhs.isRuntimeSelectionLoading == rhs.isRuntimeSelectionLoading
             && lhs.runtimeState == rhs.runtimeState
+            && lhs.availableBottomBarWidth == rhs.availableBottomBarWidth
     }
 
     // Renders one consolidated runtime pill backed by a real UIKit UIMenu so we
@@ -539,7 +557,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 4)
-        .frame(maxWidth: maxInlineRuntimeLabelWidth, alignment: .leading)
+        .frame(width: inlineRuntimeLabelWidth, alignment: .leading)
         .clipped()
         .contentShape(Rectangle())
     }
@@ -551,6 +569,14 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         return model
             + Text(" ")
             + Text(effortPart).foregroundStyle(.tertiary)
+    }
+}
+
+private struct ComposerBottomBarWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
