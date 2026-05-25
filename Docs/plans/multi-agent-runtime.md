@@ -128,6 +128,20 @@ The superseded model-catalog issues are #31-#37. Replacement plan:
 | OpenCode Running Turn lifecycle stability | [#42](https://github.com/kartikkabadi/remodex/issues/42) |
 | Physical iPad dynamic model smoke | [#43](https://github.com/kartikkabadi/remodex/issues/43) |
 
+### Open issue reality (2026-05-25, for agents)
+
+| Issue | Code reality | Blocker |
+|-------|--------------|---------|
+| #19, #23 | Partial — canonical layer exists; Codex paths still emit raw `codex/event/*` in places | Big-bang cutover not finished |
+| #20, #22 | Partial — OpenCode spawn + adapter landed; dynamic models not wired | #39–#42 track |
+| #21 | Partial — runtime pill + gating in iOS | E2E proof |
+| #24, #27 | Not proven E2E | Kartik iPhone smoke |
+| #25, #26 | Partial — Cursor ACP + adapter in bridge | E2E proof |
+| #28, #43 | Not proven on iPad | Kartik iPad smoke |
+| #29 | Not started for upstream PR | #24–#28 proof |
+| #39–#42 | Not started / early | Delegable code track after #18 |
+| #38 | PRD only | Parent for #39–#43 |
+
 ---
 
 ## Verification (agents)
