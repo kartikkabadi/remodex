@@ -40,7 +40,7 @@ function convertCodexNotificationToCanonical(rawMessage, {
     agentSessionId,
     turnId,
     itemId,
-    createdAt: now(),
+    createdAt: readString(params.createdAt) || readString(params.timestamp) || now(),
     payload: {
       ...mapping.payload,
       sourceMethod: method,
@@ -72,6 +72,7 @@ function mapCodexMethod(method, params) {
       type: CANONICAL_EVENT_TYPES.USER_MESSAGE,
       payload: {
         text: readString(params.text)
+          || readString(params.message)
           || readString(params.message?.text)
           || readString(params.item?.text),
       },
@@ -98,6 +99,7 @@ function mapCodexMethod(method, params) {
       itemId: extractItemId(params),
       payload: {
         text: readString(params.text)
+          || readString(params.message)
           || readString(params.message?.text)
           || readString(params.item?.text),
       },
@@ -121,6 +123,14 @@ function mapCodexMethod(method, params) {
       type: CANONICAL_EVENT_TYPES.TOOL_DELTA,
       itemId: extractItemId(params),
       payload: extractToolPayload(params, method),
+    };
+  }
+
+  if (method === "codex/event/image_generation_end") {
+    return {
+      type: CANONICAL_EVENT_TYPES.IMAGE_GENERATION_END,
+      itemId: extractItemId(params),
+      payload: extractImageGenerationPayload(params, method),
     };
   }
 
@@ -223,9 +233,29 @@ function extractToolPayload(params, method) {
   return {
     toolType: method.replace(/^codex\/event\//, ""),
     command: readString(params.command),
+    message: readString(params.message),
     chunk: readString(params.chunk) || readString(params.delta) || readString(params.output),
     status: readString(params.status),
+    success: typeof params.success === "boolean" ? params.success : undefined,
+    changes: Array.isArray(params.changes) ? params.changes : undefined,
     fileChanges: Array.isArray(params.fileChanges) ? params.fileChanges : undefined,
+    remodexTurnFileChangeSnapshot: params.remodexTurnFileChangeSnapshot === true ? true : undefined,
+  };
+}
+
+function extractImageGenerationPayload(params, method) {
+  return {
+    toolType: method.replace(/^codex\/event\//, ""),
+    call_id: readString(params.call_id)
+      || readString(params.callId)
+      || readString(params.id)
+      || readString(params.itemId),
+    status: readString(params.status) || "completed",
+    saved_path: readString(params.saved_path)
+      || readString(params.savedPath)
+      || readString(params.path)
+      || readString(params.file_path),
+    result: readString(params.result),
   };
 }
 
@@ -255,6 +285,9 @@ function extractItemId(params = {}) {
 }
 
 function parseJsonRpcMessage(rawMessage) {
+  if (rawMessage && typeof rawMessage === "object") {
+    return rawMessage;
+  }
   try {
     return JSON.parse(rawMessage);
   } catch {

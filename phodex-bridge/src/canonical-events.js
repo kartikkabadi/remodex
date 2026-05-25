@@ -15,6 +15,7 @@ const CANONICAL_EVENT_TYPES = Object.freeze({
   TOOL_STARTED: "tool_started",
   TOOL_DELTA: "tool_delta",
   TOOL_COMPLETED: "tool_completed",
+  IMAGE_GENERATION_END: "image_generation_end",
   DIFF_UPDATED: "diff_updated",
   TURN_COMPLETED: "turn_completed",
   ERROR: "error",

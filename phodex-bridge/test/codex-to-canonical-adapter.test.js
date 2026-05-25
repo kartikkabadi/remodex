@@ -97,6 +97,58 @@ test("codex adapter maps tool activity and diffs to canonical events", () => {
   assert.equal(diff.method, "remodex/event/diff_updated");
 });
 
+test("codex adapter maps rollout message strings and image generation end", () => {
+  const userMessage = convertFixture({
+    method: "codex/event/user_message",
+    params: {
+      threadId: "thread-rollout",
+      turnId: "turn-rollout",
+      message: "Prompt from desktop",
+    },
+  });
+  const assistantMessage = convertFixture({
+    method: "codex/event/agent_message",
+    params: {
+      threadId: "thread-rollout",
+      turnId: "turn-rollout",
+      itemId: "assistant-rollout",
+      message: "Done from desktop",
+    },
+  });
+  const imageEnd = convertFixture({
+    method: "codex/event/image_generation_end",
+    params: {
+      threadId: "thread-rollout",
+      turnId: "turn-rollout",
+      itemId: "image-rollout",
+      saved_path: "/tmp/generated image.png",
+    },
+  });
+
+  assert.equal(userMessage.method, "remodex/event/user_message");
+  assert.equal(userMessage.params.payload.text, "Prompt from desktop");
+  assert.equal(assistantMessage.method, "remodex/event/assistant_completed");
+  assert.equal(assistantMessage.params.payload.text, "Done from desktop");
+  assert.equal(imageEnd.method, "remodex/event/image_generation_end");
+  assert.equal(imageEnd.params.itemId, "image-rollout");
+  assert.equal(imageEnd.params.payload.saved_path, "/tmp/generated image.png");
+});
+
+test("codex adapter accepts already-parsed notification objects", () => {
+  const canonical = convertCodexNotificationToCanonical({
+    method: "codex/event/user_message",
+    params: {
+      threadId: "thread-object",
+      message: "Object input",
+    },
+  }, {
+    now: () => "2026-05-23T00:00:00.000Z",
+  });
+
+  assert.equal(canonical.method, "remodex/event/user_message");
+  assert.equal(canonical.params.payload.text, "Object input");
+});
+
 test("codex adapter ignores responses and unknown notifications", () => {
   assert.equal(convertFixture({
     id: "thread-list-1",

@@ -998,7 +998,7 @@ function emitRolloutNotification(notification, state, sendApplicationResponse) {
 
   if (!canonicalDisabled && method.startsWith("codex/event/")) {
     try {
-      const converted = convertCodexNotificationToCanonical(notification, {
+      const converted = convertCodexNotificationToCanonical(JSON.stringify(notification), {
         agentRuntime: "codex",
         resolveAgentSessionId: ({ threadId: resolvedThreadId }) => resolvedThreadId || threadId,
       });

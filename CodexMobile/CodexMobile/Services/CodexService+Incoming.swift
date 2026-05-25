@@ -84,10 +84,6 @@ extension CodexService {
     }
 
     func handleIncomingRPCMessage(_ message: RPCMessage) {
-        if let wireMethod = message.method, wireMethod.hasPrefix("codex/event/") {
-            return
-        }
-
         let message = remodexAdaptedRPCMessage(message)
         if let method = message.method {
             let normalizedMethod = normalizedIncomingMethodName(method)

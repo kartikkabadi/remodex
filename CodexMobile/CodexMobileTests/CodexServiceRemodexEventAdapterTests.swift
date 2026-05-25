@@ -11,7 +11,7 @@ import XCTest
 final class CodexServiceRemodexEventAdapterTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
-    func testRawCodexEventWireIngressIsDropped() {
+    func testRawCodexEventWireIngressUsesLegacyFallbackHandlers() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
 
@@ -19,11 +19,13 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
             method: "codex/event/user_message",
             params: .object([
                 "threadId": .string(threadID),
-                "message": .string("Should not appear"),
+                "message": .string("Fallback prompt"),
             ])
         ))
 
-        XCTAssertTrue(service.messages(for: threadID).isEmpty)
+        XCTAssertEqual(service.messages(for: threadID).count, 1)
+        XCTAssertEqual(service.messages(for: threadID).first?.role, .user)
+        XCTAssertEqual(service.messages(for: threadID).first?.text, "Fallback prompt")
     }
 
     func testCanonicalTurnAndAssistantDeltaUseExistingTimelinePipeline() {
@@ -310,6 +312,32 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
             adapted.params?.objectValue?["error"]?.objectValue?["message"]?.stringValue,
             "OpenCode credits exhausted"
         )
+    }
+
+    func testCanonicalImageGenerationEndAppendsGeneratedImagePreview() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+        let itemID = "image-\(UUID().uuidString)"
+        let imagePath = "/Users/example/generated image.png"
+
+        service.handleIncomingRPCMessage(canonicalEvent(
+            type: "image_generation_end",
+            threadID: threadID,
+            turnID: turnID,
+            itemID: itemID,
+            payload: [
+                "saved_path": .string(imagePath),
+                "status": .string("completed"),
+            ]
+        ))
+
+        let imageRows = service.messages(for: threadID).filter {
+            $0.role == .assistant && $0.itemId == itemID
+        }
+        XCTAssertEqual(imageRows.count, 1)
+        XCTAssertEqual(imageRows[0].turnId, turnID)
+        XCTAssertEqual(imageRows[0].text, "![Generated image](</Users/example/generated image.png>)")
     }
 
     private func canonicalEvent(

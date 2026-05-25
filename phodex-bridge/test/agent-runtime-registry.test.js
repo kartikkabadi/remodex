@@ -227,6 +227,15 @@ test("runtime dispatch rejects unavailable non-codex thread/start without forwar
     assert.equal(forwarded.length, 0);
     assert.equal(responses.length, 1);
     assert.equal(responses[0].error.data.errorCode, "agent_runtime_unavailable");
+
+    registry.observeOutboundMessage(JSON.stringify({
+      id: "thread-start-opencode-1",
+      result: {
+        thread: { id: "thread-unrelated" },
+      },
+    }));
+
+    assert.equal(registry.threadAgentState.get("thread-unrelated"), null);
   });
 });
 
@@ -456,6 +465,15 @@ test("thread/start rejects runtime changes after lock", async () => {
     assert.equal(blocked.allowed, false);
     assert.match(blocked.message, /locked/i);
     assert.equal(blocked.errorCode, "agent_runtime_locked");
+
+    registry.observeOutboundMessage(JSON.stringify({
+      id: "thread-start-2",
+      result: {
+        thread: { id: "thread-unrelated" },
+      },
+    }));
+
+    assert.equal(registry.threadAgentState.get("thread-unrelated"), null);
   });
 });
 

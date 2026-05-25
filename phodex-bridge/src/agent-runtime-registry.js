@@ -413,6 +413,7 @@ function createAgentRuntimeRegistry({
       });
 
       if (existing?.runtimeLocked && existing.agentRuntime !== requestedRuntime) {
+        forgetPendingThreadStartRequest(parsed.id);
         return {
           allowed: false,
           requestId: parsed.id,
@@ -423,6 +424,7 @@ function createAgentRuntimeRegistry({
     }
 
     if (!hasRuntimeAdapter(requestedRuntime)) {
+      forgetPendingThreadStartRequest(parsed.id);
       return {
         allowed: false,
         requestId: parsed.id,
@@ -473,6 +475,12 @@ function createAgentRuntimeRegistry({
     });
 
     return { allowed: true, requestedRuntime, threadId };
+  }
+
+  function forgetPendingThreadStartRequest(requestId) {
+    if (requestId != null) {
+      pendingThreadStartRequestIds.delete(String(requestId));
+    }
   }
 
   function trackForwardedRequest(rawMessage) {

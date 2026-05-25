@@ -62,15 +62,15 @@ test("desktop-origin active runs replay thinking and exec command activity on re
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/exec_command_begin",
-      "codex/event/exec_command_output_delta",
-      "codex/event/exec_command_end",
+      "remodex/event/tool_started",
+      "remodex/event/tool_delta",
+      "remodex/event/tool_completed",
     ]
   );
   assert.equal(outbound[1].params.delta, "Thinking...");
   assert.equal(outbound[0].params.remodexDesktopMirror, true);
-  assert.equal(outbound[2].params.command, "git status");
-  assert.equal(outbound[3].params.chunk, "On branch main");
+  assert.equal(outbound[2].params.payload.command, "git status");
+  assert.equal(outbound[3].params.payload.chunk, "On branch main");
 });
 
 test("desktop-origin active runs emit activity heartbeat while rollout is quiet", async (t) => {
@@ -158,17 +158,16 @@ test("desktop-origin bootstrap replays the pending user message and final assist
     outbound.map((message) => message.method),
     [
       "turn/started",
-      "codex/event/user_message",
+      "remodex/event/user_message",
       "item/reasoning/textDelta",
-      "codex/event/agent_message",
+      "remodex/event/assistant_completed",
     ]
   );
   assert.equal(outbound[0].params.remodexRolloutLiveMirror, true);
-  assert.equal(outbound[1].params.message, "Please review this diff");
+  assert.equal(outbound[1].params.payload.text, "Please review this diff");
   assert.equal(outbound[1].params.turnId, "turn-chat");
   assert.equal(outbound[1].params.createdAt, "2026-03-15T19:47:36.500Z");
-  assert.equal(outbound[1].params.timestamp, "2026-03-15T19:47:36.500Z");
-  assert.equal(outbound[3].params.message, "Review complete");
+  assert.equal(outbound[3].params.payload.text, "Review complete");
   assert.equal(
     outbound[3].params.itemId,
     "rollout-agent-message:thread-chat:turn-chat:2026-03-15T19:47:40.000Z:73e01b91e228"
@@ -218,14 +217,13 @@ test("desktop-origin live tail attaches pre-task user messages to the next turn"
     outbound.map((message) => message.method),
     [
       "turn/started",
-      "codex/event/user_message",
+      "remodex/event/user_message",
       "item/reasoning/textDelta",
     ]
   );
-  assert.equal(outbound[1].params.message, "Start from Mac");
+  assert.equal(outbound[1].params.payload.text, "Start from Mac");
   assert.equal(outbound[1].params.turnId, "turn-live-prelude");
   assert.equal(outbound[1].params.createdAt, "2026-03-15T19:47:36.500Z");
-  assert.equal(outbound[1].params.timestamp, "2026-03-15T19:47:36.500Z");
 });
 
 test("desktop-origin update_plan calls mirror as structured activity plan updates", async (t) => {
@@ -402,10 +400,10 @@ test("desktop-origin task_started without turn_id still mirrors live file change
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/patch_apply_begin",
-      "codex/event/background_event",
-      "codex/event/patch_apply_end",
-      "codex/event/patch_apply_end",
+      "remodex/event/tool_started",
+      "remodex/event/tool_delta",
+      "remodex/event/tool_completed",
+      "remodex/event/tool_completed",
       "turn/completed",
     ]
   );
@@ -414,9 +412,9 @@ test("desktop-origin task_started without turn_id still mirrors live file change
   assert.equal(outbound[2].params.turnId, mirroredTurnId);
   assert.equal(outbound[4].params.turnId, mirroredTurnId);
   assert.equal(outbound[5].params.turnId, mirroredTurnId);
-  assert.equal(outbound[5].params.remodexTurnFileChangeSnapshot, true);
+  assert.equal(outbound[5].params.payload.remodexTurnFileChangeSnapshot, true);
   assert.equal(outbound[6].params.turnId, mirroredTurnId);
-  assert.equal(outbound[4].params.changes[0].path, "Sources/App.swift");
+  assert.equal(outbound[4].params.payload.changes[0].path, "Sources/App.swift");
 });
 
 test("desktop-origin active runs mirror generated image previews", async (t) => {
@@ -460,14 +458,14 @@ test("desktop-origin active runs mirror generated image previews", async (t) => 
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
+      "remodex/event/image_generation_end",
     ]
   );
-  assert.equal(outbound[2].params.call_id, "ig_123");
+  assert.equal(outbound[2].params.payload.call_id, "ig_123");
   assert.equal(outbound[2].params.itemId, "ig_123");
   assert.equal(outbound[2].params.turnId, "turn-image");
   assert.equal(
-    outbound[2].params.saved_path,
+    outbound[2].params.payload.saved_path,
     path.join(homeDir, "generated_images", "thread-image", "ig_123.png")
   );
 });
@@ -513,11 +511,11 @@ test("desktop-origin active runs mirror imageView items", async (t) => {
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
+      "remodex/event/image_generation_end",
     ]
   );
-  assert.equal(outbound[2].params.call_id, "view_123");
-  assert.equal(outbound[2].params.saved_path, "/tmp/generated view.png");
+  assert.equal(outbound[2].params.payload.call_id, "view_123");
+  assert.equal(outbound[2].params.payload.saved_path, "/tmp/generated view.png");
 });
 
 test("desktop-origin active runs mirror image_generation items", async (t) => {
@@ -561,11 +559,11 @@ test("desktop-origin active runs mirror image_generation items", async (t) => {
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
+      "remodex/event/image_generation_end",
     ]
   );
-  assert.equal(outbound[2].params.call_id, "ig_generation");
-  assert.equal(outbound[2].params.saved_path, "/tmp/generated item.png");
+  assert.equal(outbound[2].params.payload.call_id, "ig_generation");
+  assert.equal(outbound[2].params.payload.saved_path, "/tmp/generated item.png");
 });
 
 test("desktop-origin active runs mirror generated image end events without response items", async (t) => {
@@ -609,13 +607,13 @@ test("desktop-origin active runs mirror generated image end events without respo
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
+      "remodex/event/image_generation_end",
     ]
   );
-  assert.equal(outbound[2].params.call_id, "ig_event");
+  assert.equal(outbound[2].params.payload.call_id, "ig_event");
   assert.equal(outbound[2].params.itemId, "ig_event");
   assert.equal(outbound[2].params.turnId, "turn-image-event");
-  assert.equal(outbound[2].params.saved_path, "/tmp/generated event.png");
+  assert.equal(outbound[2].params.payload.saved_path, "/tmp/generated event.png");
 });
 
 test("phone-origin rollouts do not emit mirrored updates", async (t) => {
@@ -703,10 +701,10 @@ test("desktop-origin idle watchers stream new rollout growth after the phone reo
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/background_event",
+      "remodex/event/tool_delta",
     ]
   );
-  assert.equal(outbound[2].params.message, "Applying patch");
+  assert.equal(outbound[2].params.payload.message, "Applying patch");
 });
 
 test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle", async (t) => {
@@ -760,20 +758,20 @@ test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle
     [
       "turn/started",
       "item/reasoning/textDelta",
-      "codex/event/patch_apply_begin",
-      "codex/event/background_event",
-      "codex/event/patch_apply_end",
+      "remodex/event/tool_started",
+      "remodex/event/tool_delta",
+      "remodex/event/tool_completed",
     ]
   );
   assert.equal(outbound[2].params.itemId, "call-patch");
-  assert.equal(outbound[2].params.status, "inProgress");
-  assert.equal(outbound[2].params.changes[0].path, "Sources/App.swift");
+  assert.equal(outbound[2].params.payload.status, "inProgress");
+  assert.equal(outbound[2].params.payload.changes[0].path, "Sources/App.swift");
   assert.equal(outbound[4].params.itemId, "call-patch");
-  assert.equal(outbound[4].params.changes[0].path, "Sources/App.swift");
-  assert.equal(outbound[4].params.changes[0].kind, "update");
-  assert.equal(outbound[4].params.changes[0].additions, 1);
-  assert.equal(outbound[4].params.changes[0].deletions, 1);
-  assert.match(outbound[4].params.changes[0].diff, /diff --git a\/Sources\/App.swift b\/Sources\/App.swift/);
+  assert.equal(outbound[4].params.payload.changes[0].path, "Sources/App.swift");
+  assert.equal(outbound[4].params.payload.changes[0].kind, "update");
+  assert.equal(outbound[4].params.payload.changes[0].additions, 1);
+  assert.equal(outbound[4].params.payload.changes[0].deletions, 1);
+  assert.match(outbound[4].params.payload.changes[0].diff, /diff --git a\/Sources\/App.swift b\/Sources\/App.swift/);
 });
 
 test("desktop-origin rollouts emit turn-end file-change snapshot after final text", async (t) => {
@@ -839,19 +837,19 @@ test("desktop-origin rollouts emit turn-end file-change snapshot after final tex
 
   const methods = outbound.map((message) => message.method);
   const aggregateIndex = outbound.findIndex((message) => (
-    message.method === "codex/event/patch_apply_end"
-    && message.params.remodexTurnFileChangeSnapshot === true
+    message.method === "remodex/event/tool_completed"
+    && message.params.payload.remodexTurnFileChangeSnapshot === true
   ));
   const completedIndex = methods.lastIndexOf("turn/completed");
-  const agentIndex = methods.lastIndexOf("codex/event/agent_message");
+  const agentIndex = methods.lastIndexOf("remodex/event/assistant_completed");
 
   assert.ok(agentIndex >= 0);
   assert.ok(aggregateIndex > agentIndex);
   assert.ok(completedIndex > aggregateIndex);
   assert.equal(outbound[aggregateIndex].params.itemId, "call-patch-2");
-  assert.equal(outbound[aggregateIndex].params.changes.length, 2);
+  assert.equal(outbound[aggregateIndex].params.payload.changes.length, 2);
   assert.deepEqual(
-    outbound[aggregateIndex].params.changes.map((change) => change.path),
+    outbound[aggregateIndex].params.payload.changes.map((change) => change.path),
     ["Sources/App.swift", "Sources/Settings.swift"]
   );
 });

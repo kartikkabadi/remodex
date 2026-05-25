@@ -71,6 +71,45 @@ test("Cursor thread/start creates an ACP session, locks state, and emits canonic
   });
 });
 
+test("Cursor thread/resume reuses the stored ACP session without creating a new one", async () => {
+  await withTempState(async ({ stateStore }) => {
+    const { adapter, requests } = createAdapter({
+      stateStore,
+      clientResults: [{ sessionId: "cur-fresh", title: "Unexpected fresh session" }],
+    });
+    stateStore.upsert("thread-cursor", {
+      agentRuntime: "cursor",
+      agentSessionId: "cur-existing",
+      cwd: "/repo",
+      runtimeLocked: true,
+    });
+    const outbound = [];
+
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "thread-resume-1",
+        method: "thread/resume",
+        params: {
+          threadId: "thread-cursor",
+          agentRuntime: "cursor",
+          cwd: "/repo",
+        },
+      },
+      threadId: "thread-cursor",
+      sendResponse(rawMessage) {
+        outbound.push(JSON.parse(rawMessage));
+      },
+    });
+
+    assert.deepEqual(requests, []);
+    assert.equal(outbound[0].result.thread.agentSessionId, "cur-existing");
+    assert.equal(outbound[1].method, "remodex/event/thread_started");
+    assert.equal(outbound[1].params.agentSessionId, "cur-existing");
+    assert.equal(stateStore.get("thread-cursor").agentSessionId, "cur-existing");
+    assert.equal(stateStore.get("thread-cursor").runtimeLocked, true);
+  });
+});
+
 test("Cursor turn/start prompts in plan mode and maps ACP notifications to canonical", async () => {
   await withTempState(async ({ stateStore }) => {
     const { adapter, requests } = createAdapter({

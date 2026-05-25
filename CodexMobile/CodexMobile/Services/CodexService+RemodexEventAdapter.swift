@@ -70,9 +70,27 @@ extension CodexService {
             return RPCMessage(method: "item/completed", params: .object(adapted))
 
         case "tool_started", "tool_delta", "tool_completed":
+            if let legacyMethod = remodexLegacyCodexToolMethod(from: payload) {
+                return RPCMessage(method: legacyMethod, params: .object(remodexLegacyCodexToolParams(base: base, payload: payload)))
+            }
             var adapted = base
             adapted["delta"] = remodexToolDeltaValue(eventType: eventType, payload: payload)
             return RPCMessage(method: "item/toolCall/outputDelta", params: .object(adapted))
+
+        case "image_generation_end":
+            var adapted = base
+            for key in ["saved_path", "savedPath", "path", "file_path", "result", "status", "call_id", "callId", "id"] {
+                if let value = payload[key] {
+                    adapted[key] = value
+                }
+            }
+            if adapted["itemId"] == nil {
+                adapted["itemId"] = firstJSONValue(payload, keys: ["itemId", "item_id", "call_id", "callId", "id"])
+            }
+            if adapted["turnId"] == nil {
+                adapted["turnId"] = firstJSONValue(payload, keys: ["turnId", "turn_id"])
+            }
+            return RPCMessage(method: "image_generation_end", params: .object(adapted))
 
         case "diff_updated":
             var adapted = base
@@ -169,6 +187,40 @@ extension CodexService {
         default:
             return .string(toolName)
         }
+    }
+
+    private func remodexLegacyCodexToolMethod(from payload: IncomingParamsObject) -> String? {
+        let rawToolType = firstJSONValue(payload, keys: ["toolType", "tool_type", "sourceMethod"])?.stringValue
+        let toolType = rawToolType?
+            .replacingOccurrences(of: "codex/event/", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        switch toolType {
+        case "exec_command_begin",
+             "exec_command_output_delta",
+             "exec_command_end",
+             "background_event",
+             "patch_apply_begin",
+             "patch_apply_end":
+            return "codex/event/\(toolType ?? "")"
+        default:
+            return nil
+        }
+    }
+
+    private func remodexLegacyCodexToolParams(base: IncomingParamsObject, payload: IncomingParamsObject) -> IncomingParamsObject {
+        var adapted = base
+        if let raw = payload["raw"]?.objectValue {
+            for (key, value) in raw where adapted[key] == nil {
+                adapted[key] = value
+            }
+        }
+        for (key, value) in payload where adapted[key] == nil && key != "raw" {
+            adapted[key] = value
+        }
+        if adapted["event"] == nil {
+            adapted["event"] = .object(payload)
+        }
+        return adapted
     }
 
     private func firstJSONValue(_ object: IncomingParamsObject, keys: [String]) -> JSONValue? {

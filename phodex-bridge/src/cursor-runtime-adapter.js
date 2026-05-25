@@ -57,8 +57,11 @@ function createCursorRuntimeAdapter({
     },
     async handleRuntimeRequest(context = {}) {
       const method = readString(context.parsed?.method);
-      if (method === "thread/start" || method === "thread/resume") {
+      if (method === "thread/start") {
         return handleThreadStartLike(context);
+      }
+      if (method === "thread/resume") {
+        return handleThreadResume(context);
       }
       if (method === "turn/start") {
         return handleTurnStart(context);
@@ -148,6 +151,51 @@ function createCursorRuntimeAdapter({
       thread: {
         id: threadId,
         title: readString(result?.title) || readString(params.title),
+        agentRuntime: id,
+        agentSessionId,
+      },
+    });
+    sendCanonical(sendResponse, CANONICAL_EVENT_TYPES.THREAD_STARTED, {
+      threadId,
+      agentSessionId,
+      payload: {
+        thread: {
+          id: threadId,
+          agentRuntime: id,
+          agentSessionId,
+        },
+      },
+    });
+    return { responded: true };
+  }
+
+  async function handleThreadResume({ parsed, sendResponse }) {
+    const params = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+    const threadId = extractThreadId(params);
+    if (!threadId) {
+      return handleThreadStartLike({ parsed, sendResponse });
+    }
+
+    const existing = threadAgentState.get(threadId);
+    const agentSessionId = readString(existing?.agentSessionId)
+      || readString(params.agentSessionId)
+      || readString(params.agent_session_id);
+    if (!agentSessionId) {
+      return handleThreadStartLike({ parsed, sendResponse });
+    }
+
+    const cwd = readString(params.cwd) || readString(params.workingDirectory) || readString(existing?.cwd);
+    threadAgentState.upsert(threadId, {
+      agentRuntime: id,
+      agentSessionId,
+      cwd,
+      runtimeLocked: true,
+    });
+
+    sendJsonRpcResult(sendResponse, parsed.id, {
+      thread: {
+        id: threadId,
+        title: readString(params.title),
         agentRuntime: id,
         agentSessionId,
       },
