@@ -10,8 +10,6 @@ struct SettingsConnectionCard: View {
     @Environment(CodexService.self) private var codex
     @State private var isShowingComputerNameSheet = false
 
-    private let settingsAccentColor = Color.primary
-
     var body: some View {
         SettingsCard(title: "Connection") {
             if let trustedPairPresentation = codex.trustedPairPresentation {
@@ -52,7 +50,7 @@ struct SettingsConnectionCard: View {
 
             if codex.supportsKeepAwakeWhileBridgeRuns {
                 Toggle("Keep device reachable", isOn: keepMacAwakeWhileBridgeRunsBinding)
-                    .tint(settingsAccentColor)
+                    .tint(settingsToggleTintColor)
 
                     Text(codex.keepMacAwakeWhileBridgeRuns
                      ? "Uses the host device's keep-awake support while the bridge is running so the device stays reachable even if the display turns off. Best while charging."

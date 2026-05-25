@@ -433,9 +433,9 @@ extension CodexService {
         let errorResponse = try? JSONDecoder().decode(CodexRelayErrorResponse.self, from: data)
         switch errorResponse?.code {
         case "pairing_code_expired":
-            throw CodexSecureTransportError.invalidQR("This pairing code has expired. Generate a new one from the device bridge.")
+            throw CodexSecureTransportError.invalidQR("This pairing code has expired. Generate a new one from the Mac bridge.")
         case "pairing_code_unavailable":
-            throw CodexSecureTransportError.invalidQR("That pairing code is not available right now. Make sure your device bridge is running and try again.")
+            throw CodexSecureTransportError.invalidQR("That pairing code is not available right now. Make sure your Mac bridge is running and try again.")
         default:
             if httpResponse.statusCode == 404 {
                 throw CodexSecureTransportError.invalidQR("This relay does not support pairing codes yet. Scan the QR code instead.")

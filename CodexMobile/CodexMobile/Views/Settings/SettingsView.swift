@@ -13,6 +13,7 @@ struct SettingsView: View {
         List {
             SettingsArchivedChatsCard()
             SettingsAppearanceCard(appFontStyle: appFontStyleBinding)
+            SettingsAppIconCard()
             SettingsNotificationsCard()
             SettingsGPTAccountCard()
             SettingsSubscriptionCard()
@@ -148,7 +149,7 @@ private struct SettingsAppearanceCard: View {
 
             if GlassPreference.isSupported {
                 Toggle("Liquid Glass", isOn: $useLiquidGlass)
-                    .tint(settingsAccentColor)
+                    .tint(settingsToggleTintColor)
             }
 
             SettingsPetCompanionSection(settingsAccentColor: settingsAccentColor)
@@ -157,6 +158,168 @@ private struct SettingsAppearanceCard: View {
 
     private var selectedUserBubbleColor: UserBubbleColor {
         UserBubbleColor(rawValue: userBubbleColorRawValue) ?? .default
+    }
+}
+
+private struct SettingsAppIconCard: View {
+    @State private var selectedAppIcon = AppIconChoice.current
+    @State private var appIconErrorMessage: String?
+
+    var body: some View {
+        if UIApplication.shared.supportsAlternateIcons {
+            SettingsCard(title: "App Icon") {
+                ForEach(AppIconChoice.allCases) { icon in
+                    Button {
+                        updateAppIcon(to: icon)
+                    } label: {
+                        AppIconChoiceRow(
+                            icon: icon,
+                            isSelected: selectedAppIcon == icon
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let appIconErrorMessage {
+                    Text(appIconErrorMessage)
+                        .font(AppFont.caption())
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    // Applies the selected icon through UIKit; Xcode generates the
+    // alternate declarations from the Alternate App Icon Sets build setting.
+    private func updateAppIcon(to appIcon: AppIconChoice) {
+        guard selectedAppIcon != appIcon else {
+            return
+        }
+
+        appIconErrorMessage = nil
+        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+
+        UIApplication.shared.setAlternateIconName(appIcon.alternateIconName) { error in
+            Task { @MainActor in
+                if let error {
+                    appIconErrorMessage = error.localizedDescription
+                    selectedAppIcon = AppIconChoice.current
+                } else {
+                    selectedAppIcon = appIcon
+                }
+            }
+        }
+    }
+}
+
+private struct AppIconChoiceRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let icon: AppIconChoice
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            iconPreview
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(icon.title)
+                    .font(AppFont.body(weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Text(icon.subtitle)
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isSelected {
+                RemodexIcon.image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.green)
+            }
+        }
+        .frame(minHeight: 74)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var iconPreview: some View {
+        switch icon {
+        case .classic:
+            AppIconPreviewImage(name: "AppIconClassicPreview", size: 52)
+        case .contrast:
+            AppIconPreviewImage(name: contrastPreviewName, size: 52)
+        }
+    }
+
+    private var contrastPreviewName: String {
+        colorScheme == .dark ? "AppIconContrastDarkPreview" : "AppIconContrastLightPreview"
+    }
+}
+
+private struct AppIconPreviewImage: View {
+    let name: String
+    let size: CGFloat
+
+    var body: some View {
+        Image(name)
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 6, x: 0, y: 3)
+    }
+}
+
+private enum AppIconChoice: String, CaseIterable, Identifiable {
+    case classic
+    case contrast
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .classic:
+            "Classic"
+        case .contrast:
+            "Contrast"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .classic:
+            "Remodex 2"
+        case .contrast:
+            "Dark in light mode, white in dark mode"
+        }
+    }
+
+    var alternateIconName: String? {
+        switch self {
+        case .classic:
+            nil
+        case .contrast:
+            "RemodexContrast"
+        }
+    }
+
+    static var current: AppIconChoice {
+        switch UIApplication.shared.alternateIconName {
+        case AppIconChoice.contrast.alternateIconName:
+            .contrast
+        default:
+            .classic
+        }
     }
 }
 
@@ -182,7 +345,7 @@ private struct SettingsPetCompanionSection: View {
                         )
                 }
             }
-            .tint(settingsAccentColor)
+            .tint(settingsToggleTintColor)
 
             if petStore.isEnabled {
                 if petStore.availablePets.isEmpty {
