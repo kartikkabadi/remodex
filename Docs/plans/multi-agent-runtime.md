@@ -1,6 +1,6 @@
 # Multi-agent runtime — index
 
-**Status:** Active (2026-05-23)  
+**Status:** Active (verified 2026-05-25)  
 **Branch:** `feat/multi-agent-runtime` on [kartikkabadi/remodex](https://github.com/kartikkabadi/remodex) from `origin/main`  
 **Parent issue:** https://github.com/kartikkabadi/remodex/issues/16  
 **Implementation blueprint:** [multi-agent-runtime-implementation.md](multi-agent-runtime-implementation.md)
@@ -12,7 +12,32 @@ Execution detail lives in **GitHub issues on the fork** (not local `.scratch/`).
 
 ---
 
-## Current Reality (as of stabilization work start, post user answers 2026)
+## Current Reality (verified 2026-05-25)
+
+**Canonical local surface:** `/Users/user/Documents/Projects/remodex-build` on
+`feat/multi-agent-runtime`. Treat `/Users/user/Documents/Projects/remodex` as a
+historical/stale snapshot for this lane unless Kartik explicitly asks to inspect
+it.
+
+**Live tracker state:** Parent epic #16 is open. #17 is closed via PR #30.
+#18 is closed as completed after 2026-05-25 reconciliation and bridge/relay
+test proof. Foundational follow-ups #19-#29 remain open/gated, and the static
+model-catalog pass #31-#37 is closed/superseded by dynamic provider/model issues
+#38-#43.
+
+**Verification run 2026-05-25:**
+- `cd phodex-bridge && npm test` -> 448 pass, 0 fail.
+- `cd relay && npm test` -> 39 pass, 0 fail.
+- Not run in this audit: `xcodebuild`, physical iPhone smoke, physical iPad
+  smoke.
+
+**Immediate operating note:** the registry blocker has been reconciled and #18
+is closed. The next delegable track is dynamic provider/model discovery in order:
+#39 -> #40 -> #41 -> #42, with #43 kept human/device-gated until physical iPad
+proof exists. Do not unblock upstream PR prep #29 without fresh iPhone/iPad
+runtime proof.
+
+## Prior Reality (as of stabilization work start, post user answers 2026)
 
 **Brownfield state on this branch (hybrid partial impl + docs/plans ahead of full cutover):**
 - Substantial real foundation present (bridge: full `agent-runtime-registry.js` + `agent-runtime-capabilities.js` + `canonical-events.js` + `thread-agent-state.js` + codex/opencode/cursor adapters + `opencode-server.js` (exact spawn + security per blueprint) + `cursor-acp-client.js` (robust discovery with local paths); iOS: `CodexService+RemodexEventAdapter.swift` wired in Incoming, `CodexThread` has `agentRuntime`/`agentSessionId`/`opencode*AgentName` fields + merge, `TurnComposerRuntimeState` + gating + Agent pill, `CodexServiceRemodexEventAdapterTests` + service descriptors; all per ADR 002/003 + implementation blueprint tables).
@@ -20,7 +45,7 @@ Execution detail lives in **GitHub issues on the fork** (not local `.scratch/`).
 - **GitHub issues** (kartikkabadi/remodex, via MCP): All slices #21–#29 OPEN, "enhancement"/"blocked"/"ready-for-human", bodies match plans 1:1 (acceptance requires agent verification + Kartik physical smoke). No slices closed yet. Local code has partial progress on many "suggested files".
 - **Docs drift**: README heavily Codex-only (being stabilized in Phase 1 with CONTEXT terms + V1/partial/Core notes + links). Plans/ADRs use correct language. modelProvider still in legacy iOS models (kept separate per plans; not overloaded for Agent Runtime).
 - **Cleanup debt**: 12 P0 god objects in Swift (CLEANUP-AUDIT May 11; many still TODO per TRACKER). Narrow scope: only intersecting files (CodexThread, Helpers, Incoming, ThreadFork, RemodexEventAdapter) in Phase 3.
-- **Artifacts (user rules strictly followed)**: tmp-vps-live/ (Emanuele upstream live relay bits) fully protected — zero touch. cleanup/plans/ (270 local per-file plans) treated as user-local; no bulk action (narrow scope + "review details first... very selective... do not delete anything that belongs to Emanuele").
+- **Artifacts (user rules strictly followed)**: tmp-vps-live/ (Emanuele upstream live relay bits) fully protected — zero touch. cleanup/plans/ (270 local per-file plans) treated as user-local; no bulk action (narrow scope + "review details first... very selective... do not delete anything that belongs to Emanuele"). (Archived as "completed" for narrow 2026-05 pass per gates; high-level TRACKER remains; see active cleanup/TASK-TRACKER.md.)
 - **User intent (ask_user_question answers)**: Hybrid (local partial as solo base + selective safe cherry-picks from Emanuele codex/add-* in parallel); narrow scope; push higher practical parity where safe/fixture-backed; keep selectively + extremely conservative on artifacts (nothing Emanuele-owned); actively update GitHub issues with reality/progress during work.
 
 **Stabilization in progress (Phase 1 docs first, then 7 gaps per blueprint order, narrow intersecting cleanup, higher-parity polish).** See plan.md (session 019e5a13-...) + README updates for Reality vs. Plan. All work follows AGENTS.md guardrails (local-first, read this plan first, kartikkabadi issues, xcodebuild after Swift, no junk reports, preserve iOS timeline rules).
