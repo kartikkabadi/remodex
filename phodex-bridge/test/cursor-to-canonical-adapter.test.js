@@ -81,13 +81,13 @@ test("Cursor adapter maps permission request without auto-allowing it", () => {
   assert.equal(permission.params.payload.request.toolName, "shell");
 });
 
-test("cursorModeForParams preserves plan and ask while defaulting to Cursor agent mode", () => {
+test("cursorModeForParams preserves documented ACP modes and defaults UI-only modes to agent", () => {
   assert.equal(cursorModeForParams({ mode: "agent" }), "agent");
   assert.equal(cursorModeForParams({ mode: "plan" }), "plan");
   assert.equal(cursorModeForParams({ plan: true }), "plan");
   assert.equal(cursorModeForParams({ mode: "ask" }), "ask");
-  assert.equal(cursorModeForParams({ mode: "debug" }), "debug");
-  assert.equal(cursorModeForParams({ mode: "multitask" }), "multitask");
+  assert.equal(cursorModeForParams({ mode: "debug" }), "agent");
+  assert.equal(cursorModeForParams({ mode: "multitask" }), "agent");
   assert.equal(cursorModeForParams({}), "agent");
 });
 
