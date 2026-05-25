@@ -28,6 +28,7 @@ const {
   convertOpenCodeEventToCanonical,
   createOpenCodeCanonicalState,
 } = require("./opencode-to-canonical-adapter");
+const { discoverOpenCodeAgents } = require("./opencode-agent-discovery");
 
 function createOpenCodeRuntimeAdapter({
   id = "opencode",
@@ -58,12 +59,14 @@ function createOpenCodeRuntimeAdapter({
       const serverStatus = serverManager.getStatus?.() || { state: "stopped" };
       const mappedStatus = mapOpenCodeRuntimeStatus(serverStatus.state);
       const modelCatalog = await resolveOpenCodeModelCatalog();
+      const openCodeAgents = discoverOpenCodeAgents();
       return buildRuntimeListEntry({
         id,
         status: mappedStatus.status,
         statusMessage: mappedStatus.statusMessage,
         capabilities: getAgentRuntimeCapabilities(id),
         modelCatalog,
+        openCodeAgents,
       });
     },
     async handleRuntimeRequest(context = {}) {

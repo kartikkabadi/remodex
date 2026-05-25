@@ -38,10 +38,16 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     static func makeMenu(_ input: Input) -> UIMenu {
         var children: [UIMenuElement] = []
 
+        if let cursorModeMenu = cursorModeMenu(input) {
+            children.append(cursorModeMenu)
+        }
         if let providerMenu = providerMenu(input) {
             children.append(providerMenu)
         }
         children.append(modelMenu(input))
+        if let openCodeAgentMenu = openCodeAgentMenu(input) {
+            children.append(openCodeAgentMenu)
+        }
 
         if let intelligenceMenu = intelligenceMenu(input) {
             children.append(intelligenceMenu)
@@ -54,7 +60,60 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         return UIMenu(title: "", options: [.displayInline], children: children)
     }
 
-    // MARK: - Provider / Model
+    // MARK: - Cursor / Provider / Model / OpenCode agent
+
+    private static func cursorModeMenu(_ input: Input) -> UIMenu? {
+        guard input.runtimeState.selectedAgentRuntimeID == "cursor" else {
+            return nil
+        }
+
+        let selectedModeID = input.runtimeState.selectedCursorModeID
+        let selectedTitle = input.runtimeState.selectedCursorModeTitle
+        let actions = CursorComposerModeOption.all.map { mode in
+            UIAction(
+                title: mode.displayName,
+                state: mode.id == selectedModeID ? .on : .off
+            ) { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.selectCursorMode(mode.id)
+            }
+        }
+
+        return UIMenu(
+            title: "Mode",
+            subtitle: selectedTitle,
+            image: RemodexIcon.menuUIImage(systemName: "slider.horizontal.3"),
+            options: [.singleSelection],
+            children: actions
+        )
+    }
+
+    private static func openCodeAgentMenu(_ input: Input) -> UIMenu? {
+        guard input.runtimeState.selectedAgentRuntimeID == "opencode",
+              input.runtimeState.openCodeAgentOptions.count > 1 else {
+            return nil
+        }
+
+        let selectedAgentID = input.runtimeState.selectedOpenCodeBuildAgentID
+        let selectedTitle = input.runtimeState.selectedOpenCodeBuildAgentTitle
+        let actions = input.runtimeState.openCodeAgentOptions.map { agent in
+            UIAction(
+                title: agent.displayName,
+                state: agent.id == selectedAgentID ? .on : .off
+            ) { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.selectOpenCodeBuildAgent(agent.id)
+            }
+        }
+
+        return UIMenu(
+            title: "Agent",
+            subtitle: selectedTitle,
+            image: RemodexIcon.menuUIImage(systemName: "person.crop.circle"),
+            options: [.singleSelection],
+            children: actions
+        )
+    }
 
     private static func providerMenu(_ input: Input) -> UIMenu? {
         let providers = providerOptions(input)

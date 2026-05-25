@@ -3165,16 +3165,15 @@ extension CodexService {
         params["agentRuntime"] = .string(runtime)
         if runtime == "opencode" {
             let descriptor = agentRuntimeDescriptor(id: runtime)
-            params["opencodeBuildAgentName"] = .string(
-                thread?.opencodeBuildAgentName
-                    ?? descriptor?.defaultBuildAgentName
-                    ?? "build"
-            )
+            params["opencodeBuildAgentName"] = .string(effectiveOpenCodeBuildAgentName(for: thread))
             params["opencodePlanAgentName"] = .string(
                 thread?.opencodePlanAgentName
                     ?? descriptor?.defaultPlanAgentName
                     ?? "plan"
             )
+        }
+        if runtime == "cursor" {
+            params["mode"] = .string(effectiveCursorMode(for: thread))
         }
     }
 

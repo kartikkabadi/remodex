@@ -84,6 +84,9 @@ struct ComposerBottomBar: View {
                 .padding(.leading, 8)
             inlineAccessMenuLabel
             agentRuntimeMenuControl
+            if runtimeState.selectedAgentRuntimeID == "opencode", runtimeState.openCodeAgentOptions.count > 1 {
+                openCodeBuildAgentMenuControl
+            }
             Spacer(minLength: 0)
 
             inlineStatusControl
@@ -263,6 +266,43 @@ struct ComposerBottomBar: View {
         .equatable()
     }
 
+    private var openCodeBuildAgentMenuControl: some View {
+        Menu {
+            ForEach(runtimeState.openCodeAgentOptions) { agent in
+                Button {
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    runtimeActions.selectOpenCodeBuildAgent(agent.id)
+                } label: {
+                    if runtimeState.selectedOpenCodeBuildAgentID == agent.id {
+                        Label(agent.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(agent.displayName)
+                    }
+                }
+                .disabled(runtimeState.isAgentRuntimeLocked)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                RemodexIcon.image(systemName: "person.crop.circle", size: 14)
+                Text(runtimeState.selectedOpenCodeBuildAgentTitle)
+                    .font(AppFont.caption(weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(runtimeState.isAgentRuntimeLocked ? Color(.secondaryLabel) : Color(.label))
+            .padding(.horizontal, 9)
+            .frame(maxWidth: 140)
+            .frame(height: 30)
+            .background(
+                Capsule().fill(Color(.secondarySystemBackground))
+            )
+            .contentShape(Capsule())
+        }
+        .menuIndicator(.hidden)
+        .disabled(runtimeState.isAgentRuntimeLocked)
+        .accessibilityLabel("OpenCode agent")
+    }
+
     private var agentRuntimeMenuControl: some View {
         Menu {
             ForEach(runtimeState.agentRuntimeOptions) { runtime in
@@ -286,9 +326,11 @@ struct ComposerBottomBar: View {
                 Text(runtimeState.selectedAgentRuntimeTitle)
                     .font(AppFont.caption(weight: .semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(runtimeState.isAgentRuntimeLocked ? Color(.secondaryLabel) : Color(.label))
             .padding(.horizontal, 9)
+            .frame(maxWidth: 96)
             .frame(height: 30)
             .background(
                 Capsule().fill(Color(.secondarySystemBackground))

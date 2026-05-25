@@ -592,8 +592,106 @@ extension CodexService {
             capabilities: capabilities,
             defaultBuildAgentName: object["defaultBuildAgentName"]?.stringValue,
             defaultPlanAgentName: object["defaultPlanAgentName"]?.stringValue,
+            openCodeAgents: decodeOpenCodeAgents(object["openCodeAgents"]),
             modelCatalog: decodeAgentRuntimeModelCatalog(object["modelCatalog"])
         )
+    }
+
+    private func decodeOpenCodeAgents(_ value: JSONValue?) -> [OpenCodeAgentOption]? {
+        guard let entries = value?.arrayValue, !entries.isEmpty else {
+            return nil
+        }
+        let agents = entries.compactMap { entry -> OpenCodeAgentOption? in
+            guard let object = entry.objectValue,
+                  let id = object["id"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !id.isEmpty else {
+                return nil
+            }
+            return OpenCodeAgentOption(
+                id: id,
+                displayName: object["displayName"]?.stringValue ?? id,
+                isDefaultBuild: object["isDefaultBuild"]?.boolValue ?? false,
+                isDefaultPlan: object["isDefaultPlan"]?.boolValue ?? false
+            )
+        }
+        return agents.isEmpty ? nil : agents
+    }
+
+    func openCodeAgentOptions(for thread: CodexThread?) -> [OpenCodeAgentOption] {
+        let descriptor = agentRuntimeDescriptor(id: effectiveAgentRuntimeID(for: thread))
+        if let agents = descriptor?.openCodeAgents, !agents.isEmpty {
+            return agents
+        }
+        let buildDefault = descriptor?.defaultBuildAgentName ?? "build"
+        let planDefault = descriptor?.defaultPlanAgentName ?? "plan"
+        return [
+            OpenCodeAgentOption(id: buildDefault, displayName: buildDefault.capitalized, isDefaultBuild: true),
+            OpenCodeAgentOption(id: planDefault, displayName: planDefault.capitalized, isDefaultPlan: true),
+        ]
+    }
+
+    func effectiveOpenCodeBuildAgentName(for thread: CodexThread?) -> String {
+        if let locked = thread?.opencodeBuildAgentName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !locked.isEmpty {
+            return locked
+        }
+        let selected = selectedOpenCodeBuildAgentForNewThreads.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty {
+            return selected
+        }
+        return agentRuntimeDescriptor(id: "opencode")?.defaultBuildAgentName ?? "build"
+    }
+
+    func setSelectedOpenCodeBuildAgentForNewThreads(_ agentName: String) {
+        let normalized = agentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        selectedOpenCodeBuildAgentForNewThreads = normalized
+    }
+
+    func setOpenCodeBuildAgentName(_ agentName: String, for thread: CodexThread?) {
+        let normalized = agentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if var mutableThread = thread {
+            mutableThread.opencodeBuildAgentName = normalized
+            upsertThread(mutableThread)
+            return
+        }
+        setSelectedOpenCodeBuildAgentForNewThreads(normalized)
+    }
+
+    func effectiveCursorMode(for thread: CodexThread?) -> String {
+        let override = threadRuntimeOverride(for: thread?.id)?.cursorMode?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !override.isEmpty {
+            return normalizedCursorMode(override)
+        }
+        return normalizedCursorMode(selectedCursorModeForNewThreads)
+    }
+
+    func setSelectedCursorModeForNewThreads(_ mode: String) {
+        selectedCursorModeForNewThreads = normalizedCursorMode(mode)
+    }
+
+    func setCursorMode(_ mode: String, for thread: CodexThread?) {
+        let normalized = normalizedCursorMode(mode)
+        guard let threadID = normalizedInterruptIdentifier(thread?.id) else {
+            selectedCursorModeForNewThreads = normalized
+            return
+        }
+        mutateThreadRuntimeOverride(for: threadID) { override in
+            override.cursorMode = normalized
+        }
+    }
+
+    private func normalizedCursorMode(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "plan", "debug", "multitask", "ask":
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        case "none", "agent", "":
+            return "agent"
+        default:
+            return "agent"
+        }
     }
 
     private func normalizedAgentRuntimeID(_ value: String) -> String {
@@ -720,6 +818,7 @@ private extension CodexService {
         var currentOverride = threadRuntimeOverridesByThreadID[threadId] ?? CodexThreadRuntimeOverride(
             reasoningEffort: nil,
             serviceTierRawValue: nil,
+            cursorMode: nil,
             overridesReasoning: false,
             overridesServiceTier: false
         )

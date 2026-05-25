@@ -17,6 +17,9 @@ struct TurnComposerRuntimeState: Equatable {
     let agentRuntimeOptions: [AgentRuntimeDescriptor]
     let agentRuntimeCapabilities: AgentRuntimeCapabilities
     let isAgentRuntimeLocked: Bool
+    let openCodeAgentOptions: [OpenCodeAgentOption]
+    let selectedOpenCodeBuildAgentID: String
+    let selectedCursorModeID: String
 
     var selectedReasoningTitle: String {
         effectiveReasoningEffort.map(TurnComposerMetaMapper.reasoningTitle(for:)) ?? "Select reasoning"
@@ -24,6 +27,15 @@ struct TurnComposerRuntimeState: Equatable {
 
     var selectedAgentRuntimeTitle: String {
         agentRuntimeOptions.first(where: { $0.id == selectedAgentRuntimeID })?.displayName ?? "Codex"
+    }
+
+    var selectedOpenCodeBuildAgentTitle: String {
+        openCodeAgentOptions.first(where: { $0.id == selectedOpenCodeBuildAgentID })?.displayName
+            ?? selectedOpenCodeBuildAgentID.capitalized
+    }
+
+    var selectedCursorModeTitle: String {
+        CursorComposerModeOption.all.first(where: { $0.id == selectedCursorModeID })?.displayName ?? "None"
     }
 
     var selectedAgentRuntimeStatusMessage: String? {
@@ -61,7 +73,10 @@ struct TurnComposerRuntimeState: Equatable {
             selectedAgentRuntimeID: runtimeID,
             agentRuntimeOptions: codex.agentRuntimeOptionsForComposer(),
             agentRuntimeCapabilities: codex.effectiveAgentRuntimeCapabilities(for: lockedThread),
-            isAgentRuntimeLocked: isAgentRuntimeLocked
+            isAgentRuntimeLocked: isAgentRuntimeLocked,
+            openCodeAgentOptions: codex.openCodeAgentOptions(for: lockedThread),
+            selectedOpenCodeBuildAgentID: codex.effectiveOpenCodeBuildAgentName(for: lockedThread),
+            selectedCursorModeID: codex.effectiveCursorMode(for: lockedThread)
         )
     }
 }

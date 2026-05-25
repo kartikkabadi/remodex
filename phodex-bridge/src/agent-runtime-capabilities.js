@@ -71,6 +71,7 @@ function buildRuntimeListEntry({
   statusMessage = "",
   capabilities = getAgentRuntimeCapabilities(id),
   modelCatalog = null,
+  openCodeAgents = null,
 }) {
   const entry = {
     id,
@@ -90,6 +91,9 @@ function buildRuntimeListEntry({
   if (id === "opencode") {
     entry.defaultBuildAgentName = OPENCODE_DEFAULT_BUILD_AGENT_NAME;
     entry.defaultPlanAgentName = OPENCODE_DEFAULT_PLAN_AGENT_NAME;
+    if (Array.isArray(openCodeAgents) && openCodeAgents.length > 0) {
+      entry.openCodeAgents = openCodeAgents;
+    }
   }
 
   return entry;

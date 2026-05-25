@@ -669,7 +669,10 @@ private struct ComposerPreviewContent: View {
                 selectedAgentRuntimeID: "codex",
                 agentRuntimeOptions: [.codex],
                 agentRuntimeCapabilities: .codex,
-                isAgentRuntimeLocked: false
+                isAgentRuntimeLocked: false,
+                openCodeAgentOptions: [],
+                selectedOpenCodeBuildAgentID: "build",
+                selectedCursorModeID: "agent"
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },
@@ -677,7 +680,9 @@ private struct ComposerPreviewContent: View {
                 selectAutomaticReasoning: {},
                 selectReasoning: { _ in },
                 selectServiceTier: { _ in },
-                selectAgentRuntime: { _ in }
+                selectAgentRuntime: { _ in },
+                selectOpenCodeBuildAgent: { _ in },
+                selectCursorMode: { _ in }
             ),
             voiceButtonPresentation: TurnComposerVoiceButtonPresentation(
                 systemImageName: "mic",

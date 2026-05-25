@@ -13,6 +13,8 @@ struct TurnComposerRuntimeActions {
     let selectReasoning: (String) -> Void
     let selectServiceTier: (CodexServiceTier?) -> Void
     let selectAgentRuntime: (String) -> Void
+    let selectOpenCodeBuildAgent: (String) -> Void
+    let selectCursorMode: (String) -> Void
 
     static func resolve(codex: CodexService, thread: CodexThread?) -> TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
@@ -21,7 +23,9 @@ struct TurnComposerRuntimeActions {
             selectAutomaticReasoning: { codex.setSelectedReasoningEffort(nil) },
             selectReasoning: { effort in codex.setSelectedReasoningEffort(effort) },
             selectServiceTier: codex.setSelectedServiceTier,
-            selectAgentRuntime: codex.setSelectedAgentRuntimeForNewThreads
+            selectAgentRuntime: codex.setSelectedAgentRuntimeForNewThreads,
+            selectOpenCodeBuildAgent: { agentName in codex.setOpenCodeBuildAgentName(agentName, for: thread) },
+            selectCursorMode: { mode in codex.setCursorMode(mode, for: thread) }
         )
     }
 }

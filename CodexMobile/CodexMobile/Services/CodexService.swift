@@ -153,6 +153,7 @@ struct CodexBridgeUpdatePrompt: Identifiable, Equatable, Sendable {
 struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     var reasoningEffort: String?
     var serviceTierRawValue: String?
+    var cursorMode: String?
     var overridesReasoning: Bool
     var overridesServiceTier: Bool
 
@@ -164,7 +165,7 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     }
 
     var isEmpty: Bool {
-        !overridesReasoning && !overridesServiceTier
+        !overridesReasoning && !overridesServiceTier && (cursorMode?.isEmpty ?? true)
     }
 }
 
@@ -227,6 +228,26 @@ struct AgentRuntimeModelCatalog: Codable, Equatable, Sendable {
     )
 }
 
+struct OpenCodeAgentOption: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var displayName: String
+    var isDefaultBuild: Bool = false
+    var isDefaultPlan: Bool = false
+}
+
+struct CursorComposerModeOption: Equatable, Identifiable, Sendable {
+    let id: String
+    let displayName: String
+
+    static let all: [CursorComposerModeOption] = [
+        CursorComposerModeOption(id: "agent", displayName: "None"),
+        CursorComposerModeOption(id: "plan", displayName: "Plan"),
+        CursorComposerModeOption(id: "debug", displayName: "Debug"),
+        CursorComposerModeOption(id: "multitask", displayName: "Multitask"),
+        CursorComposerModeOption(id: "ask", displayName: "Ask"),
+    ]
+}
+
 struct AgentRuntimeDescriptor: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var displayName: String
@@ -235,6 +256,7 @@ struct AgentRuntimeDescriptor: Codable, Equatable, Identifiable, Sendable {
     var capabilities: AgentRuntimeCapabilities
     var defaultBuildAgentName: String? = nil
     var defaultPlanAgentName: String? = nil
+    var openCodeAgents: [OpenCodeAgentOption]? = nil
     var modelCatalog: AgentRuntimeModelCatalog? = nil
 
     var isReady: Bool {
@@ -480,6 +502,8 @@ final class CodexService {
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var defaultAgentRuntime: String = "codex"
     var selectedAgentRuntimeForNewThreads: String = "codex"
+    var selectedOpenCodeBuildAgentForNewThreads: String = "build"
+    var selectedCursorModeForNewThreads: String = "agent"
     var agentRuntimeDescriptors: [AgentRuntimeDescriptor] = [.codex]
     var selectedAccessMode: CodexAccessMode = .onRequest
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
