@@ -10,6 +10,7 @@ const {
 } = require("./canonical-events");
 
 const PERMISSION_REQUEST_METHOD = "remodex/request/permission";
+const USER_INPUT_REQUEST_METHOD = "item/tool/requestUserInput";
 
 function createOpenCodeCanonicalState() {
   return {
@@ -180,6 +181,10 @@ function convertOpenCodeEventToCanonical(event, {
     return [createPermissionRequest(event, properties, common)];
   }
 
+  if (type === "question.asked") {
+    return [createQuestionRequest(event, properties, common)];
+  }
+
   return [];
 }
 
@@ -240,7 +245,11 @@ function convertMessageUpdated(properties, common, state) {
     })];
   }
 
-  if (!info.time?.completed && !readString(info.finish)) {
+  const finish = readString(info.finish);
+  if (isNonTerminalFinishReason(finish)) {
+    return [];
+  }
+  if (!info.time?.completed && !finish) {
     return [];
   }
   if (state.completedMessageIds.has(messageId)) {
@@ -255,9 +264,14 @@ function convertMessageUpdated(properties, common, state) {
     payload: {
       sourceEventType: "message.updated",
       text: state.messageTextById.get(messageId) || readString(info.text) || readString(info.content) || "",
-      status: readString(info.finish) || "completed",
+      status: finish || "completed",
     },
   })];
+}
+
+function isNonTerminalFinishReason(value) {
+  const normalized = readString(value).toLowerCase().replace(/[_\s]+/g, "-");
+  return normalized === "tool-calls" || normalized === "tool-call";
 }
 
 function createPermissionRequest(event, properties, common) {
@@ -296,6 +310,60 @@ function createPermissionRequest(event, properties, common) {
         },
       },
     },
+  };
+}
+
+function createQuestionRequest(event, properties, common) {
+  const requestId = readString(properties.id) || readString(properties.requestID) || readString(event.id);
+  const rawQuestions = Array.isArray(properties.questions) ? properties.questions : [];
+  const questions = rawQuestions.map((question, index) => normalizeQuestion(question, index));
+  const tool = properties.tool && typeof properties.tool === "object" ? properties.tool : {};
+
+  return {
+    jsonrpc: "2.0",
+    id: requestId || undefined,
+    method: USER_INPUT_REQUEST_METHOD,
+    params: {
+      schemaVersion: 1,
+      ...common,
+      itemId: readString(tool.callID)
+        || readString(tool.messageID)
+        || `opencode-question-${requestId || readString(event.id) || "active"}`,
+      requestId,
+      questionRequestId: requestId,
+      questions,
+      payload: {
+        sourceEventType: "question.asked",
+        request: {
+          id: requestId,
+          questions: rawQuestions,
+          tool,
+        },
+      },
+    },
+  };
+}
+
+function normalizeQuestion(question, index) {
+  const source = question && typeof question === "object" ? question : {};
+  const rawOptions = Array.isArray(source.options) ? source.options : [];
+  const options = rawOptions.map((option) => {
+    const entry = option && typeof option === "object" ? option : {};
+    return {
+      label: readString(entry.label) || readString(option),
+      description: readString(entry.description),
+    };
+  }).filter((option) => option.label);
+  const allowsMultiple = source.multiple === true;
+  const customAllowed = source.custom !== false;
+
+  return {
+    id: readString(source.id) || `q${index + 1}`,
+    header: readString(source.header) || `Question ${index + 1}`,
+    question: readString(source.question) || "Answer this question",
+    isOther: customAllowed,
+    selectionLimit: allowsMultiple ? Math.max(options.length, 1) : 1,
+    options,
   };
 }
 
@@ -346,6 +414,7 @@ function readString(value) {
 
 module.exports = {
   PERMISSION_REQUEST_METHOD,
+  USER_INPUT_REQUEST_METHOD,
   convertOpenCodeEventToCanonical,
   createOpenCodeCanonicalState,
 };

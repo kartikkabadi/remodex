@@ -38,7 +38,16 @@ test("OpenCode allowlist permits runtime API endpoints and denies auth mutation"
   assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/prompt_async"), true);
   assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/abort"), true);
   assert.equal(isAllowedOpenCodeRequest("GET", "/session/ses_1/diff"), true);
+  assert.equal(isAllowedOpenCodeRequest("GET", "/session/ses_1/message"), true);
+  assert.equal(isAllowedOpenCodeRequest("GET", "/session/ses_1/message/msg_1"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/fork"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/summarize"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/revert"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/unrevert"), true);
   assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/permissions/perm_1"), true);
+  assert.equal(isAllowedOpenCodeRequest("GET", "/question"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/question/que_1/reply"), true);
+  assert.equal(isAllowedOpenCodeRequest("POST", "/question/que_1/reject"), true);
   assert.equal(isAllowedOpenCodeRequest("POST", "/permission/perm_1/reply"), true);
   assert.equal(isAllowedOpenCodeRequest("PUT", "/auth"), false);
   assert.equal(isAllowedOpenCodeRequest("POST", "/session/ses_1/share"), false);

@@ -672,7 +672,8 @@ private struct ComposerPreviewContent: View {
                 isAgentRuntimeLocked: false,
                 openCodeAgentOptions: [],
                 selectedOpenCodeBuildAgentID: "build",
-                selectedCursorModeID: "agent"
+                selectedCursorModeID: "agent",
+                agentRuntimeModelProviders: []
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },

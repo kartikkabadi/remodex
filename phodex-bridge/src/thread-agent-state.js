@@ -83,6 +83,9 @@ function normalizeThreadRecord(threadId, record = {}, { now = () => new Date().t
       || OPENCODE_DEFAULT_BUILD_AGENT_NAME,
     opencodePlanAgentName: normalizeNonEmptyString(record.opencodePlanAgentName)
       || OPENCODE_DEFAULT_PLAN_AGENT_NAME,
+    model: normalizeNonEmptyString(record.model),
+    modelProvider: normalizeNonEmptyString(record.modelProvider),
+    modelVariant: normalizeNonEmptyString(record.modelVariant),
     runtimeLocked: record.runtimeLocked === true,
     createdAt: normalizeNonEmptyString(record.createdAt) || timestamp,
     updatedAt: timestamp,
@@ -170,6 +173,9 @@ function createThreadAgentStateStore(options = {}) {
       cwd: source.cwd,
       opencodeBuildAgentName: source.opencodeBuildAgentName,
       opencodePlanAgentName: source.opencodePlanAgentName,
+      model: source.model,
+      modelProvider: source.modelProvider,
+      modelVariant: source.modelVariant,
       runtimeLocked: source.runtimeLocked,
       createdAt: source.createdAt,
     });

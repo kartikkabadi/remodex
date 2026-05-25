@@ -256,6 +256,21 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     }
 
     private static func providerOptions(_ input: Input) -> [RuntimeMenuProviderOption] {
+        let catalogProviders = input.runtimeState.agentRuntimeModelProviders
+        if !catalogProviders.isEmpty {
+            return catalogProviders.map { provider in
+                let modelCount = provider.modelIds.isEmpty
+                    ? input.orderedModelOptions.filter { $0.providerID == provider.id }.count
+                    : provider.modelIds.count
+                return RuntimeMenuProviderOption(
+                    id: provider.id,
+                    displayName: provider.displayName,
+                    modelCount: modelCount,
+                    isDefault: provider.isDefault
+                )
+            }
+        }
+
         var providersByID: [String: RuntimeMenuProviderOption] = [:]
         var orderedProviderIDs: [String] = []
         for model in input.orderedModelOptions {

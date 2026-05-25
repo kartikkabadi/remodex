@@ -279,6 +279,18 @@ function isAllowedOpenCodeRequest(method, path) {
   if (/^\/permission\/[^/]+\/reply$/.test(normalizedPath)) {
     return normalizedMethod === "POST";
   }
+  if (normalizedPath === "/question") {
+    return normalizedMethod === "GET";
+  }
+  if (/^\/question\/[^/]+\/(reply|reject)$/.test(normalizedPath)) {
+    return normalizedMethod === "POST";
+  }
+  if (normalizedPath === "/agent" || normalizedPath === "/skill") {
+    return normalizedMethod === "GET";
+  }
+  if (normalizedPath === "/provider" || normalizedPath === "/config/providers") {
+    return normalizedMethod === "GET";
+  }
   if (normalizedPath === "/session") {
     return normalizedMethod === "GET" || normalizedMethod === "POST";
   }
@@ -291,6 +303,12 @@ function isAllowedOpenCodeRequest(method, path) {
   if (/^\/session\/[^/]+\/(abort|prompt_async|diff)$/.test(normalizedPath)) {
     return (normalizedMethod === "POST" && !normalizedPath.endsWith("/diff"))
       || (normalizedMethod === "GET" && normalizedPath.endsWith("/diff"));
+  }
+  if (/^\/session\/[^/]+\/message(\/[^/]+)?$/.test(normalizedPath)) {
+    return normalizedMethod === "GET";
+  }
+  if (/^\/session\/[^/]+\/(fork|summarize|revert|unrevert)$/.test(normalizedPath)) {
+    return normalizedMethod === "POST";
   }
   if (/^\/session\/[^/]+\/permissions\/[^/]+$/.test(normalizedPath)) {
     return normalizedMethod === "POST";

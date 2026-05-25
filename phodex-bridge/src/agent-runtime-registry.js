@@ -453,6 +453,22 @@ function createAgentRuntimeRegistry({
         || readString(params.opencode_plan_agent_name)
         || existing?.opencodePlanAgentName
         || OPENCODE_DEFAULT_PLAN_AGENT_NAME,
+      model: readString(params.model)
+        || readString(params.runtimeModel)
+        || readString(params.runtime_model)
+        || existing?.model
+        || "",
+      modelProvider: readString(params.modelProvider)
+        || readString(params.model_provider)
+        || readString(params.providerID)
+        || readString(params.provider_id)
+        || existing?.modelProvider
+        || "",
+      modelVariant: readString(params.modelVariant)
+        || readString(params.model_variant)
+        || readString(params.variant)
+        || existing?.modelVariant
+        || "",
       runtimeLocked: existing?.runtimeLocked === true,
     });
 
@@ -533,6 +549,9 @@ function createAgentRuntimeRegistry({
       cwd: existing?.cwd || readString(thread?.cwd) || "",
       opencodeBuildAgentName: existing?.opencodeBuildAgentName || OPENCODE_DEFAULT_BUILD_AGENT_NAME,
       opencodePlanAgentName: existing?.opencodePlanAgentName || OPENCODE_DEFAULT_PLAN_AGENT_NAME,
+      model: existing?.model || readString(thread?.model) || "",
+      modelProvider: existing?.modelProvider || readString(thread?.modelProvider) || readString(thread?.model_provider) || "",
+      modelVariant: existing?.modelVariant || readString(thread?.modelVariant) || readString(thread?.model_variant) || "",
     });
   }
 
@@ -612,6 +631,15 @@ function createAgentRuntimeRegistry({
     thread.agentSessionId = runtime.agentSessionId;
     thread.opencodeBuildAgentName = runtime.opencodeBuildAgentName;
     thread.opencodePlanAgentName = runtime.opencodePlanAgentName;
+    if (runtime.model) {
+      thread.model = runtime.model;
+    }
+    if (runtime.modelProvider) {
+      thread.modelProvider = runtime.modelProvider;
+    }
+    if (runtime.modelVariant) {
+      thread.modelVariant = runtime.modelVariant;
+    }
     return thread;
   }
 

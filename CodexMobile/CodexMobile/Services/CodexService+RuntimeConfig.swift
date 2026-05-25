@@ -286,7 +286,13 @@ extension CodexService {
     }
 
     func selectedModelOption(for thread: CodexThread?) -> CodexModelOption? {
-        selectedModelOption(from: modelOptions(for: thread), agentRuntime: effectiveAgentRuntimeID(for: thread))
+        let runtime = effectiveAgentRuntimeID(for: thread)
+        let models = modelOptions(for: thread)
+        if runtime != "codex",
+           let threadModel = selectedModelOptionForLockedRuntimeThread(thread, models: models) {
+            return threadModel
+        }
+        return selectedModelOption(from: models, agentRuntime: runtime)
     }
 
     // Composer chrome should not present the canonical fallback as a loaded user choice.
@@ -707,20 +713,71 @@ extension CodexService {
     }
 
     func setSelectedRuntimeModelId(_ modelId: String?, for thread: CodexThread?) {
-        setSelectedModelId(modelId, forAgentRuntime: effectiveAgentRuntimeID(for: thread))
+        let runtime = effectiveAgentRuntimeID(for: thread)
+        guard runtime != "codex" else {
+            setSelectedModelId(modelId, forAgentRuntime: runtime)
+            return
+        }
+
+        let normalized = modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if var mutableThread = thread,
+           normalized?.isEmpty == false {
+            let selected = modelOptions(for: thread).first { model in
+                model.id == normalized || model.model == normalized
+            }
+            mutableThread.model = selected?.model ?? normalized
+            mutableThread.modelProvider = selected?.providerID ?? mutableThread.modelProvider
+            upsertThread(mutableThread)
+            return
+        }
+
+        setSelectedModelId(modelId, forAgentRuntime: runtime)
     }
 
     func setSelectedRuntimeProviderId(_ providerId: String, for thread: CodexThread?) {
         let normalizedProviderID = providerId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedProviderID.isEmpty else { return }
 
+        let catalogProvider = agentRuntimeModelProviders(for: thread).first { $0.id == normalizedProviderID }
         let models = modelOptions(for: thread).filter { model in
-            model.providerID == normalizedProviderID
+            model.providerID == normalizedProviderID || catalogProvider?.modelIds.contains(model.id) == true
         }
         guard let selectedModel = models.first(where: { $0.isDefault }) ?? models.first else {
             return
         }
         setSelectedRuntimeModelId(selectedModel.id, for: thread)
+    }
+
+    func agentRuntimeModelProviders(for thread: CodexThread?) -> [AgentRuntimeModelProvider] {
+        let runtime = effectiveAgentRuntimeID(for: thread)
+        guard runtime != "codex" else { return [] }
+        return agentRuntimeDescriptor(id: runtime)?.modelCatalog?.providers ?? []
+    }
+
+    private func selectedModelOptionForLockedRuntimeThread(
+        _ thread: CodexThread?,
+        models: [CodexModelOption]
+    ) -> CodexModelOption? {
+        guard let thread else { return nil }
+        let threadModel = thread.model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let threadProvider = thread.modelProvider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !threadModel.isEmpty || !threadProvider.isEmpty else { return nil }
+
+        if let direct = models.first(where: { model in
+            model.id == threadModel || model.model == threadModel
+        }) {
+            return direct
+        }
+
+        if !threadProvider.isEmpty,
+           let byProvider = models.first(where: { model in
+               model.providerID == threadProvider
+                   && (model.modelID == threadModel || model.id == "\(threadProvider)/\(threadModel)")
+           }) {
+            return byProvider
+        }
+
+        return nil
     }
 
     private func setSelectedCodexModelId(_ modelId: String?) {

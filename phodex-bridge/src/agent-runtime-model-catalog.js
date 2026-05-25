@@ -169,8 +169,11 @@ function resolveRuntimeModelSelection(params = {}, record = {}, catalog = {}) {
   const rawModel = readString(params.runtimeModel)
     || readString(params.runtime_model)
     || readString(params.model)
+    || combineProviderModel(params.modelProvider || params.model_provider || params.providerID || params.provider_id, params.modelID || params.model_id)
+    || readString(record.model)
     || readString(record.runtimeModel)
     || readString(record.selectedModel)
+    || combineProviderModel(record.modelProvider, record.modelID || record.model_id)
     || readString(catalog.defaultModelId);
   return findRuntimeModelOption(rawModel, catalog) || null;
 }
@@ -229,6 +232,12 @@ function parseProviderModelIdentifier(value) {
     providerID: normalized.slice(0, slashIndex),
     modelID: normalized.slice(slashIndex + 1),
   };
+}
+
+function combineProviderModel(provider, model) {
+  const providerID = readString(provider);
+  const modelID = readString(model);
+  return providerID && modelID ? `${providerID}/${modelID}` : "";
 }
 
 function readOpenCodePreferredModelId({ fsImpl = fs } = {}) {

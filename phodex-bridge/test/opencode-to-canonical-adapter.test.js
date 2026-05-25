@@ -9,6 +9,7 @@ const assert = require("node:assert/strict");
 
 const {
   PERMISSION_REQUEST_METHOD,
+  USER_INPUT_REQUEST_METHOD,
   convertOpenCodeEventToCanonical,
   createOpenCodeCanonicalState,
 } = require("../src/opencode-to-canonical-adapter");
@@ -138,6 +139,25 @@ test("OpenCode adapter preserves whitespace in streamed text deltas", () => {
   assert.equal(completed[0].params.payload.text, "Hey. How can I help?");
 });
 
+test("OpenCode adapter does not complete turns on tool-call finish reasons", () => {
+  const state = createOpenCodeCanonicalState();
+  const completed = convertFixture({
+    type: "message.updated",
+    properties: {
+      sessionID: "ses_123",
+      info: {
+        id: "msg_tool_calls",
+        sessionID: "ses_123",
+        role: "assistant",
+        time: { created: 1, completed: 2 },
+        finish: "tool-calls",
+      },
+    },
+  }, state);
+
+  assert.deepEqual(completed, []);
+});
+
 test("OpenCode adapter maps completion, diff, tools, and errors to canonical events", () => {
   const state = createOpenCodeCanonicalState();
   convertFixture({
@@ -237,6 +257,38 @@ test("OpenCode adapter maps permission requests without auto-allowing them", () 
   assert.equal(permission[0].params.permissionId, "per_123");
   assert.equal(permission[0].params.payload.request.permissions.edit, true);
   assert.equal(permission[0].params.payload.request.toolName, "edit");
+});
+
+test("OpenCode adapter maps question requests to structured user input", () => {
+  const question = convertFixture({
+    type: "question.asked",
+    properties: {
+      id: "que_123",
+      sessionID: "ses_123",
+      questions: [{
+        header: "Path",
+        question: "Which route should we take?",
+        multiple: true,
+        options: [
+          { label: "Small", description: "Keep the change scoped" },
+          { label: "Broad", description: "Take the larger refactor" },
+        ],
+      }],
+      tool: {
+        messageID: "msg_tool",
+        callID: "call_question",
+      },
+    },
+  }, createOpenCodeCanonicalState());
+
+  assert.equal(question.length, 1);
+  assert.equal(question[0].method, USER_INPUT_REQUEST_METHOD);
+  assert.equal(question[0].id, "que_123");
+  assert.equal(question[0].params.itemId, "call_question");
+  assert.equal(question[0].params.questions[0].id, "q1");
+  assert.equal(question[0].params.questions[0].header, "Path");
+  assert.equal(question[0].params.questions[0].selectionLimit, 2);
+  assert.equal(question[0].params.questions[0].options[0].label, "Small");
 });
 
 function convertFixture(event, state) {
