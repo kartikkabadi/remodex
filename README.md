@@ -44,7 +44,7 @@ If you want the public-repo distribution model explained clearly, read [SELF_HOS
 
 **Why this fork still matters:** Official Codex-in-ChatGPT mobile is Codex-only. This branch targets **multiple agent runtimes** (OpenCode, Cursor), **self-hosted relay**, and optional Telegram — not the same product surface.
 
-**Prerequisites for OpenCode/Cursor on this branch:** OpenCode CLI, Cursor `agent acp`, Codex CLI auth on the Mac. Agents: start at [Docs/WHERE_TO_WORK.md](Docs/WHERE_TO_WORK.md).
+**Prerequisites for OpenCode/Cursor on this branch:** OpenCode CLI, Cursor `agent acp`, Codex CLI auth on the Mac. **Agents:** read [Docs/agents/README.md](Docs/agents/README.md).
 
 > **I am very early in this project. Expect bugs.**
 >

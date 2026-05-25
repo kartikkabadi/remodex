@@ -2,6 +2,10 @@
 
 Keep this file and `CLAUDE.md` aligned.
 
+## Agent bootstrap
+
+Before picking work, read [Docs/agents/README.md](Docs/agents/README.md). Issue queue: [Docs/agents/issue-tracker.md](Docs/agents/issue-tracker.md). Domain: [Docs/agents/domain.md](Docs/agents/domain.md).
+
 This repo is local-first now. Do not reintroduce hosted-service assumptions, remote deployment runbooks, or hardcoded production domains.
 
 ## Core guardrails
@@ -46,21 +50,21 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 
 ## Multi-agent runtime program
 
-When working on OpenCode, Cursor, canonical events, or `agentRuntime`, read **[Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md)** first. Work tickets live as GitHub issues on **kartikkabadi/remodex** — see [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md). Do not merge upstream `modelProvider` router branches wholesale.
+When working on OpenCode, Cursor, canonical events, or `agentRuntime`, read **[Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md)** after [Docs/agents/README.md](Docs/agents/README.md). Work tickets live as GitHub issues on **kartikkabadi/remodex** — see [Docs/agents/issue-tracker.md](Docs/agents/issue-tracker.md). Do not merge upstream `modelProvider` router branches wholesale.
 
 ## Agent skills
 
 ### Issue tracker
 
-GitHub issues on fork **kartikkabadi/remodex** (always `--repo kartikkabadi/remodex`). See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+GitHub issues on fork **kartikkabadi/remodex** (always `--repo kartikkabadi/remodex`). See [Docs/agents/issue-tracker.md](Docs/agents/issue-tracker.md).
 
 ### Triage labels
 
-Canonical roles mapped in [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+Canonical roles mapped in [Docs/agents/triage-labels.md](Docs/agents/triage-labels.md).
 
 ### Domain docs
 
-Single-context: [CONTEXT.md](CONTEXT.md) + [Docs/adr/](Docs/adr/). See [docs/agents/domain.md](docs/agents/domain.md).
+Single-context: [CONTEXT.md](CONTEXT.md) + [Docs/adr/](Docs/adr/). See [Docs/agents/domain.md](Docs/agents/domain.md).
 
 ## Local quick runbook
 
