@@ -13,6 +13,7 @@ const {
 } = require("./rollout-watch");
 const { resolveCodexGeneratedImagesRoot } = require("./codex-home");
 const { buildApplyPatchFileChangeItem } = require("./apply-patch-changes");
+const { convertCodexNotificationToCanonical } = require("./codex-to-canonical-adapter");
 
 const DEFAULT_POLL_INTERVAL_MS = 700;
 const DEFAULT_LOOKUP_TIMEOUT_MS = 5_000;
@@ -170,9 +171,15 @@ function createThreadRolloutLiveMirror({
           return;
         }
 
-        const combined = `${partialLine}${chunk}`;
-        const lines = combined.split("\n");
-        partialLine = lines.pop() || "";
+        const combined = partialLine ? `${partialLine}${chunk}` : chunk;
+        let searchStart = 0;
+        let nlIndex;
+        const lines = [];
+        while ((nlIndex = combined.indexOf("\n", searchStart)) !== -1) {
+          lines.push(combined.substring(searchStart, nlIndex));
+          searchStart = nlIndex + 1;
+        }
+        partialLine = searchStart < combined.length ? combined.substring(searchStart) : "";
         processRolloutLines(lines, state, sendApplicationResponse);
         return;
       }
@@ -311,7 +318,7 @@ function processRolloutLines(lines, state, sendApplicationResponse) {
 
     const notifications = synthesizeNotificationsFromRolloutEntry(parsed, state);
     for (const notification of notifications) {
-      sendApplicationResponse(JSON.stringify(notification));
+      emitRolloutNotification(notification, state, sendApplicationResponse);
     }
   }
 }
@@ -372,6 +379,7 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
         state.pendingUserMessages.push({
           id: readString(payload.id),
           message,
+          timestamp: readUserMessageTimestamp(entry, payload),
         });
         return [];
       }
@@ -380,6 +388,7 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
         threadId: state.threadId,
         turnId,
         message,
+        ...timestampParams(readUserMessageTimestamp(entry, payload)),
       }));
       return notifications;
     }
@@ -981,6 +990,30 @@ function createNotification(method, params = {}) {
   };
 }
 
+function emitRolloutNotification(notification, state, sendApplicationResponse) {
+  const method = readString(notification?.method);
+  const threadId = readString(notification?.params?.threadId) || readString(state?.threadId) || "";
+  const canonicalDisabled = process.env.REMODEX_CANONICAL_CODEX_EVENTS === "0"
+    || process.env.REMODEX_CANONICAL_CODEX_EVENTS === "false";
+
+  if (!canonicalDisabled && method.startsWith("codex/event/")) {
+    try {
+      const converted = convertCodexNotificationToCanonical(notification, {
+        agentRuntime: "codex",
+        resolveAgentSessionId: ({ threadId: resolvedThreadId }) => resolvedThreadId || threadId,
+      });
+      if (converted) {
+        sendApplicationResponse(JSON.stringify(converted));
+        return;
+      }
+    } catch (err) {
+      console.warn(`${readString(state?.logPrefix) || "[remodex]"} rollout canonical conversion failed: ${err?.message || err}`);
+    }
+  }
+
+  sendApplicationResponse(JSON.stringify(notification));
+}
+
 function flushPendingUserMessageNotifications(state, turnId) {
   const messages = state.pendingUserMessages.splice(0);
   if (messages.length === 0) {
@@ -992,7 +1025,25 @@ function flushPendingUserMessageNotifications(state, turnId) {
     turnId: turnId || state.activeTurnId || "",
     message: pending.message,
     ...(pending.id ? { id: pending.id } : {}),
+    ...timestampParams(pending.timestamp),
   }));
+}
+
+function readUserMessageTimestamp(entry, payload = {}) {
+  return firstNonEmptyString([
+    readString(payload.createdAt),
+    readString(payload.created_at),
+    readString(payload.timestamp),
+    readString(payload.time),
+    readString(entry?.timestamp),
+  ]);
+}
+
+function timestampParams(timestamp) {
+  const normalizedTimestamp = readString(timestamp);
+  return normalizedTimestamp
+    ? { createdAt: normalizedTimestamp, timestamp: normalizedTimestamp }
+    : {};
 }
 
 function buildSyntheticItemId(kind, threadId, turnId, suffix = "") {

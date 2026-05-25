@@ -1,0 +1,11 @@
+default: full-review
+
+remodex-wave0:
+  description: "Remodex #17 — bridge hygiene and CI (plan, build, review with test gate)"
+  steps:
+    - agent: planner
+      prompt: "Read AGENTS.md and Docs/plans/multi-agent-runtime.md. Plan implementation for Wave 0 / issue #17: $INPUT"
+    - agent: builder
+      prompt: "Implement this plan in the Remodex repo. Follow AGENTS.md guardrails:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Review this implementation. Run cd phodex-bridge && npm test when verifying bridge changes. List bugs, missing requirements, and concrete fixes:\n\n$INPUT"

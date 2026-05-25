@@ -79,7 +79,7 @@ struct ComposerBottomBar: View {
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             attachmentMenu
                 .padding(.leading, 8)
             inlineAccessMenuLabel
@@ -419,9 +419,15 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
-    private var inlineRuntimeLabelWidth: CGFloat {
-        let measuredWidth = availableBottomBarWidth > 0 ? availableBottomBarWidth : 760
-        return min(max(measuredWidth * 0.18, 124), 210)
+    private let minInlineRuntimeLabelWidth: CGFloat = 88
+    private let maxInlineRuntimeLabelWidth: CGFloat = 200
+
+    private var inlineRuntimeLabelMaxWidth: CGFloat {
+        guard availableBottomBarWidth > 0 else {
+            return maxInlineRuntimeLabelWidth
+        }
+        let budget = availableBottomBarWidth * 0.22
+        return min(max(budget, minInlineRuntimeLabelWidth), maxInlineRuntimeLabelWidth)
     }
 
     static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
@@ -465,7 +471,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                 )
             )
         }
-        .layoutPriority(-1)
+        .layoutPriority(1)
         .tint(metaLabelColor)
         .accessibilityLabel(runtimeAccessibilityLabel)
     }
@@ -480,7 +486,9 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
 
     private var effortLabelPart: String? {
         guard selectedModelID != nil else { return nil }
-        return compactReasoningTitle(runtimeState.selectedReasoningTitle)
+        let trimmed = runtimeState.selectedReasoningTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "Select reasoning" else { return nil }
+        return trimmed
     }
 
     // Keeps inline runtime metadata short so stop + send controls do not move the composer.
@@ -508,22 +516,6 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             return "\(selectedModelTitle), \(effort)"
         }
         return selectedModelTitle
-    }
-
-    private func compactReasoningTitle(_ title: String) -> String? {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != "Select reasoning" else {
-            return nil
-        }
-
-        switch trimmed.lowercased() {
-        case "extra high":
-            return "XH"
-        case "medium":
-            return "Med"
-        default:
-            return trimmed
-        }
     }
 
     // Identifiers pinned to the top of the model submenu; the rest are reachable
@@ -557,8 +549,8 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 4)
-        .frame(width: inlineRuntimeLabelWidth, alignment: .leading)
-        .clipped()
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: inlineRuntimeLabelMaxWidth, alignment: .leading)
         .contentShape(Rectangle())
     }
 
