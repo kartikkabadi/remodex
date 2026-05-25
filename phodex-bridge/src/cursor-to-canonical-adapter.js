@@ -163,11 +163,11 @@ function convertCursorAcpFrameToCanonical(frame, {
 
 function cursorModeForParams(params = {}) {
   const mode = readString(params.mode) || readString(params.turnMode) || readString(params.turn_mode);
-  if (mode === "plan" || params.plan === true) {
-    return "plan";
+  if (["agent", "plan", "ask", "debug", "multitask"].includes(mode)) {
+    return mode;
   }
-  if (mode === "ask") {
-    return "ask";
+  if (params.plan === true) {
+    return "plan";
   }
   return "agent";
 }

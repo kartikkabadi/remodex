@@ -82,9 +82,12 @@ test("Cursor adapter maps permission request without auto-allowing it", () => {
 });
 
 test("cursorModeForParams preserves plan and ask while defaulting to Cursor agent mode", () => {
+  assert.equal(cursorModeForParams({ mode: "agent" }), "agent");
   assert.equal(cursorModeForParams({ mode: "plan" }), "plan");
   assert.equal(cursorModeForParams({ plan: true }), "plan");
   assert.equal(cursorModeForParams({ mode: "ask" }), "ask");
+  assert.equal(cursorModeForParams({ mode: "debug" }), "debug");
+  assert.equal(cursorModeForParams({ mode: "multitask" }), "multitask");
   assert.equal(cursorModeForParams({}), "agent");
 });
 

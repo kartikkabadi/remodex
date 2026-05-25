@@ -110,6 +110,79 @@ test("Cursor thread/resume reuses the stored ACP session without creating a new 
   });
 });
 
+test("Cursor thread/read and turns/list return stored runtime session state", async () => {
+  await withTempState(async ({ stateStore }) => {
+    const pendingPrompt = new Promise(() => {});
+    const { adapter } = createAdapter({
+      stateStore,
+      clientResults: [pendingPrompt],
+    });
+    stateStore.upsert("thread-cursor", {
+      agentRuntime: "cursor",
+      agentSessionId: "cur-existing",
+      cwd: "/repo",
+      model: "cursor-model",
+      modelProvider: "cursor",
+      runtimeLocked: true,
+    });
+    const outbound = [];
+
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "turn-start-read",
+        method: "turn/start",
+        params: {
+          threadId: "thread-cursor",
+          turnId: "turn-running",
+          prompt: "Keep running",
+        },
+      },
+      threadId: "thread-cursor",
+      sendResponse(rawMessage) {
+        outbound.push(JSON.parse(rawMessage));
+      },
+    });
+
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "thread-read-1",
+        method: "thread/read",
+        params: { threadId: "thread-cursor" },
+      },
+      threadId: "thread-cursor",
+      sendResponse(rawMessage) {
+        outbound.push(JSON.parse(rawMessage));
+      },
+    });
+
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "turns-list-1",
+        method: "thread/turns/list",
+        params: {
+          threadId: "thread-cursor",
+          sortDirection: "desc",
+        },
+      },
+      threadId: "thread-cursor",
+      sendResponse(rawMessage) {
+        outbound.push(JSON.parse(rawMessage));
+      },
+    });
+
+    const readResponse = outbound.find((message) => message.id === "thread-read-1");
+    assert.equal(readResponse.result.thread.agentRuntime, "cursor");
+    assert.equal(readResponse.result.thread.agentSessionId, "cur-existing");
+    assert.equal(readResponse.result.thread.status, "running");
+    assert.equal(readResponse.result.thread.activeTurnId, "turn-running");
+
+    const turnsResponse = outbound.find((message) => message.id === "turns-list-1");
+    assert.equal(turnsResponse.result.turns.length, 1);
+    assert.equal(turnsResponse.result.turns[0].turnId, "turn-running");
+    assert.equal(turnsResponse.result.agentSessionId, "cur-existing");
+  });
+});
+
 test("Cursor turn/start prompts in plan mode and maps ACP notifications to canonical", async () => {
   await withTempState(async ({ stateStore }) => {
     const { adapter, requests } = createAdapter({
@@ -202,9 +275,10 @@ test("Cursor handleRuntimeResponse forwards phone permission replies to ACP", as
       params: { id: "perm-1" },
     });
 
+    const permissionRequestId = outbound.find((message) => message.method === "remodex/request/permission")?.id;
     const handled = await adapter.handleRuntimeResponse({
       parsed: {
-        id: 42,
+        id: permissionRequestId,
         result: { decision: "accept" },
       },
       sendResponse(rawMessage) {
@@ -261,6 +335,81 @@ test("Cursor stop sends session/cancel and transport does not auto-approve permi
     assert.equal(outbound[0].result.cancelled, true);
     assert.equal(outbound[1].method, "remodex/request/permission");
     assert.equal(permissionResult, undefined);
+  });
+});
+
+test("Cursor permission replies are scoped by thread and ACP request id", async () => {
+  await withTempState(async ({ stateStore }) => {
+    const fakeClients = [];
+    const { adapter } = createAdapter({
+      stateStore,
+      clientResults: [new Promise(() => {}), new Promise(() => {})],
+      fakeClients,
+    });
+    stateStore.upsert("thread-a", {
+      agentRuntime: "cursor",
+      agentSessionId: "cur-a",
+      runtimeLocked: true,
+    });
+    stateStore.upsert("thread-b", {
+      agentRuntime: "cursor",
+      agentSessionId: "cur-b",
+      runtimeLocked: true,
+    });
+    const outbound = [];
+    const sendResponse = (rawMessage) => outbound.push(JSON.parse(rawMessage));
+
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "turn-a",
+        method: "turn/start",
+        params: { threadId: "thread-a", turnId: "turn-a", prompt: "A" },
+      },
+      threadId: "thread-a",
+      sendResponse,
+    });
+    await adapter.handleRuntimeRequest({
+      parsed: {
+        id: "turn-b",
+        method: "turn/start",
+        params: { threadId: "thread-b", turnId: "turn-b", prompt: "B" },
+      },
+      threadId: "thread-b",
+      sendResponse,
+    });
+
+    fakeClients[0].emitRequest({
+      id: 7,
+      method: "permission/request",
+      params: { id: "perm-a" },
+    });
+    fakeClients[1].emitRequest({
+      id: 7,
+      method: "permission/request",
+      params: { id: "perm-b" },
+    });
+
+    const permissionRequests = outbound.filter((message) => message.method === "remodex/request/permission");
+    assert.equal(permissionRequests.length, 2);
+    assert.notEqual(permissionRequests[0].id, permissionRequests[1].id);
+
+    await adapter.handleRuntimeResponse({
+      parsed: {
+        id: permissionRequests[0].id,
+        result: { decision: "accept-a" },
+      },
+      sendResponse,
+    });
+    await adapter.handleRuntimeResponse({
+      parsed: {
+        id: permissionRequests[1].id,
+        result: { decision: "accept-b" },
+      },
+      sendResponse,
+    });
+
+    assert.deepEqual(fakeClients[0].responded, [{ id: 7, result: { decision: "accept-a" } }]);
+    assert.deepEqual(fakeClients[1].responded, [{ id: 7, result: { decision: "accept-b" } }]);
   });
 });
 

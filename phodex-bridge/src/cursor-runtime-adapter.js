@@ -63,6 +63,12 @@ function createCursorRuntimeAdapter({
       if (method === "thread/resume") {
         return handleThreadResume(context);
       }
+      if (method === "thread/read") {
+        return handleThreadRead(context);
+      }
+      if (method === "thread/turns/list") {
+        return handleThreadTurnsList(context);
+      }
       if (method === "turn/start") {
         return handleTurnStart(context);
       }
@@ -112,10 +118,18 @@ function createCursorRuntimeAdapter({
       },
       onRequest(frame) {
         if (isCursorPermissionRequest(frame)) {
-          pendingPermissionsById.set(String(frame.id), {
-            threadId,
-            acpRequestId: frame.id,
-          });
+          if (frame.id != null) {
+            const requestId = cursorPermissionRequestKey(threadId, frame.id);
+            pendingPermissionsById.set(requestId, {
+              threadId,
+              acpRequestId: frame.id,
+            });
+            sendCursorCanonical(sendResponse, {
+              ...frame,
+              id: requestId,
+            }, threadId);
+            return undefined;
+          }
         }
         sendCursorCanonical(sendResponse, frame, threadId);
         return undefined;
@@ -210,6 +224,52 @@ function createCursorRuntimeAdapter({
           agentSessionId,
         },
       },
+    });
+    return { responded: true };
+  }
+
+  async function handleThreadRead({ parsed, threadId, sendResponse }) {
+    const params = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+    const resolvedThreadId = threadId || extractThreadId(params);
+    const { record, agentSessionId } = resolveKnownThreadSession(resolvedThreadId, params, "thread/read");
+    sendJsonRpcResult(sendResponse, parsed.id, {
+      thread: buildCursorThreadPayload(resolvedThreadId, record, agentSessionId, params),
+    });
+    return { responded: true };
+  }
+
+  async function handleThreadTurnsList({ parsed, threadId, sendResponse }) {
+    const params = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+    const resolvedThreadId = threadId || extractThreadId(params);
+    const { record, agentSessionId } = resolveKnownThreadSession(resolvedThreadId, params, "thread/turns/list");
+    const runningTurnId = activeTurnIdsByThreadId.get(resolvedThreadId);
+    const turns = runningTurnId ? [{
+      id: runningTurnId,
+      turnId: runningTurnId,
+      threadId: resolvedThreadId,
+      status: "running",
+      agentRuntime: id,
+      agentSessionId,
+      items: [],
+    }] : [];
+    const sortDirection = readString(params.sortDirection) || readString(params.sort_direction) || "asc";
+    const ordered = sortDirection.toLowerCase() === "desc" ? [...turns].reverse() : turns;
+    const limit = normalizePositiveInteger(params.limit, 50);
+    const offset = parseTurnsCursor(params.cursor);
+    const data = ordered.slice(offset, offset + limit);
+    const nextOffset = offset + data.length;
+    const nextCursor = nextOffset < ordered.length ? `cursor-offset:${nextOffset}` : null;
+
+    sendJsonRpcResult(sendResponse, parsed.id, {
+      data,
+      items: data,
+      turns: data,
+      nextCursor,
+      threadId: resolvedThreadId,
+      agentRuntime: id,
+      agentSessionId,
+      model: record.model,
+      modelProvider: record.modelProvider,
     });
     return { responded: true };
   }
@@ -353,6 +413,33 @@ function createCursorRuntimeAdapter({
     });
   }
 
+  function resolveKnownThreadSession(threadId, params = {}, methodName = "Cursor request") {
+    const resolvedThreadId = readString(threadId) || extractThreadId(params);
+    const record = resolvedThreadId ? threadAgentState.get(resolvedThreadId) : null;
+    const agentSessionId = readString(record?.agentSessionId)
+      || readString(params.agentSessionId)
+      || readString(params.agent_session_id);
+    if (!resolvedThreadId || !agentSessionId) {
+      throw new Error(`Cursor ${methodName} requires a known thread and agent session.`);
+    }
+    return { record: record || {}, agentSessionId };
+  }
+
+  function buildCursorThreadPayload(threadId, record = {}, agentSessionId, params = {}) {
+    const runningTurnId = activeTurnIdsByThreadId.get(threadId);
+    return {
+      id: threadId,
+      title: readString(params.title) || readString(record.title),
+      cwd: readString(record.cwd) || readString(params.cwd) || readString(params.workingDirectory),
+      agentRuntime: id,
+      agentSessionId,
+      model: readString(record.model),
+      modelProvider: readString(record.modelProvider),
+      status: runningTurnId ? "running" : "idle",
+      activeTurnId: runningTurnId || undefined,
+    };
+  }
+
   async function handleRuntimeResponse({ rawMessage, parsed, sendResponse } = {}) {
     const message = parsed || parseJsonRpcMessage(rawMessage);
     if (!message || message.method || message.id == null) {
@@ -407,6 +494,10 @@ function createCursorRuntimeAdapter({
   }
 }
 
+function cursorPermissionRequestKey(threadId, requestId) {
+  return JSON.stringify([readString(threadId), String(requestId)]);
+}
+
 function buildCursorPromptParts(params = {}) {
   const text = readString(params.prompt) || readString(params.input) || readString(params.message);
   return text ? [{ type: "text", text }] : [];
@@ -454,6 +545,23 @@ function extractTurnId(params = {}) {
 
 function readString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseTurnsCursor(value) {
+  const raw = readString(value);
+  if (!raw) {
+    return 0;
+  }
+  const match = raw.match(/^cursor-offset:(\d+)$/);
+  if (!match) {
+    return 0;
+  }
+  return Number.parseInt(match[1], 10) || 0;
 }
 
 function parseJsonRpcMessage(rawMessage) {

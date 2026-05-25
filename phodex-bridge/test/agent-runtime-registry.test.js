@@ -446,6 +446,41 @@ test("thread/fork responses inherit runtime metadata into bridge state", async (
   });
 });
 
+test("thread/fork error responses clear pending inheritance state", async () => {
+  await withTempStateDir(async ({ registry }) => {
+    registry.threadAgentState.upsert("thread-source", {
+      agentRuntime: "opencode",
+      agentSessionId: "ses-source",
+      runtimeLocked: true,
+    });
+
+    registry.trackForwardedRequest(JSON.stringify({
+      id: "fork-error-1",
+      method: "thread/fork",
+      params: { sourceThreadId: "thread-source" },
+    }));
+
+    registry.observeOutboundMessage(JSON.stringify({
+      id: "fork-error-1",
+      error: {
+        code: -32603,
+        message: "fork failed",
+      },
+    }));
+    registry.observeOutboundMessage(JSON.stringify({
+      id: "fork-error-1",
+      result: {
+        thread: {
+          id: "thread-unrelated",
+          agentSessionId: "thread-unrelated",
+        },
+      },
+    }));
+
+    assert.equal(registry.threadAgentState.get("thread-unrelated"), null);
+  });
+});
+
 test("thread/start rejects runtime changes after lock", async () => {
   await withTempStateDir(async ({ registry }) => {
     registry.threadAgentState.lockRuntime("thread-locked", {

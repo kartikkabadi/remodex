@@ -514,9 +514,12 @@ function createAgentRuntimeRegistry({
       }
     }
 
-    if (responseId && pendingForkSourceByRequestId.has(responseId) && parsed.result != null) {
+    if (responseId && pendingForkSourceByRequestId.has(responseId)) {
       const sourceThreadId = pendingForkSourceByRequestId.get(responseId);
       pendingForkSourceByRequestId.delete(responseId);
+      if (parsed.result == null) {
+        return;
+      }
       const forkedThread = parsed.result?.thread && typeof parsed.result.thread === "object"
         ? parsed.result.thread
         : parsed.result;
