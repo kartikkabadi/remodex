@@ -64,13 +64,19 @@ struct TurnComposerRuntimeState: Equatable {
         let lockedThread = isAgentRuntimeLocked ? thread : nil
         let runtimeID = codex.effectiveAgentRuntimeID(for: lockedThread)
         let selectedModel = codex.selectedModelOption(for: lockedThread)
+        let effectiveReasoningEffort = runtimeID == "codex"
+            ? codex.selectedReasoningEffortForSelectedModel(thread: lockedThread)
+            : nil
+        let selectedServiceTier = runtimeID == "codex"
+            ? codex.effectiveServiceTier(for: lockedThread)
+            : nil
         return TurnComposerRuntimeState(
             reasoningDisplayOptions: reasoningDisplayOptions,
-            effectiveReasoningEffort: runtimeID == "codex" ? codex.selectedReasoningEffortForSelectedModel() : nil,
-            selectedReasoningEffort: codex.selectedReasoningEffort,
+            effectiveReasoningEffort: effectiveReasoningEffort,
+            selectedReasoningEffort: effectiveReasoningEffort,
             reasoningMenuDisabled: runtimeID != "codex" || reasoningDisplayOptions.isEmpty || selectedModel == nil,
-            selectedServiceTier: runtimeID == "codex" ? codex.effectiveServiceTier() : nil,
-            supportsFastMode: runtimeID == "codex" && codex.selectedModelSupportsServiceTier(.fast),
+            selectedServiceTier: selectedServiceTier,
+            supportsFastMode: runtimeID == "codex" && codex.selectedModelSupportsServiceTier(.fast, for: lockedThread),
             selectedAgentRuntimeID: runtimeID,
             agentRuntimeOptions: codex.agentRuntimeOptionsForComposer(),
             agentRuntimeCapabilities: codex.effectiveAgentRuntimeCapabilities(for: lockedThread),

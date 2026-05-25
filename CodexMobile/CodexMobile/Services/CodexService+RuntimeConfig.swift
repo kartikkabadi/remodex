@@ -330,7 +330,11 @@ extension CodexService {
     }
 
     func selectedModelSupportsServiceTier(_ serviceTier: CodexServiceTier) -> Bool {
-        selectedModelOption()?.supportsServiceTier(serviceTier) == true
+        selectedModelSupportsServiceTier(serviceTier, for: nil)
+    }
+
+    func selectedModelSupportsServiceTier(_ serviceTier: CodexServiceTier, for thread: CodexThread?) -> Bool {
+        selectedModelOption(for: thread)?.supportsServiceTier(serviceTier) == true
     }
 
     func gitWriterModelIdentifier() -> String? {
@@ -358,8 +362,9 @@ extension CodexService {
         threadRuntimeOverride(for: threadId)?.overridesServiceTier == true
     }
 
-    func selectedReasoningEffortForSelectedModel(threadId: String? = nil) -> String? {
-        guard let model = selectedModelOption() else {
+    func selectedReasoningEffortForSelectedModel(thread: CodexThread? = nil, threadId: String? = nil) -> String? {
+        let resolvedThread = thread ?? threadId.flatMap { self.thread(for: $0) }
+        guard let model = selectedModelOption(for: resolvedThread) else {
             return RuntimeSelectionDefaults.reasoningEffort(for: selectedModelId)
                 ?? selectedReasoningEffort
                 ?? RuntimeSelectionDefaults.reasoningEffort
@@ -370,7 +375,8 @@ extension CodexService {
             return nil
         }
 
-        if let threadOverride = threadRuntimeOverride(for: threadId),
+        let resolvedThreadId = resolvedThread?.id ?? threadId
+        if let threadOverride = threadRuntimeOverride(for: resolvedThreadId),
            threadOverride.overridesReasoning,
            let selected = threadOverride.reasoningEffort,
            supported.contains(selected) {
@@ -405,6 +411,14 @@ extension CodexService {
     }
 
     func effectiveServiceTier(for threadId: String? = nil) -> CodexServiceTier? {
+        effectiveServiceTier(for: threadId.flatMap { thread(for: $0) }, threadId: threadId)
+    }
+
+    func effectiveServiceTier(for thread: CodexThread?) -> CodexServiceTier? {
+        effectiveServiceTier(for: thread, threadId: thread?.id)
+    }
+
+    private func effectiveServiceTier(for thread: CodexThread?, threadId: String?) -> CodexServiceTier? {
         let candidate: CodexServiceTier?
         if let threadOverride = threadRuntimeOverride(for: threadId),
            threadOverride.overridesServiceTier {
@@ -416,7 +430,7 @@ extension CodexService {
         guard let candidate else {
             return nil
         }
-        return selectedModelSupportsServiceTier(candidate) ? candidate : nil
+        return selectedModelSupportsServiceTier(candidate, for: thread) ? candidate : nil
     }
 
     func runtimeServiceTierForTurn(threadId: String? = nil) -> String? {

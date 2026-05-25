@@ -282,6 +282,49 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         XCTAssertEqual(service.runtimeModelIdentifierForTurn(thread: thread), "opencode-go/qwen3.6-plus")
     }
 
+    func testLockedCodexThreadComposerUsesThreadRuntimeOverrides() {
+        let service = makeService()
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedReasoningEffort("medium")
+        service.setSelectedServiceTier(.fast)
+        let thread = CodexThread(id: "thread-override", title: "Thread", model: "gpt-5.4")
+        service.setThreadReasoningEffortOverride("high", for: thread.id)
+        service.setThreadServiceTierOverride(nil, for: thread.id)
+
+        let state = TurnComposerRuntimeState.resolve(
+            codex: service,
+            reasoningDisplayOptions: reasoningOptions(),
+            thread: thread,
+            isAgentRuntimeLocked: true
+        )
+
+        XCTAssertEqual(state.effectiveReasoningEffort, "high")
+        XCTAssertEqual(state.selectedReasoningEffort, "high")
+        XCTAssertTrue(state.isSelectedReasoning("high"))
+        XCTAssertNil(state.selectedServiceTier)
+        XCTAssertTrue(state.isSelectedServiceTier(nil))
+        XCTAssertTrue(state.supportsFastMode)
+    }
+
+    func testLockedThreadRuntimeActionsWriteThreadOverridesInsteadOfGlobalDefaults() {
+        let service = makeService()
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedReasoningEffort("medium")
+        service.setSelectedServiceTier(nil)
+        let thread = CodexThread(id: "thread-actions", title: "Thread", model: "gpt-5.4")
+        let actions = TurnComposerRuntimeActions.resolve(codex: service, thread: thread)
+
+        actions.selectReasoning("high")
+        actions.selectServiceTier(.fast)
+
+        XCTAssertEqual(service.selectedReasoningEffort, "medium")
+        XCTAssertNil(service.selectedServiceTier)
+        XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(thread: thread), "high")
+        XCTAssertEqual(service.effectiveServiceTier(for: thread), .fast)
+    }
+
     func testSelectingProviderForLockedOpenCodeThreadPersistsThreadModel() {
         let service = makeService()
         service.agentRuntimeDescriptors = [.codex, makeOpenCodeDescriptor()]
@@ -309,6 +352,13 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         let service = CodexService(defaults: defaults)
         Self.retainedServices.append(service)
         return service
+    }
+
+    private func reasoningOptions() -> [TurnComposerReasoningDisplayOption] {
+        [
+            TurnComposerReasoningDisplayOption(effort: "medium", title: "Medium"),
+            TurnComposerReasoningDisplayOption(effort: "high", title: "High"),
+        ]
     }
 
     private func workspaceCheckpointResponse(kind: String, threadId: String, copied: Bool? = nil) -> RPCMessage {

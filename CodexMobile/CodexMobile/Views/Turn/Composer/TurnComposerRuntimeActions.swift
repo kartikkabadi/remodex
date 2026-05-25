@@ -20,9 +20,27 @@ struct TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
             selectModel: { modelID in codex.setSelectedRuntimeModelId(modelID, for: thread) },
             selectProvider: { providerID in codex.setSelectedRuntimeProviderId(providerID, for: thread) },
-            selectAutomaticReasoning: { codex.setSelectedReasoningEffort(nil) },
-            selectReasoning: { effort in codex.setSelectedReasoningEffort(effort) },
-            selectServiceTier: codex.setSelectedServiceTier,
+            selectAutomaticReasoning: {
+                if let thread {
+                    codex.clearThreadReasoningEffortOverride(for: thread.id)
+                } else {
+                    codex.setSelectedReasoningEffort(nil)
+                }
+            },
+            selectReasoning: { effort in
+                if let thread {
+                    codex.setThreadReasoningEffortOverride(effort, for: thread.id)
+                } else {
+                    codex.setSelectedReasoningEffort(effort)
+                }
+            },
+            selectServiceTier: { serviceTier in
+                if let thread {
+                    codex.setThreadServiceTierOverride(serviceTier, for: thread.id)
+                } else {
+                    codex.setSelectedServiceTier(serviceTier)
+                }
+            },
             selectAgentRuntime: codex.setSelectedAgentRuntimeForNewThreads,
             selectOpenCodeBuildAgent: { agentName in codex.setOpenCodeBuildAgentName(agentName, for: thread) },
             selectCursorMode: { mode in codex.setCursorMode(mode, for: thread) }
