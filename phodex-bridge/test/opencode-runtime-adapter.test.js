@@ -405,9 +405,17 @@ test("OpenCode stop posts abort for the runtime session", async () => {
   assert.equal(outbound[0].result.aborted, true);
 });
 
+function createAuthedFsImpl() {
+  return {
+    existsSync: (filePath) => String(filePath).endsWith("auth.json"),
+    readFileSync: () => JSON.stringify({ openai: { token: "test-token" } }),
+  };
+}
+
 function createAdapter({
   serverStatus = { state: "ready", baseUrl: "http://127.0.0.1:49152" },
   requestImpl,
+  fsImpl = createAuthedFsImpl(),
   modelCatalog = {
     defaultModelId: "opencode-go/deepseek-v4-flash",
     models: [
@@ -460,6 +468,11 @@ function createAdapter({
     adapter: createOpenCodeRuntimeAdapter({
       serverManager,
       threadAgentState: stateStore,
+      fsImpl,
+      discoverAgents: () => [
+        { id: "build", displayName: "Build", isDefaultBuild: true, isDefaultPlan: false },
+        { id: "plan", displayName: "Plan", isDefaultBuild: false, isDefaultPlan: true },
+      ],
       modelCatalogProvider: {
         async get() {
           return modelCatalog;

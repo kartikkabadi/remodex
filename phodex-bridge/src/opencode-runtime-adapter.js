@@ -37,6 +37,8 @@ function createOpenCodeRuntimeAdapter({
   threadAgentState,
   modelCatalogProvider = createOpenCodeModelCatalogProvider(),
   completionGraceMs = 1_500,
+  fsImpl = fs,
+  discoverAgents = discoverOpenCodeAgents,
 } = {}) {
   if (!serverManager) {
     throw new Error("OpenCode runtime adapter requires a serverManager.");
@@ -57,9 +59,9 @@ function createOpenCodeRuntimeAdapter({
     },
     async getRuntimeListEntry() {
       const serverStatus = serverManager.getStatus?.() || { state: "stopped" };
-      const mappedStatus = mapOpenCodeRuntimeStatus(serverStatus.state);
+      const mappedStatus = mapOpenCodeRuntimeStatus(serverStatus.state, fsImpl);
       const modelCatalog = await resolveOpenCodeModelCatalog();
-      const openCodeAgents = discoverOpenCodeAgents();
+      const openCodeAgents = discoverAgents({ fsImpl });
       return buildRuntimeListEntry({
         id,
         status: mappedStatus.status,
