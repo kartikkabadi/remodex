@@ -189,6 +189,21 @@ test("codex adapter maps approval server requests to canonical permission reques
   assert.equal(canonical.params.payload.request.permissions.shell, true);
 });
 
+test("codex adapter stringifies numeric approval ids for permission tracking", () => {
+  const canonical = convertCodexServerRequestToCanonical({
+    jsonrpc: "2.0",
+    id: 42,
+    method: "item/fileRead/requestApproval",
+    params: {
+      threadId: "thread-numeric",
+      path: "README.md",
+    },
+  });
+
+  assert.equal(canonical.id, 42);
+  assert.equal(canonical.params.permissionId, "42");
+});
+
 test("codex adapter ignores non-approval server requests", () => {
   assert.equal(convertCodexServerRequestToCanonical({
     jsonrpc: "2.0",
@@ -196,6 +211,17 @@ test("codex adapter ignores non-approval server requests", () => {
     method: "item/tool/requestUserInput",
     params: {
       threadId: "thread-question",
+    },
+  }), null);
+});
+
+test("codex adapter preserves unknown approval-like server requests as raw", () => {
+  assert.equal(convertCodexServerRequestToCanonical({
+    jsonrpc: "2.0",
+    id: "unknown-approval",
+    method: "runtime/custom/requestApproval",
+    params: {
+      threadId: "thread-custom",
     },
   }), null);
 });

@@ -78,7 +78,7 @@ function convertCodexServerRequestToCanonical(rawMessage, {
     || readString(params.permission_id)
     || readString(params.requestId)
     || readString(params.request_id)
-    || readString(parsed.id);
+    || (parsed.id != null ? String(parsed.id) : "");
 
   return {
     jsonrpc: "2.0",
@@ -299,9 +299,7 @@ function isApprovalRequestMethod(method) {
   return method === "item/commandExecution/requestApproval"
     || method === "item/fileChange/requestApproval"
     || method === "item/fileRead/requestApproval"
-    || method === "item/permissions/requestApproval"
-    || method.endsWith("/requestApproval")
-    || method.endsWith("requestApproval");
+    || method === "item/permissions/requestApproval";
 }
 
 function extractToolPayload(params, method) {
