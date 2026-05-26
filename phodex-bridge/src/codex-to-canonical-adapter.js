@@ -35,6 +35,27 @@ function convertCodexNotificationToCanonical(rawMessage, {
   const agentSessionId = typeof resolveAgentSessionId === "function"
     ? resolveAgentSessionId({ threadId, params, method })
     : threadId;
+  const createdAt = readString(params.createdAt) || readString(params.timestamp) || now();
+  const payload = {
+    ...mapping.payload,
+    sourceMethod: method,
+    raw: params,
+  };
+
+  if (mapping.method) {
+    return createCanonicalBridgeMessage({
+      method: mapping.method,
+      agentRuntime,
+      threadId,
+      agentSessionId,
+      turnId,
+      itemId,
+      requestId: mapping.requestId,
+      createdAt,
+      payload,
+      extraParams: mapping.extraParams,
+    });
+  }
 
   return createCanonicalEvent({
     type: mapping.type,
@@ -43,12 +64,8 @@ function convertCodexNotificationToCanonical(rawMessage, {
     agentSessionId,
     turnId,
     itemId,
-    createdAt: readString(params.createdAt) || readString(params.timestamp) || now(),
-    payload: {
-      ...mapping.payload,
-      sourceMethod: method,
-      raw: params,
-    },
+    createdAt,
+    payload,
   });
 }
 
@@ -145,6 +162,39 @@ function mapCodexMethod(method, params) {
     };
   }
 
+  if (method === "turn/plan/updated") {
+    const plan = params.plan !== undefined ? params.plan : params;
+    const explanation = params.explanation !== undefined ? params.explanation : undefined;
+    return {
+      method,
+      payload: {
+        plan,
+        explanation,
+      },
+      extraParams: {
+        plan,
+        explanation,
+      },
+    };
+  }
+
+  if (method === "item/plan/delta") {
+    const delta = params.delta !== undefined
+      ? params.delta
+      : params.text !== undefined
+        ? params.text
+        : params.content;
+    return {
+      method,
+      payload: {
+        delta,
+      },
+      extraParams: {
+        delta,
+      },
+    };
+  }
+
   if (method === "item/agentMessage/delta"
     || method === "codex/event/agent_message_content_delta"
     || method === "codex/event/agent_message_delta") {
@@ -226,6 +276,23 @@ function mapCodexMethod(method, params) {
     };
   }
 
+  if (method === "serverRequest/resolved") {
+    const requestId = readIdentifier(params.requestId)
+      || readIdentifier(params.request_id)
+      || readIdentifier(params.id);
+    return {
+      method,
+      requestId,
+      payload: {
+        requestId,
+        resolution: params.resolution || params.result || null,
+      },
+      extraParams: {
+        requestId,
+      },
+    };
+  }
+
   if (method === "error" || method === "codex/event/error" || method === "turn/failed") {
     return {
       type: CANONICAL_EVENT_TYPES.ERROR,
@@ -239,6 +306,38 @@ function mapCodexMethod(method, params) {
   }
 
   return null;
+}
+
+function createCanonicalBridgeMessage({
+  method,
+  agentRuntime = "codex",
+  threadId,
+  agentSessionId,
+  turnId,
+  itemId,
+  requestId,
+  createdAt = new Date().toISOString(),
+  payload = {},
+  extraParams = {},
+} = {}) {
+  const params = omitEmpty({
+    ...(extraParams && typeof extraParams === "object" ? extraParams : {}),
+    schemaVersion: CANONICAL_SCHEMA_VERSION,
+    agentRuntime: readString(agentRuntime) || "codex",
+    threadId: readString(threadId),
+    agentSessionId: readString(agentSessionId),
+    turnId: readString(turnId),
+    itemId: readString(itemId),
+    requestId: readIdentifier(requestId),
+    createdAt: readString(createdAt) || new Date().toISOString(),
+    payload: payload && typeof payload === "object" ? payload : {},
+  });
+
+  return {
+    jsonrpc: "2.0",
+    method,
+    params,
+  };
 }
 
 function mapItemCompleted(params) {
@@ -370,6 +469,16 @@ function parseJsonRpcMessage(rawMessage) {
 
 function readString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function readIdentifier(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function omitEmpty(value) {
