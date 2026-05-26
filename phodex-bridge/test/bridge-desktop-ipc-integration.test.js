@@ -427,8 +427,12 @@ test("bridge forwards live desktop assistant deltas to the phone", async (t) => 
 // Loads bridge.js with plaintext test transports while leaving the production module untouched.
 function loadBridgeWithTestDoubles({ createCodexTransportImpl }) {
   const bridgePath = require.resolve("../src/bridge");
+  const policyPath = require.resolve("../src/opencode-runtime-policy");
+  const codexTransportPath = require.resolve("../src/codex-transport");
   const originalLoad = Module._load;
   delete require.cache[bridgePath];
+  delete require.cache[policyPath];
+  delete require.cache[codexTransportPath];
   Module._load = function loadWithBridgeDoubles(request, parent, isMain) {
     if (parent?.filename === bridgePath && request === "./codex-transport") {
       return { createCodexTransport: createCodexTransportImpl };
@@ -447,6 +451,8 @@ function loadBridgeWithTestDoubles({ createCodexTransportImpl }) {
   } finally {
     Module._load = originalLoad;
     delete require.cache[bridgePath];
+    delete require.cache[policyPath];
+    delete require.cache[codexTransportPath];
   }
 }
 

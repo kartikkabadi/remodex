@@ -13,12 +13,17 @@ const {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
   createMacOSBridgeWakeAssertion,
+  createOpenCodeDesktopRefusalResponse,
+  createOpenCodeRefusalResponse,
   disableUnsupportedReasoningSummaryForTurnStart,
   fetchAdaptiveThreadTurnsListForRelay,
   hasRelayConnectionGoneStale,
+  isCodexOnlyBridgeMethod,
+  isOpenCodeBlockedDesktopMethod,
   normalizeRelayBoundJsonRpcMessage,
   persistBridgePreferences,
   resolveJsonlTurnsListRolloutPathForFallback,
+  resolveRuntimeTransportFactory,
   sanitizeLiveGeneratedImageMessageForRelay,
   sanitizeThreadHistoryImagesForRelay,
 } = require("../src/bridge");
@@ -2201,4 +2206,71 @@ test("sanitizeThreadHistoryImagesForRelay truncates the newest oversized text it
   assert.equal(item.relayTextTailTruncated, true);
   assert.equal(item.text.startsWith("…\n"), true);
   assert.equal(item.text.includes("header"), false);
+});
+
+test("isCodexOnlyBridgeMethod flags git and title generation requests", () => {
+  assert.equal(
+    isCodexOnlyBridgeMethod(JSON.stringify({ id: 1, method: "thread/generateTitle", params: {} })),
+    true
+  );
+  assert.equal(
+    isCodexOnlyBridgeMethod(JSON.stringify({ id: 2, method: "git/generateCommitMessage", params: {} })),
+    true
+  );
+  assert.equal(
+    isCodexOnlyBridgeMethod(JSON.stringify({ id: 3, method: "turn/start", params: {} })),
+    false
+  );
+});
+
+test("isOpenCodeBlockedDesktopMethod flags continue-on-desktop requests", () => {
+  assert.equal(
+    isOpenCodeBlockedDesktopMethod(JSON.stringify({ id: 1, method: "desktop/continueOnDesktop", params: {} })),
+    true
+  );
+  assert.equal(
+    isOpenCodeBlockedDesktopMethod(JSON.stringify({ id: 2, method: "desktop/open", params: {} })),
+    false
+  );
+});
+
+test("createOpenCodeRefusalResponse returns codex_only_feature for title generation", () => {
+  const raw = createOpenCodeRefusalResponse(JSON.stringify({
+    id: "title-1",
+    method: "thread/generateTitle",
+    params: {},
+  }));
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.id, "title-1");
+  assert.equal(parsed.error.data.errorCode, "codex_only_feature");
+});
+
+test("createOpenCodeDesktopRefusalResponse returns desktop_continue_not_supported", () => {
+  const raw = createOpenCodeDesktopRefusalResponse(JSON.stringify({
+    id: "desktop-1",
+    method: "desktop/continueOnDesktop",
+    params: {},
+  }));
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.error.data.errorCode, "desktop_continue_not_supported");
+});
+
+test("disableUnsupportedReasoningSummaryForTurnStart leaves OpenCode turn/start unchanged", () => {
+  const raw = JSON.stringify({
+    id: 1,
+    method: "turn/start",
+    params: { model: "gpt-5", summary: "auto" },
+  });
+  const previous = process.env.REMODEX_PROVIDER;
+  process.env.REMODEX_PROVIDER = "opencode";
+  try {
+    assert.equal(disableUnsupportedReasoningSummaryForTurnStart(raw), raw);
+    assert.equal(resolveRuntimeTransportFactory().name, "createOpenCodeTransport");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_PROVIDER;
+    } else {
+      process.env.REMODEX_PROVIDER = previous;
+    }
+  }
 });

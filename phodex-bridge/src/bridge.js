@@ -22,6 +22,14 @@ const {
 } = require("./bridge-status");
 const { createCodexTransport } = require("./codex-transport");
 const {
+  isCodexOnlyBridgeMethodName,
+  isOpenCodeBlockedDesktopMethodName,
+  isOpenCodeRuntime,
+  lookupCodexOnlyBridgeRefusal,
+  lookupOpenCodeTransportRefusal,
+  resolveRuntimeTransportFactory,
+} = require("./opencode-runtime-policy");
+const {
   createThreadRolloutActivityWatcher,
   findRecentRolloutFileForContextRead,
   resolveSessionsRoot,
@@ -130,6 +138,10 @@ function startBridge({
 } = {}) {
   const config = explicitConfig || readBridgeConfig();
   config.keepMacAwakeEnabled = config.keepMacAwakeEnabled === true;
+  const isOpenCodeRuntimeActive = isOpenCodeRuntime();
+  const createRuntimeTransport = isOpenCodeRuntimeActive
+    ? require("./opencode-transport").createOpenCodeTransport
+    : createCodexTransport;
   const bridgeWakeAssertion = createMacOSBridgeWakeAssertion({
     enabled: config.keepMacAwakeEnabled,
   });
@@ -159,7 +171,7 @@ function startBridge({
   const relaySessionUrl = `${relayBaseUrl}/${sessionId}`;
   const notificationSecret = randomBytes(24).toString("hex");
   const desktopRefresher = new CodexDesktopRefresher({
-    enabled: config.refreshEnabled,
+    enabled: config.refreshEnabled && !isOpenCodeRuntimeActive,
     debounceMs: config.refreshDebounceMs,
     refreshCommand: config.refreshCommand,
     bundleId: config.codexBundleId,
@@ -244,12 +256,12 @@ function startBridge({
   }
   // Only the spawned local runtime needs rollout mirroring; a real endpoint
   // already provides the authoritative live stream for resumed threads.
-  const rolloutLiveMirror = !config.codexEndpoint
+  const rolloutLiveMirror = !config.codexEndpoint && !isOpenCodeRuntimeActive
     ? createRolloutLiveMirrorController({
       sendApplicationResponse,
     })
     : null;
-  const desktopIpcActionFollower = !config.codexEndpoint
+  const desktopIpcActionFollower = !config.codexEndpoint && !isOpenCodeRuntimeActive
     ? createDesktopIpcActionFollower({
       sendApplicationResponse,
       readConversationState: async (threadId) => seedConversationStateFromThreadRead(
@@ -261,7 +273,7 @@ function startBridge({
   let contextUsageWatcher = null;
   let watchedContextUsageKey = null;
 
-  const codex = createCodexTransport({
+  const codex = createRuntimeTransport({
     endpoint: config.codexEndpoint,
     env: process.env,
     appPath: config.codexAppPath,
@@ -296,6 +308,10 @@ function startBridge({
     });
     if (config.codexEndpoint) {
       console.error(`[remodex] Failed to connect to Codex endpoint: ${config.codexEndpoint}`);
+    } else if (isOpenCodeRuntimeActive) {
+      console.error("[remodex] Failed to start `opencode serve`.");
+      console.error(`[remodex] Launch command: ${codex.describe()}`);
+      console.error("[remodex] Make sure the OpenCode CLI is installed and launchable on this Mac.");
     } else {
       console.error("[remodex] Failed to start `codex app-server`.");
       console.error(`[remodex] Launch command: ${codex.describe()}`);
@@ -585,7 +601,15 @@ function startBridge({
     if (handleBridgeManagedAccountRequest(rawMessage, sendApplicationResponse)) {
       return;
     }
-    if (voiceHandler.handleVoiceRequest(rawMessage, sendApplicationResponse)) {
+    if (!isOpenCodeRuntimeActive && voiceHandler.handleVoiceRequest(rawMessage, sendApplicationResponse)) {
+      return;
+    }
+    if (isOpenCodeRuntimeActive && isCodexOnlyBridgeMethod(rawMessage)) {
+      sendApplicationResponse(createOpenCodeRefusalResponse(rawMessage));
+      return;
+    }
+    if (isOpenCodeRuntimeActive && isOpenCodeBlockedDesktopMethod(rawMessage)) {
+      sendApplicationResponse(createOpenCodeDesktopRefusalResponse(rawMessage));
       return;
     }
     if (handleThreadContextRequest(rawMessage, sendApplicationResponse)) {
@@ -697,6 +721,9 @@ function startBridge({
   }
 
   function maybeBuildJsonlThreadTurnsListFallback(request, response) {
+    if (isOpenCodeRuntimeActive) {
+      return null;
+    }
     const params = request?.params || {};
     const threadId = normalizeNonEmptyString(params.threadId)
       || normalizeNonEmptyString(params.thread_id);
@@ -806,6 +833,9 @@ function startBridge({
     if (method !== "account/status/read"
       && method !== "getAuthStatus"
       && method !== "account/login/openOnMac"
+      && method !== "account/login/start"
+      && method !== "account/login/cancel"
+      && method !== "account/logout"
       && method !== "voice/resolveAuth") {
       return false;
     }
@@ -829,6 +859,37 @@ function startBridge({
 
   // Resolves bridge-owned account helpers like status reads and Mac-side browser opening.
   async function readBridgeManagedAccountResult(method, params) {
+    if (isOpenCodeRuntimeActive) {
+      switch (method) {
+        case "account/status/read":
+        case "getAuthStatus":
+          return {
+            account: null,
+            requiresOpenaiAuth: false,
+            transportMode: "opencode",
+          };
+        case "account/login/openOnMac":
+          throw Object.assign(
+            new Error("ChatGPT sign-in is not available with the OpenCode runtime."),
+            { errorCode: "auth_not_supported" }
+          );
+        case "account/login/start":
+        case "account/login/cancel":
+        case "account/logout":
+          throw Object.assign(
+            new Error("ChatGPT account login is not available with the OpenCode runtime."),
+            { errorCode: "auth_not_supported" }
+          );
+        case "voice/resolveAuth":
+          throw Object.assign(
+            new Error("Voice auth is not available with the OpenCode runtime."),
+            { errorCode: "voice_not_supported" }
+          );
+        default:
+          throw new Error(`Unsupported bridge-managed account method: ${method}`);
+      }
+    }
+
     switch (method) {
       case "account/status/read":
       case "getAuthStatus":
@@ -1657,9 +1718,57 @@ function shutdown(codex, getSocket, beforeExit = () => {}) {
   setTimeout(() => process.exit(0), 100);
 }
 
-// Forces app-server summary generation off for models whose Responses API calls
-// reject reasoning.summary, while leaving the phone-facing runtime choice intact.
+function isCodexOnlyBridgeMethod(rawMessage) {
+  const parsed = parseBridgeJSON(rawMessage);
+  const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+  return isCodexOnlyBridgeMethodName(method);
+}
+
+function isOpenCodeBlockedDesktopMethod(rawMessage) {
+  const parsed = parseBridgeJSON(rawMessage);
+  const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+  return isOpenCodeBlockedDesktopMethodName(method);
+}
+
+function createOpenCodeRefusalResponse(rawMessage) {
+  const parsed = parseBridgeJSON(rawMessage);
+  const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
+  const requestId = parsed?.id;
+  const refusal = lookupCodexOnlyBridgeRefusal(method);
+  const message = refusal?.message || "This feature is not available with the OpenCode runtime.";
+  return JSON.stringify({
+    id: requestId,
+    error: {
+      code: -32000,
+      message,
+      data: {
+        errorCode: refusal?.errorCode || "codex_only_feature",
+      },
+    },
+  });
+}
+
+function createOpenCodeDesktopRefusalResponse(rawMessage) {
+  const parsed = parseBridgeJSON(rawMessage);
+  const requestId = parsed?.id;
+  const refusal = lookupOpenCodeTransportRefusal("desktop/continueOnDesktop");
+  return JSON.stringify({
+    id: requestId,
+    error: {
+      code: -32000,
+      message: refusal?.message || "Continue on Desktop is not available with the OpenCode runtime.",
+      data: {
+        errorCode: refusal?.errorCode || "desktop_continue_not_supported",
+      },
+    },
+  });
+}
+
 function disableUnsupportedReasoningSummaryForTurnStart(rawMessage) {
+  if (isOpenCodeRuntime()) {
+    return rawMessage;
+  }
+
   const parsed = parseBridgeJSON(rawMessage);
   if (!parsed || parsed.method !== "turn/start") {
     return rawMessage;
@@ -1713,6 +1822,10 @@ function extractBridgeMessageContext(rawMessage) {
 }
 
 function shouldStartContextUsageWatcher(context) {
+  if (isOpenCodeRuntime()) {
+    return false;
+  }
+
   if (!context?.threadId) {
     return false;
   }
@@ -3563,13 +3676,18 @@ module.exports = {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
   createMacOSBridgeWakeAssertion,
+  createOpenCodeDesktopRefusalResponse,
+  createOpenCodeRefusalResponse,
   disableUnsupportedReasoningSummaryForTurnStart,
   fetchAdaptiveThreadTurnsListForRelay,
   hasRelayConnectionGoneStale,
+  isCodexOnlyBridgeMethod,
+  isOpenCodeBlockedDesktopMethod,
   normalizeRelayBoundJsonRpcMessage,
   persistBridgePreferences,
   resolveJsonlTurnsListRolloutPathForFallback,
   sanitizeLiveGeneratedImageMessageForRelay,
   sanitizeThreadHistoryImagesForRelay,
+  resolveRuntimeTransportFactory,
   startBridge,
 };
