@@ -54,6 +54,53 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
         XCTAssertEqual(service.messages(for: threadID).first?.role, .assistant)
     }
 
+    func testCanonicalOpenCodeTurnStaysRunningThroughIdleGapAndDelayedDelta() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+        let itemID = "assistant-\(UUID().uuidString)"
+
+        service.handleIncomingRPCMessage(canonicalEvent(
+            type: "turn_started",
+            threadID: threadID,
+            turnID: turnID,
+            agentRuntime: "opencode"
+        ))
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+        XCTAssertEqual(service.activeTurnID(for: threadID), turnID)
+        XCTAssertTrue(service.timelineState(for: threadID).renderSnapshot.isThreadRunning)
+
+        service.handleNotification(
+            method: "thread/status/changed",
+            params: .object([
+                "threadId": .string(threadID),
+                "status": .object([
+                    "type": .string("idle"),
+                ]),
+            ])
+        )
+
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+        XCTAssertEqual(service.activeTurnID(for: threadID), turnID)
+        XCTAssertTrue(service.timelineState(for: threadID).renderSnapshot.isThreadRunning)
+
+        service.handleIncomingRPCMessage(canonicalEvent(
+            type: "assistant_delta",
+            threadID: threadID,
+            turnID: turnID,
+            itemID: itemID,
+            payload: ["delta": .string("Delayed OpenCode response")],
+            agentRuntime: "opencode"
+        ))
+        service.flushAllPendingStreamingDeltas()
+
+        let assistantMessages = service.messages(for: threadID).filter { $0.role == .assistant }
+        XCTAssertEqual(assistantMessages.count, 1)
+        XCTAssertEqual(assistantMessages.first?.turnId, turnID)
+        XCTAssertEqual(assistantMessages.first?.text, "Delayed OpenCode response")
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+    }
+
     func testCanonicalReasoningDiffAndCompletionRouteToExistingHandlers() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
@@ -384,11 +431,12 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
         threadID: String,
         turnID: String? = nil,
         itemID: String? = nil,
-        payload: [String: JSONValue] = [:]
+        payload: [String: JSONValue] = [:],
+        agentRuntime: String = "cursor"
     ) -> RPCMessage {
         var params: [String: JSONValue] = [
             "schemaVersion": .integer(1),
-            "agentRuntime": .string("cursor"),
+            "agentRuntime": .string(agentRuntime),
             "threadId": .string(threadID),
             "createdAt": .string("2026-05-24T00:00:00.000Z"),
             "payload": .object(payload)
