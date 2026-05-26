@@ -26,6 +26,7 @@ const {
   isOpenCodeBlockedDesktopMethodName,
   isOpenCodeRuntime,
   lookupCodexOnlyBridgeRefusal,
+  lookupOpenCodeAccountRefusal,
   lookupOpenCodeTransportRefusal,
   resolveRuntimeTransportFactory,
 } = require("./opencode-runtime-policy");
@@ -612,7 +613,7 @@ function startBridge({
       sendApplicationResponse(createOpenCodeDesktopRefusalResponse(rawMessage));
       return;
     }
-    if (handleThreadContextRequest(rawMessage, sendApplicationResponse)) {
+    if (!isOpenCodeRuntimeActive && handleThreadContextRequest(rawMessage, sendApplicationResponse)) {
       return;
     }
     if (handleWorkspaceRequest(rawMessage, sendApplicationResponse)) {
@@ -636,7 +637,7 @@ function startBridge({
     })) {
       return;
     }
-    if (handleGitRequest(rawMessage, sendApplicationResponse, {
+    if (!isOpenCodeRuntimeActive && handleGitRequest(rawMessage, sendApplicationResponse, {
       codexAppPath: config.codexAppPath,
       onThreadNameSet: sendThreadNameUpdatedNotification,
     })) {
@@ -835,8 +836,10 @@ function startBridge({
       && method !== "account/login/openOnMac"
       && method !== "account/login/start"
       && method !== "account/login/cancel"
+      && method !== "account/login/complete"
       && method !== "account/logout"
-      && method !== "voice/resolveAuth") {
+      && method !== "voice/resolveAuth"
+      && method !== "account/rateLimits/read") {
       return false;
     }
 
@@ -860,6 +863,10 @@ function startBridge({
   // Resolves bridge-owned account helpers like status reads and Mac-side browser opening.
   async function readBridgeManagedAccountResult(method, params) {
     if (isOpenCodeRuntimeActive) {
+      const refusal = lookupOpenCodeAccountRefusal(method);
+      if (refusal) {
+        throw Object.assign(new Error(refusal.message), { errorCode: refusal.errorCode });
+      }
       switch (method) {
         case "account/status/read":
         case "getAuthStatus":
@@ -868,23 +875,6 @@ function startBridge({
             requiresOpenaiAuth: false,
             transportMode: "opencode",
           };
-        case "account/login/openOnMac":
-          throw Object.assign(
-            new Error("ChatGPT sign-in is not available with the OpenCode runtime."),
-            { errorCode: "auth_not_supported" }
-          );
-        case "account/login/start":
-        case "account/login/cancel":
-        case "account/logout":
-          throw Object.assign(
-            new Error("ChatGPT account login is not available with the OpenCode runtime."),
-            { errorCode: "auth_not_supported" }
-          );
-        case "voice/resolveAuth":
-          throw Object.assign(
-            new Error("Voice auth is not available with the OpenCode runtime."),
-            { errorCode: "voice_not_supported" }
-          );
         default:
           throw new Error(`Unsupported bridge-managed account method: ${method}`);
       }

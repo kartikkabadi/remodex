@@ -141,7 +141,7 @@ const {
  * @property {Map<string, ThreadBinding>} bindingsBySessionId
  * @property {Map<string, CwdTurnLock>} locksByCwd
  * @property {Map<string, PendingApproval>} pendingApprovalsById
- * @property {{ buffer: string, lastSequence: number, reconnectAttempt: number, stop: (() => void) | null, reconnectScheduled?: boolean, reconnectTimer?: NodeJS.Timeout|null, lastEventId?: string|null, lastAppliedSequence?: number, seenBusEventIds?: Set<string>, evictedBusEventIds?: Set<string> }} sse
+ * @property {{ buffer: string, lastSequence: number, reconnectAttempt: number, stop: (() => void) | null, reconnectScheduled?: boolean, reconnectTimer?: NodeJS.Timeout|null, lastEventId?: string|null, lastAppliedSequence?: number, seenBusEventIds?: Set<string>, evictedBusEventIds?: Set<string>, lastEmittedItemIdByThread?: Map<string, string> }} sse
  * @property {Map<string, { startedEmitted: boolean, terminalEmitted: boolean, itemIdByPartId: Map<string, string>, partKindByPartId: Map<string, string> }>} [turnReducerByThreadId]
  * @property {ReturnType<typeof createListenerBag>} listeners
  * @property {CreateOpenCodeTransportOptions} options
@@ -196,12 +196,14 @@ function createOpenCodeTransport(options = {}) {
       lastAppliedSequence: 0,
       seenBusEventIds: new Set(),
       evictedBusEventIds: new Set(),
+      lastEmittedItemIdByThread: new Map(),
     },
     turnReducerByThreadId: new Map(),
     listeners: createListenerBag(),
     options,
     pendingBootLines: [],
     _persistBindingsTimer: null,
+    agentsCache: null,
   };
   rebuildBindingIndexes(state);
 
@@ -684,7 +686,7 @@ function loadBindings(bindingsPath) {
   } catch (error) {
     const logPrefix = process.env.REMODEX_LOG_PREFIX || "[remodex]";
     console.warn(
-      `${logPrefix} Ignoring corrupt OpenCode bindings at ${bindingsPath}: ${error?.message || error}`
+      `${logPrefix} Ignoring corrupt OpenCode bindings at ${bindingsPath}: ${coerceMessageString(error)}`
     );
     try {
       fs.renameSync(bindingsPath, `${bindingsPath}.corrupt-${Date.now()}`);
@@ -832,6 +834,7 @@ const INBOUND_REQUEST_HANDLERS = {
   "thread/name/set": handleThreadNameSetRequest,
   "turn/start": handleTurnStartRequest,
   "turn/interrupt": handleTurnInterruptRequest,
+  "collaborationMode/list": handleCollaborationModeListRequest,
 };
 
 /**
@@ -852,7 +855,7 @@ function routeInboundJsonRpc(state, rawLine, emit) {
   if (parsed.id != null && !parsed.method && (parsed.result !== undefined || parsed.error)) {
     Promise.resolve(handleInboundClientResponse(state, parsed, emit)).catch((error) => {
       const logPrefix = state.options.logPrefix || "[remodex]";
-      console.warn(`${logPrefix} OpenCode approval response failed: ${error?.message || error}`);
+      console.warn(`${logPrefix} OpenCode approval response failed: ${coerceMessageString(error)}`);
     });
     return;
   }
@@ -880,7 +883,7 @@ function routeInboundJsonRpc(state, rawLine, emit) {
     emit(makeJsonRpcError(
       parsed.id,
       -32000,
-      error?.message || "OpenCode request failed",
+      coerceMessageString(error, "OpenCode request failed"),
       { errorCode: error?.errorCode || "request_failed" }
     ));
   });
@@ -899,13 +902,67 @@ function routeInboundJsonRpc(state, rawLine, emit) {
 async function handleInitializeRequest(state, request, emit) {
   emit(makeJsonRpcResponse(request.id, {
     capabilities: {
+      agentRuntime: "opencode",
+      transportMode: "opencode",
       turnPagination: true,
+      supportsApprovals: true,
+      supportsAgents: true,
+      supportsVariants: true,
+      supportsCollaborationMode: true,
+      requiresOpenaiAuth: false,
+      experimentalApi: false,
     },
     serverInfo: {
       name: "opencode",
       version: "serve",
     },
   }));
+}
+
+/**
+ * `collaborationMode/list` — probe OpenCode for available collaboration modes.
+ * Returns Codex-shaped mode descriptors. Plan mode is declared as supported
+ * iff the OpenCode "plan" agent exists. Caches the agent list for 60 s.
+ * On fetch error, returns an empty modes array rather than crashing.
+ *
+ * @param {OpenCodeTransportState} state
+ * @param {ParsedJsonRpc} request
+ * @param {(line: string) => void} emit
+ * @returns {Promise<void>}
+ */
+async function handleCollaborationModeListRequest(state, request, emit) {
+  let agents = [];
+
+  const cached = state.agentsCache;
+  if (cached && Date.now() - cached.fetchedAt < 60_000) {
+    agents = cached.agents;
+  } else {
+    try {
+      await ensureOpenCodeServer(state.server, state.options);
+      const result = await openCodeFetch(state.server, "/agent", {
+        method: "GET",
+        fetchImpl: state.options.fetchImpl,
+      });
+      if (!result.__opencodeError && Array.isArray(result)) {
+        agents = result;
+        state.agentsCache = { agents, fetchedAt: Date.now() };
+      } else {
+        state.agentsCache = { agents: [], fetchedAt: Date.now() };
+      }
+    } catch {
+      state.agentsCache = { agents: [], fetchedAt: Date.now() };
+    }
+  }
+
+  const hasPlan = agents.some(
+    (agent) => agent && (agent.id === "plan" || agent.name === "plan"),
+  );
+
+  emit(
+    makeJsonRpcResponse(request.id, {
+      modes: [{ mode: "plan", name: "Plan", supported: hasPlan }],
+    }),
+  );
 }
 
 /**
@@ -1435,6 +1492,25 @@ function mapBusEventToCodexLines(state, busEvent) {
   switch (busEvent.type) {
     case "session.status": {
       const statusType = readSessionStatusType(busEvent.properties);
+
+      // thread/status/changed fires whenever we have a binding, regardless of turn
+      if (binding) {
+        let threadStatus;
+        if (statusType === "busy") {
+          threadStatus = "running";
+        } else if (statusType === "idle") {
+          threadStatus = "idle";
+        } else if (statusType === "retry") {
+          threadStatus = "retrying";
+        }
+        if (threadStatus) {
+          lines.push(emitThreadStatusChanged(state, {
+            threadId: binding.remodexThreadId,
+            status: threadStatus,
+          }));
+        }
+      }
+
       if (statusType === "busy" && binding?.activeRemodexTurnId) {
         const line = emitTurnStarted(state, {
           threadId: binding.remodexThreadId,
@@ -1505,6 +1581,7 @@ function mapBusEventToCodexLines(state, busEvent) {
         });
         if (line) {
           lines.push(line);
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, itemId);
         }
       } else if (partKind === "tool") {
         const line = emitToolCallDelta(state, {
@@ -1515,6 +1592,7 @@ function mapBusEventToCodexLines(state, busEvent) {
         });
         if (line) {
           lines.push(line);
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, itemId);
         }
       } else {
         const line = emitAgentMessageDelta(state, {
@@ -1525,6 +1603,7 @@ function mapBusEventToCodexLines(state, busEvent) {
         });
         if (line) {
           lines.push(line);
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, itemId);
         }
       }
       break;
@@ -1542,8 +1621,9 @@ function mapBusEventToCodexLines(state, busEvent) {
       const partStatus = readString(part?.state?.status) || readString(part?.status);
       if (toolName) {
         const itemId = resolveItemIdForPart(state, binding.remodexThreadId, partId || toolName);
+        let lifecycleLine;
         if (partStatus === "completed" || partStatus === "failed") {
-          lines.push(emitItemLifecycle(state, {
+          lifecycleLine = emitItemLifecycle(state, {
             threadId: binding.remodexThreadId,
             turnId: binding.activeRemodexTurnId,
             itemId,
@@ -1553,15 +1633,19 @@ function mapBusEventToCodexLines(state, busEvent) {
               name: toolName,
               status: partStatus === "failed" ? "failed" : "completed",
             },
-          }));
+          });
         } else {
-          lines.push(emitItemLifecycle(state, {
+          lifecycleLine = emitItemLifecycle(state, {
             threadId: binding.remodexThreadId,
             turnId: binding.activeRemodexTurnId,
             itemId,
             phase: "started",
             patch: { type: "toolCall", name: toolName, status: "running" },
-          }));
+          });
+        }
+        if (lifecycleLine) {
+          lines.push(lifecycleLine);
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, itemId);
         }
       }
       break;
@@ -1570,9 +1654,13 @@ function mapBusEventToCodexLines(state, busEvent) {
       if (!binding) {
         break;
       }
-      const line = emitApprovalRequest(state, binding, busEvent.properties);
-      if (line) {
-        lines.push(line);
+      const permLine = emitApprovalRequest(state, binding, busEvent.properties);
+      if (permLine) {
+        lines.push(permLine);
+        const parsed = JSON.parse(permLine);
+        if (parsed?.params?.itemId) {
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, parsed.params.itemId);
+        }
       }
       break;
     }
@@ -1580,9 +1668,13 @@ function mapBusEventToCodexLines(state, busEvent) {
       if (!binding) {
         break;
       }
-      const line = emitUserInputRequest(state, binding, busEvent.properties);
-      if (line) {
-        lines.push(line);
+      const qLine = emitUserInputRequest(state, binding, busEvent.properties);
+      if (qLine) {
+        lines.push(qLine);
+        const parsed = JSON.parse(qLine);
+        if (parsed?.params?.itemId) {
+          state.sse.lastEmittedItemIdByThread.set(binding.remodexThreadId, parsed.params.itemId);
+        }
       }
       break;
     }
@@ -1641,6 +1733,13 @@ function emitToolCallDelta(state, { threadId, turnId, itemId, delta }) {
   });
 }
 
+function emitThreadStatusChanged(state, { threadId, status }) {
+  return makeNotification("thread/status/changed", {
+    threadId,
+    status,
+  });
+}
+
 function emitTurnCompleted(state, { threadId, turnId, status }) {
   const reducer = getTurnReducer(state, threadId);
   if (reducer.terminalEmitted) {
@@ -1660,7 +1759,7 @@ function emitTurnFailed(state, { threadId, turnId, message }) {
     threadId,
     turnId,
     status: "failed",
-    error: { message },
+    error: { message: coerceMessageString(message, "Turn failed") },
   });
 }
 
@@ -1881,11 +1980,41 @@ function makeJsonRpcResponse(id, result) {
 }
 
 function makeJsonRpcError(id, code, message, data) {
-  const envelope = { jsonrpc: "2.0", id, error: { code, message } };
+  const envelope = {
+    jsonrpc: "2.0",
+    id,
+    error: { code, message: coerceMessageString(message, "Request failed") },
+  };
   if (data !== undefined) {
     envelope.error.data = data;
   }
   return `${JSON.stringify(envelope)}\n`;
+}
+
+/**
+ * JSON-RPC and iOS-facing notifications require string `message` fields.
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+function coerceMessageString(value, fallback = "Unknown error") {
+  if (value == null) {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.message || fallback;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return String(value);
 }
 
 function makeNotification(method, params) {
@@ -2030,6 +2159,9 @@ function ensureSseState(state) {
   }
   if (!state.sse.evictedBusEventIds) {
     state.sse.evictedBusEventIds = new Set();
+  }
+  if (!state.sse.lastEmittedItemIdByThread) {
+    state.sse.lastEmittedItemIdByThread = new Map();
   }
   return state.sse;
 }
@@ -2284,36 +2416,156 @@ function readModelReference(value) {
 
 function mapProvidersConfigToModelList(config) {
   const items = [];
-  const providers = config?.providers && typeof config.providers === "object"
-    ? config.providers
-    : {};
   const defaults = config?.default && typeof config.default === "object" ? config.default : {};
-  const defaultModel = readString(defaults.model);
 
-  for (const [providerId, providerConfig] of Object.entries(providers)) {
+  for (const { providerId, providerConfig } of iterateProviderConfigs(config)) {
     const models = providerConfig?.models && typeof providerConfig.models === "object"
-      ? Object.keys(providerConfig.models)
-      : Array.isArray(providerConfig?.models)
-        ? providerConfig.models
-        : [];
-    for (const modelId of models) {
-      const normalized = readString(modelId);
-      if (!normalized) {
+      ? providerConfig.models
+      : {};
+    for (const [modelId, modelConfig] of Object.entries(models)) {
+      const normalizedModelId = readString(modelId);
+      if (!normalizedModelId) {
         continue;
       }
-      const reference = `${providerId}/${normalized}`;
-      items.push({
-        id: reference,
-        model: reference,
-        modelProvider: "opencode",
-        provider: "opencode",
-        displayName: normalized,
-        isDefault: reference === defaultModel || normalized === defaultModel,
+      appendCatalogEntriesForModel(items, {
+        providerId,
+        modelId: normalizedModelId,
+        modelConfig: modelConfig && typeof modelConfig === "object" ? modelConfig : {},
+        defaults,
       });
     }
   }
 
+  for (const entry of items) {
+    entry.supportsFastMode = items.some((other) => other.providerId === entry.providerId
+      && other.id !== entry.id
+      && readServiceTierFromModelOptions(other)
+      && (other.modelId === `${entry.modelId}-fast`
+        || (other.modelId.startsWith(`${entry.modelId}-`)
+          && other.modelId.length > entry.modelId.length + 1)));
+  }
+
   return { items };
+}
+
+/**
+ * OpenCode returns `providers` as an array; older fixtures may use a keyed object.
+ * @param {unknown} config
+ * @returns {{ providerId: string, providerConfig: object }[]}
+ */
+function iterateProviderConfigs(config) {
+  const raw = config?.providers;
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        providerId: readString(entry.id) || readString(entry.name) || "unknown",
+        providerConfig: entry,
+      }))
+      .filter((entry) => entry.providerId !== "unknown" || entry.providerConfig?.models);
+  }
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw).map(([providerId, providerConfig]) => ({
+      providerId: readString(providerId),
+      providerConfig: providerConfig && typeof providerConfig === "object" ? providerConfig : {},
+    }));
+  }
+  return [];
+}
+
+/**
+ * @param {object[]} items
+ * @param {{ providerId: string, modelId: string, modelConfig: object, defaults: object }} ctx
+ */
+function appendCatalogEntriesForModel(items, ctx) {
+  const { providerId, modelId, modelConfig, defaults } = ctx;
+  const variantsMap = modelConfig.variants && typeof modelConfig.variants === "object"
+    ? modelConfig.variants
+    : {};
+  const supportedVariants = Object.keys(variantsMap).map((id) => ({
+    id,
+    displayName: id,
+  }));
+  const providerDefault = readString(defaults[providerId]);
+  const reference = `${providerId}/${modelId}`;
+  const serviceTier = readServiceTierFromModelOptions(modelConfig);
+
+  items.push({
+    id: reference,
+    model: reference,
+    modelId,
+    providerId,
+    modelProvider: "opencode",
+    provider: "opencode",
+    displayName: readString(modelConfig.name) || modelId,
+    isDefault: reference === readString(defaults.model)
+      || modelId === providerDefault
+      || reference === `${providerId}/${providerDefault}`,
+    supportedVariants,
+    supportsFastMode: false,
+    defaultVariant: readString(modelConfig.defaultVariant)
+      || readString(modelConfig.default_variant)
+      || supportedVariants[0]?.id
+      || null,
+    ...(serviceTier ? { options: { serviceTier } } : {}),
+  });
+
+  const experimentalModes = modelConfig.experimental?.modes
+    ?? modelConfig.experimental_modes
+    ?? {};
+  if (experimentalModes && typeof experimentalModes === "object") {
+    for (const [mode, modeConfig] of Object.entries(experimentalModes)) {
+      const modeModelId = `${modelId}-${mode}`;
+      const modeOptions = mergeModelOptions(modelConfig.options, modeConfig);
+      const modeServiceTier = readServiceTierFromModelOptions({ options: modeOptions })
+        || readServiceTierFromProviderBody(modeConfig);
+      items.push({
+        id: `${providerId}/${modeModelId}`,
+        model: `${providerId}/${modeModelId}`,
+        modelId: modeModelId,
+        providerId,
+        modelProvider: "opencode",
+        provider: "opencode",
+        displayName: readString(modeConfig?.name) || `${readString(modelConfig.name) || modelId} ${mode}`,
+        isDefault: false,
+        supportedVariants: [],
+        supportsFastMode: Boolean(modeServiceTier),
+        defaultVariant: null,
+        ...(modeServiceTier ? { options: { serviceTier: modeServiceTier } } : {}),
+      });
+    }
+  }
+}
+
+function readServiceTierFromModelOptions(modelOrEntry) {
+  const options = modelOrEntry?.options;
+  if (!options || typeof options !== "object") {
+    return readServiceTierFromProviderBody(modelOrEntry);
+  }
+  return readString(options.serviceTier)
+    || readString(options.service_tier)
+    || "";
+}
+
+function readServiceTierFromProviderBody(modeConfig) {
+  const body = modeConfig?.provider?.body;
+  if (!body || typeof body !== "object") {
+    return "";
+  }
+  return readString(body.serviceTier) || readString(body.service_tier) || "";
+}
+
+function mergeModelOptions(baseOptions, modeConfig) {
+  const base = baseOptions && typeof baseOptions === "object" ? { ...baseOptions } : {};
+  const body = modeConfig?.provider?.body;
+  if (!body || typeof body !== "object") {
+    return base;
+  }
+  for (const [key, value] of Object.entries(body)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    base[camelKey] = value;
+  }
+  return base;
 }
 
 async function loadTurnsForBinding(state, binding, { sortDirection = "desc" } = {}) {
@@ -2429,11 +2681,22 @@ function buildPromptPartsFromTurnInput(input) {
 }
 
 function resolveTurnAgent(params = {}) {
-  const mode = readString(params.collaborationMode || params.collaboration_mode).toLowerCase();
+  const mode = readCollaborationModeId(params).toLowerCase();
   if (mode === "plan") {
     return "plan";
   }
   return readString(params.agent) || undefined;
+}
+
+function readCollaborationModeId(params = {}) {
+  const raw = params.collaborationMode ?? params.collaboration_mode;
+  if (typeof raw === "string") {
+    return readString(raw);
+  }
+  if (raw && typeof raw === "object") {
+    return readString(raw.mode || raw.id);
+  }
+  return "";
 }
 
 function boundedPositiveInteger(value, fallback) {
@@ -2476,12 +2739,127 @@ function attachOpenCodeSse(state, options) {
       scheduleOpenCodeSseReconnect(state, options);
     },
   }, options);
+
+  // Fire-and-forget catch-up: fetch missed messages for running turns after reconnect
+  catchUpAfterSseReconnect(state);
+}
+
+/**
+ * After SSE reconnects, fetch missed messages for each running binding and
+ * emit `item/updated` snapshots for any items not yet emitted via SSE.
+ */
+async function catchUpAfterSseReconnect(state) {
+  const { lastEmittedItemIdByThread, seenBusEventIds } = state.sse;
+  if (!lastEmittedItemIdByThread || lastEmittedItemIdByThread.size === 0) {
+    return;
+  }
+
+  for (const binding of state.bindingsByThreadId.values()) {
+    if (binding.turnPhase !== "running" || !binding.opencodeSessionId) {
+      continue;
+    }
+
+    const lastItemId = lastEmittedItemIdByThread.get(binding.remodexThreadId);
+    if (!lastItemId) {
+      continue;
+    }
+
+    const messages = await openCodeFetch(
+      state.server,
+      `/session/${binding.opencodeSessionId}/message`,
+      {
+        method: "GET",
+        directory: binding.cwd,
+        fetchImpl: state.options.fetchImpl,
+      }
+    );
+
+    if (messages && typeof messages === "object" && !messages.__opencodeError) {
+      const entries = Array.isArray(messages?.data)
+        ? messages.data
+        : Array.isArray(messages)
+          ? messages
+          : Array.isArray(messages?.messages)
+            ? messages.messages
+            : [];
+
+      if (entries.length === 0) {
+        continue;
+      }
+
+      // The OpenCode API returns messages newest-first (evidenced by
+      // loadTurnsForBinding using sortDirection:"desc" as default).
+      // Reverse to oldest-first (chronological) for catch-up scanning.
+      const ordered = [...entries].reverse();
+
+      // Find where we left off
+      let startIndex = -1;
+      for (let i = 0; i < ordered.length; i++) {
+        const msgId = readString(ordered[i]?.info?.id) || readString(ordered[i]?.id) || "";
+        if (msgId === lastItemId) {
+          startIndex = i;
+          break;
+        }
+      }
+
+      // Emit `item/updated` for messages after the last emitted item
+      for (let i = startIndex + 1; i < ordered.length; i++) {
+        const msg = ordered[i];
+        const msgId = readString(msg?.info?.id) || readString(msg?.id) || synthesizeItemId("item");
+        const role = readString(msg?.info?.role || msg?.role).toLowerCase();
+        if (role !== "assistant") {
+          continue;
+        }
+
+        // Bus events have a stable id for dedup; synthesise one if missing
+        const eventId = readString(msg?.info?.id) || msgId;
+        if (seenBusEventIds?.has(eventId)) {
+          continue;
+        }
+
+        const text = textFromOpenCodeMessage(msg);
+        const turnId = binding.activeRemodexTurnId || synthesizeTurnId();
+        const line = makeNotification("item/updated", {
+          threadId: binding.remodexThreadId,
+          turnId,
+          itemId: msgId,
+          item: {
+            id: msgId,
+            type: "agentMessage",
+            content: text,
+            status: "completed",
+          },
+        });
+        state.listeners.emitMessage(line);
+      }
+    }
+  }
 }
 
 function scheduleOpenCodeSseReconnect(state, options) {
   if (state.server.phase === "stopped" || state.sse.reconnectScheduled) {
     return;
   }
+
+  // Max-attempts ceiling: after 20 failures, fail active turns instead of retrying forever
+  if (state.sse.reconnectAttempt >= 20) {
+    for (const binding of state.bindingsByThreadId.values()) {
+      if (binding.turnPhase === "running" && binding.activeRemodexTurnId) {
+        const line = emitTurnFailed(state, {
+          threadId: binding.remodexThreadId,
+          turnId: binding.activeRemodexTurnId,
+          message: "OpenCode SSE stream lost after 20 reconnect attempts",
+        });
+        if (line) {
+          state.listeners.emitMessage(line);
+        }
+      }
+    }
+    state.sse.reconnectAttempt = 0;
+    state.sse.reconnectScheduled = false;
+    return;
+  }
+
   state.sse.reconnectScheduled = true;
   const delayMs = scheduleSseReconnect(state.sse);
   state.sse.reconnectTimer = setTimeout(() => {
@@ -2572,8 +2950,10 @@ module.exports = {
   handleUnsupportedMethod,
   handleThreadListRequest,
   handleInboundClientResponse,
+  handleCollaborationModeListRequest,
   // Pure helpers (the unit-test surface).
   mapBusEventToCodexLines,
+  mapProvidersConfigToModelList,
   emitTurnFailed,
   emitUserInputRequest,
   emitItemLifecycle,
@@ -2582,6 +2962,7 @@ module.exports = {
   parseJsonRpcLine,
   makeJsonRpcResponse,
   makeJsonRpcError,
+  coerceMessageString,
   makeNotification,
   resolveBindingsPath,
   resolveOpenCodeCommand,
@@ -2591,6 +2972,7 @@ module.exports = {
   resolveCwdFromThreadStartParams,
   rebuildBindingIndexes,
   scheduleOpenCodeSseReconnect,
+  catchUpAfterSseReconnect,
   expireStaleCwdLocks,
   flushPersistBindings,
   persistBindingsNow,

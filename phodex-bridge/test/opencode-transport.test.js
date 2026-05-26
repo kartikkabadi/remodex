@@ -32,18 +32,24 @@ const {
   resolveCwdFromThreadStartParams,
   handleUnsupportedMethod,
   handleInboundClientResponse,
+  handleCollaborationModeListRequest,
   scheduleOpenCodeSseReconnect,
+  catchUpAfterSseReconnect,
   rebuildBindingIndexes,
   flushPersistBindings,
   persistBindings,
   expireStaleCwdLocks,
   emitTurnFailed,
+  coerceMessageString,
+  makeJsonRpcError,
+  mapProvidersConfigToModelList,
 } = require("../src/opencode-transport");
 
 const {
   BUS_EVENT_ID_CACHE_LIMIT,
   CWD_LOCK_TTL_MS,
   BINDINGS_PERSIST_DEBOUNCE_MS,
+  lookupOpenCodeTransportRefusal,
 } = require("../src/opencode-runtime-policy");
 
 function createFakeChild() {
@@ -254,9 +260,13 @@ test("mapBusEventToCodexLines maps session.status busy to turn/started once", ()
     id: "evt-busy-2",
   });
 
-  assert.equal(first.length, 1);
-  assert.equal(JSON.parse(first[0]).method, "turn/started");
-  assert.equal(second.length, 0);
+  assert.equal(first.length, 2);
+  assert.equal(JSON.parse(first[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(first[0]).params.status, "running");
+  assert.equal(JSON.parse(first[1]).method, "turn/started");
+  assert.equal(second.length, 1);
+  assert.equal(JSON.parse(second[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(second[0]).params.status, "running");
 });
 
 test("mapBusEventToCodexLines maps session.status idle object to turn/completed", () => {
@@ -286,8 +296,10 @@ test("mapBusEventToCodexLines maps session.status idle object to turn/completed"
     id: "evt-idle",
   });
 
-  assert.equal(lines.length, 1);
-  const parsed = JSON.parse(lines[0]);
+  assert.equal(lines.length, 2);
+  assert.equal(JSON.parse(lines[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(lines[0]).params.status, "idle");
+  const parsed = JSON.parse(lines[1]);
   assert.equal(parsed.method, "turn/completed");
   assert.equal(parsed.params.status, "completed");
   assert.equal(binding.activeRemodexTurnId, null);
@@ -330,11 +342,13 @@ test("mapBusEventToCodexLines emits turn/started again after idle resets reducer
     id: "evt-busy-2",
   });
 
-  assert.equal(secondStart.length, 1);
-  assert.equal(JSON.parse(secondStart[0]).params.turnId, "turn-2");
+  assert.equal(secondStart.length, 2);
+  assert.equal(JSON.parse(secondStart[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(secondStart[0]).params.status, "running");
+  assert.equal(JSON.parse(secondStart[1]).params.turnId, "turn-2");
 });
 
-test("mapBusEventToCodexLines ignores session.status retry without terminal notification", () => {
+test("mapBusEventToCodexLines maps session.status retry to thread/status/changed retrying", () => {
   const state = {
     bindingsByThreadId: new Map([["thread-1", {
       remodexThreadId: "thread-1",
@@ -353,7 +367,9 @@ test("mapBusEventToCodexLines ignores session.status retry without terminal noti
     id: "evt-retry",
   });
 
-  assert.deepEqual(lines, []);
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(lines[0]).params.status, "retrying");
 });
 
 test("mapBusEventToCodexLines maps session.error structured message to turn/completed failed", () => {
@@ -412,8 +428,9 @@ test("mapBusEventToCodexLines does not push null after duplicate terminal events
     id: "evt-idle-dup",
   });
 
-  assert.deepEqual(lines, []);
-  assert.ok(lines.every((line) => line != null));
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(lines[0]).params.status, "idle");
 });
 
 test("mapBusEventToCodexLines routes reasoning delta after message.part.updated", () => {
@@ -621,8 +638,10 @@ test("mapBusEventToCodexLines still accepts legacy string session.status busy", 
     id: "evt-legacy-busy",
   });
 
-  assert.equal(lines.length, 1);
-  assert.equal(JSON.parse(lines[0]).method, "turn/started");
+  assert.equal(lines.length, 2);
+  assert.equal(JSON.parse(lines[0]).method, "thread/status/changed");
+  assert.equal(JSON.parse(lines[0]).params.status, "running");
+  assert.equal(JSON.parse(lines[1]).method, "turn/started");
 });
 
 test("mapBusEventToCodexLines maps message.part.delta to agentMessage delta", () => {
@@ -909,6 +928,136 @@ test("resolveCwdFromThreadStartParams resolves relative cwd against process cwd"
   assert.equal(cwd, path.resolve(process.cwd(), "Projects/demo"));
 });
 
+test("PT-1 coerceMessageString passes through Error.message", () => {
+  assert.equal(coerceMessageString(new Error("boom")), "boom");
+});
+
+test("PT-1 coerceMessageString JSON-stringifies plain objects", () => {
+  const serialized = coerceMessageString({ code: "bad" });
+  assert.equal(typeof serialized, "string");
+  assert.notEqual(serialized, "[object Object]");
+  assert.equal(serialized, JSON.stringify({ code: "bad" }));
+});
+
+test("PT-1 makeJsonRpcError always emits a string message field", () => {
+  const line = makeJsonRpcError(1, -32000, new Error("boom"), { errorCode: "request_failed" });
+  const parsed = JSON.parse(line);
+  assert.equal(typeof parsed.error.message, "string");
+  assert.equal(parsed.error.message, "boom");
+});
+
+test("PT-1 emitTurnFailed coerces object messages on turn/completed", () => {
+  const state = { turnReducerByThreadId: new Map() };
+  const line = emitTurnFailed(state, {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    message: { detail: "failed" },
+  });
+  assert.ok(line);
+  const parsed = JSON.parse(line);
+  assert.equal(typeof parsed.params.error.message, "string");
+  assert.equal(parsed.params.error.message, JSON.stringify({ detail: "failed" }));
+});
+
+test("PT-2 catalog shape includes providerId and supportedVariants", () => {
+  const result = mapProvidersConfigToModelList({
+    providers: [
+      {
+        id: "anthropic",
+        models: {
+          "claude-opus-4": {
+            name: "Claude Opus 4",
+            variants: { thinking: {}, fast: {} },
+          },
+        },
+      },
+      {
+        id: "openai",
+        models: {
+          "gpt-5.4": { name: "GPT-5.4" },
+        },
+      },
+    ],
+    default: { anthropic: "claude-opus-4" },
+  });
+
+  const providerIds = new Set(result.items.map((entry) => entry.providerId));
+  assert.equal(providerIds.size, 2);
+  assert.ok(providerIds.has("anthropic"));
+  assert.ok(providerIds.has("openai"));
+
+  const anthropic = result.items.find((entry) => entry.providerId === "anthropic");
+  assert.ok(anthropic);
+  assert.deepEqual(anthropic.supportedVariants, [
+    { id: "thinking", displayName: "thinking" },
+    { id: "fast", displayName: "fast" },
+  ]);
+  assert.equal(anthropic.modelId, "claude-opus-4");
+  assert.equal(anthropic.id, "anthropic/claude-opus-4");
+});
+
+test("PT-2 catalog shape omits supportedVariants when provider has none", () => {
+  const result = mapProvidersConfigToModelList({
+    providers: [{ id: "groq", models: { "llama-3": { name: "Llama 3" } } }],
+    default: {},
+  });
+  assert.deepEqual(result.items[0].supportedVariants, []);
+});
+
+test("PT-2 catalog shape expands experimental fast mode with serviceTier", () => {
+  const result = mapProvidersConfigToModelList({
+    providers: [{
+      id: "openai",
+      models: {
+        "gpt-5.4": {
+          name: "GPT-5.4",
+          experimental: {
+            modes: {
+              fast: {
+                provider: { body: { service_tier: "priority" } },
+              },
+            },
+          },
+        },
+      },
+    }],
+    default: {},
+  });
+
+  const base = result.items.find((entry) => entry.modelId === "gpt-5.4");
+  const fast = result.items.find((entry) => entry.modelId === "gpt-5.4-fast");
+  assert.ok(base);
+  assert.ok(fast);
+  assert.equal(fast.options.serviceTier, "priority");
+  assert.equal(base.supportsFastMode, true);
+});
+
+test("PT-1 routeInboundJsonRpc surfaces handler errors as string messages", async () => {
+  const state = createRouteTestState();
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/doc")) {
+      return { ok: true, status: 200, text: async () => "{}" };
+    }
+    if (String(url).includes("/config/providers")) {
+      return {
+        ok: false,
+        status: 500,
+        text: async () => JSON.stringify({ message: "boom" }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+  const lines = [];
+  routeInboundJsonRpc(state, JSON.stringify({ id: 42, method: "model/list", params: {} }), (line) => lines.push(line));
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.error.message, "boom");
+  assert.equal(typeof parsed.error.message, "string");
+});
+
 test("routeInboundJsonRpc dispatches initialize to a JSON-RPC response", async () => {
   const state = createRouteTestState();
   const lines = [];
@@ -918,6 +1067,89 @@ test("routeInboundJsonRpc dispatches initialize to a JSON-RPC response", async (
   const parsed = JSON.parse(lines[0]);
   assert.equal(parsed.id, 1);
   assert.equal(parsed.result.serverInfo.name, "opencode");
+});
+
+test("T1-1 initialize returns truthful OpenCode capabilities", async () => {
+  const state = createRouteTestState();
+  const lines = [];
+  routeInboundJsonRpc(state, JSON.stringify({ id: 2, method: "initialize", params: {} }), (line) => lines.push(line));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(parsedCapabilities(lines[0]), {
+    agentRuntime: "opencode",
+    transportMode: "opencode",
+    turnPagination: true,
+    supportsApprovals: true,
+    supportsAgents: true,
+    supportsVariants: true,
+    supportsCollaborationMode: true,
+    requiresOpenaiAuth: false,
+    experimentalApi: false,
+  });
+});
+
+test("T1-2 collaborationMode/list returns plan when plan agent exists", async () => {
+  const state = createRouteTestState();
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/agent")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify([
+          { id: "plan", name: "Plan" },
+          { id: "build", name: "Build" },
+        ]),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+  const lines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({ id: 42, method: "collaborationMode/list", params: {} }),
+    (line) => lines.push(line),
+  );
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.id, 42);
+  assert.ok(parsed.result.modes);
+  assert.equal(parsed.result.modes.length, 1);
+  assert.equal(parsed.result.modes[0].mode, "plan");
+  assert.equal(parsed.result.modes[0].name, "Plan");
+  assert.equal(parsed.result.modes[0].supported, true);
+});
+
+test("T1-2 collaborationMode/list returns unsupported when plan agent missing", async () => {
+  const state = createRouteTestState();
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/agent")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify([
+          { id: "build", name: "Build" },
+          { id: "test", name: "Test" },
+        ]),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+  const lines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({ id: 43, method: "collaborationMode/list", params: {} }),
+    (line) => lines.push(line),
+  );
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.id, 43);
+  assert.equal(parsed.result.modes.length, 1);
+  assert.equal(parsed.result.modes[0].supported, false);
 });
 
 test("handleUnsupportedMethod refuses voice/transcribe and turn/steer", () => {
@@ -1271,6 +1503,242 @@ test("scheduleOpenCodeSseReconnect single-flights overlapping reconnect timers",
       clearTimeout(state.sse.reconnectTimer);
     }
   }
+});
+
+test("scheduleOpenCodeSseReconnect emits turn/failed after 20 reconnect attempts", () => {
+  const emitted = [];
+  const state = {
+    server: { phase: "ready" },
+    bindingsByThreadId: new Map([["thread-1", {
+      remodexThreadId: "thread-1",
+      opencodeSessionId: "sess-1",
+      cwd: "/tmp/ws",
+      model: null,
+      activeRemodexTurnId: "turn-1",
+      turnPhase: "running",
+      updatedAt: Date.now(),
+    }]]),
+    sse: {
+      reconnectAttempt: 20,
+      reconnectScheduled: false,
+      reconnectTimer: null,
+      stop: null,
+      lastEmittedItemIdByThread: new Map(),
+    },
+    listeners: {
+      emitMessage(line) { emitted.push(line); },
+    },
+    turnReducerByThreadId: new Map(),
+  };
+
+  const originalSetTimeout = global.setTimeout;
+  let timerScheduled = false;
+  global.setTimeout = () => { timerScheduled = true; return 123; };
+
+  try {
+    scheduleOpenCodeSseReconnect(state, {});
+    assert.equal(timerScheduled, false);
+    assert.equal(state.sse.reconnectScheduled, false);
+    assert.equal(state.sse.reconnectAttempt, 0);
+    assert.equal(emitted.length, 1);
+    const parsed = JSON.parse(emitted[0]);
+    assert.equal(parsed.method, "turn/completed");
+    assert.equal(parsed.params.status, "failed");
+    assert.equal(parsed.params.threadId, "thread-1");
+    assert.equal(parsed.params.turnId, "turn-1");
+    assert.ok(parsed.params.error.message.includes("20 reconnect attempts"));
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    if (state.sse.reconnectTimer) {
+      clearTimeout(state.sse.reconnectTimer);
+    }
+  }
+});
+
+test("scheduleOpenCodeSseReconnect does not fail idle bindings at 20 attempts", () => {
+  const emitted = [];
+  const state = {
+    server: { phase: "ready" },
+    bindingsByThreadId: new Map([["thread-1", {
+      remodexThreadId: "thread-1",
+      opencodeSessionId: "sess-1",
+      cwd: "/tmp/ws",
+      model: null,
+      activeRemodexTurnId: null,
+      turnPhase: "idle",
+      updatedAt: Date.now(),
+    }]]),
+    sse: {
+      reconnectAttempt: 20,
+      reconnectScheduled: false,
+      reconnectTimer: null,
+      stop: null,
+      lastEmittedItemIdByThread: new Map(),
+    },
+    listeners: {
+      emitMessage(line) { emitted.push(line); },
+    },
+    turnReducerByThreadId: new Map(),
+  };
+
+  const originalSetTimeout = global.setTimeout;
+  let timerScheduled = false;
+  global.setTimeout = () => { timerScheduled = true; return 123; };
+
+  try {
+    scheduleOpenCodeSseReconnect(state, {});
+    assert.equal(timerScheduled, false);
+    assert.equal(emitted.length, 0, "must not emit turn/failed for idle bindings");
+    assert.equal(state.sse.reconnectAttempt, 0);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    if (state.sse.reconnectTimer) {
+      clearTimeout(state.sse.reconnectTimer);
+    }
+  }
+});
+
+test("catchUpAfterSseReconnect emits item/updated for missed items after reconnect", async () => {
+  const emitted = [];
+  const state = {
+    server: {
+      baseUrl: "http://127.0.0.1:4096",
+      username: "opencode",
+      password: "pw",
+    },
+    bindingsByThreadId: new Map([["thread-1", {
+      remodexThreadId: "thread-1",
+      opencodeSessionId: "sess-1",
+      cwd: "/tmp/ws",
+      model: null,
+      activeRemodexTurnId: "turn-1",
+      turnPhase: "running",
+      updatedAt: Date.now(),
+    }]]),
+    sse: {
+      lastEmittedItemIdByThread: new Map([["thread-1", "item-3"]]),
+      seenBusEventIds: new Set(),
+    },
+    options: {
+      // OpenCode API returns newest-first; the catch-up code reverses to oldest-first
+      fetchImpl: async (url) => {
+        assert.ok(url.includes("/session/sess-1/message"));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: [
+            { info: { id: "item-5", role: "assistant" }, parts: [{ type: "text", text: "Let me explain" }] },
+            { info: { id: "item-4", role: "assistant" }, parts: [{ type: "text", text: "Here is some code" }] },
+            { info: { id: "item-3", role: "assistant" }, parts: [{ type: "text", text: "How can I help?" }] },
+            { info: { id: "item-2", role: "assistant" }, parts: [{ type: "text", text: "Hi there" }] },
+            { info: { id: "item-1", role: "user" }, parts: [{ type: "text", text: "Hello" }] },
+          ]}),
+        };
+      },
+    },
+    listeners: {
+      emitMessage(line) { emitted.push(line); },
+    },
+    turnReducerByThreadId: new Map(),
+  };
+
+  await catchUpAfterSseReconnect(state);
+
+  // item-3 is the last emitted, so we should get item-4 and item-5
+  assert.equal(emitted.length, 2, "should emit 2 missed items");
+
+  const parsed4 = JSON.parse(emitted[0]);
+  assert.equal(parsed4.method, "item/updated");
+  assert.equal(parsed4.params.itemId, "item-4");
+  assert.equal(parsed4.params.threadId, "thread-1");
+  assert.equal(parsed4.params.turnId, "turn-1");
+
+  const parsed5 = JSON.parse(emitted[1]);
+  assert.equal(parsed5.method, "item/updated");
+  assert.equal(parsed5.params.itemId, "item-5");
+  assert.equal(parsed5.params.threadId, "thread-1");
+  assert.equal(parsed5.params.turnId, "turn-1");
+});
+
+test("catchUpAfterSseReconnect handles newest-first message ordering", async () => {
+  const emitted = [];
+  const state = {
+    server: {
+      baseUrl: "http://127.0.0.1:4096",
+      username: "opencode",
+      password: "pw",
+    },
+    bindingsByThreadId: new Map([["thread-1", {
+      remodexThreadId: "thread-1",
+      opencodeSessionId: "sess-1",
+      cwd: "/tmp/ws",
+      model: null,
+      activeRemodexTurnId: "turn-1",
+      turnPhase: "running",
+      updatedAt: Date.now(),
+    }]]),
+    sse: {
+      lastEmittedItemIdByThread: new Map([["thread-1", "msg-2"]]),
+      seenBusEventIds: new Set(),
+    },
+    options: {
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ data: [
+          { info: { id: "msg-5", role: "assistant" }, parts: [{ type: "text", text: "Fifth" }] },
+          { info: { id: "msg-4", role: "assistant" }, parts: [{ type: "text", text: "Fourth" }] },
+          { info: { id: "msg-3", role: "assistant" }, parts: [{ type: "text", text: "Third" }] },
+          { info: { id: "msg-2", role: "assistant" }, parts: [{ type: "text", text: "Second" }] },
+          { info: { id: "msg-1", role: "user" }, parts: [{ type: "text", text: "First" }] },
+        ]}),
+      }),
+    },
+    listeners: {
+      emitMessage(line) { emitted.push(line); },
+    },
+    turnReducerByThreadId: new Map(),
+  };
+
+  await catchUpAfterSseReconnect(state);
+
+  // Should reverse newest-first to oldest-first, find msg-2, emit msg-3, msg-4, msg-5
+  // msg-1 is user role and should be skipped
+  assert.equal(emitted.length, 3, "should emit 3 missed items after reversal");
+
+  const ids = emitted.map((line) => JSON.parse(line).params.itemId);
+  assert.deepEqual(ids, ["msg-3", "msg-4", "msg-5"]);
+});
+
+test("catchUpAfterSseReconnect skips binding with no lastEmittedItemId", async () => {
+  const emitted = [];
+  const state = {
+    server: {
+      baseUrl: "http://127.0.0.1:4096",
+      username: "opencode",
+      password: "pw",
+    },
+    bindingsByThreadId: new Map([["thread-1", {
+      remodexThreadId: "thread-1",
+      opencodeSessionId: "sess-1",
+      cwd: "/tmp/ws",
+      model: null,
+      activeRemodexTurnId: "turn-1",
+      turnPhase: "running",
+      updatedAt: Date.now(),
+    }]]),
+    sse: {
+      lastEmittedItemIdByThread: new Map(),
+      seenBusEventIds: new Set(),
+    },
+    options: {},
+    listeners: {
+      emitMessage(line) { emitted.push(line); },
+    },
+  };
+
+  await catchUpAfterSseReconnect(state);
+  assert.equal(emitted.length, 0);
 });
 
 test("routeInboundJsonRpc returns workspace_busy when cwd lock is held", async () => {
@@ -1724,6 +2192,16 @@ test("createOpenCodeTransport round-trips turn/start through routeInboundJsonRpc
   } finally {
     transport.shutdown();
   }
+});
+
+function parsedCapabilities(line) {
+  return JSON.parse(line).result.capabilities;
+}
+
+test("T1-6 thread/contextWindow/read is refused for OpenCode threads", () => {
+  const refusal = lookupOpenCodeTransportRefusal("thread/contextWindow/read");
+  assert.ok(refusal, "Expected refusal for thread/contextWindow/read");
+  assert.equal(refusal.errorCode, "context_not_supported");
 });
 
 function createRouteTestState() {
