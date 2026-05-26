@@ -171,7 +171,7 @@ test("codex adapter keeps plan methods while adding canonical envelope fields", 
   assert.equal(planDelta.params.delta, "Need one more fixture.");
 });
 
-test("codex adapter maps rollout message strings and image generation end", () => {
+test("codex adapter maps rollout message strings", () => {
   const userMessage = convertFixture({
     method: "codex/event/user_message",
     params: {
@@ -189,6 +189,14 @@ test("codex adapter maps rollout message strings and image generation end", () =
       message: "Done from desktop",
     },
   });
+
+  assert.equal(userMessage.method, "remodex/event/user_message");
+  assert.equal(userMessage.params.payload.text, "Prompt from desktop");
+  assert.equal(assistantMessage.method, "remodex/event/assistant_completed");
+  assert.equal(assistantMessage.params.payload.text, "Done from desktop");
+});
+
+test("codex adapter maps image generation end", () => {
   const imageEnd = convertFixture({
     method: "codex/event/image_generation_end",
     params: {
@@ -199,10 +207,6 @@ test("codex adapter maps rollout message strings and image generation end", () =
     },
   });
 
-  assert.equal(userMessage.method, "remodex/event/user_message");
-  assert.equal(userMessage.params.payload.text, "Prompt from desktop");
-  assert.equal(assistantMessage.method, "remodex/event/assistant_completed");
-  assert.equal(assistantMessage.params.payload.text, "Done from desktop");
   assert.equal(imageEnd.method, "remodex/event/image_generation_end");
   assert.equal(imageEnd.params.itemId, "image-rollout");
   assert.equal(imageEnd.params.payload.saved_path, "/tmp/generated image.png");
