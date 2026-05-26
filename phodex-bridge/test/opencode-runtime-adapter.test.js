@@ -567,6 +567,174 @@ test("OpenCode turn/start maps event stream deltas, completion, and diff refresh
   assert.equal(requests.at(-1).path, "/session/ses_123/diff");
 });
 
+test("OpenCode turn/start buffers early event stream messages until prompt_async is accepted", async () => {
+  let resolvePrompt;
+  const { adapter, stateStore, eventHandlers } = createAdapter({
+    requestImpl: async (_method, path) => {
+      if (path === "/session/ses_123/prompt_async") {
+        return new Promise((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }
+      if (path === "/session/ses_123/diff") {
+        return [];
+      }
+      return null;
+    },
+  });
+  stateStore.upsert("thread-opencode", {
+    agentRuntime: "opencode",
+    agentSessionId: "ses_123",
+    runtimeLocked: true,
+  });
+  const outbound = [];
+
+  const turnStart = adapter.handleRuntimeRequest({
+    parsed: {
+      id: "turn-start-buffered",
+      method: "turn/start",
+      params: {
+        threadId: "thread-opencode",
+        turnId: "turn-buffered",
+        prompt: "Start slowly",
+      },
+    },
+    threadId: "thread-opencode",
+    sendResponse(rawMessage) {
+      outbound.push(JSON.parse(rawMessage));
+    },
+  });
+  await flushAsync();
+
+  assert.equal(eventHandlers.length, 1);
+  eventHandlers[0]({
+    type: "message.part.updated",
+    properties: {
+      sessionID: "ses_123",
+      part: {
+        id: "prt_buffered",
+        sessionID: "ses_123",
+        messageID: "msg_buffered",
+        type: "text",
+        text: "",
+      },
+    },
+  });
+  eventHandlers[0]({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_123",
+      messageID: "msg_buffered",
+      partID: "prt_buffered",
+      field: "text",
+      delta: "Buffered hello",
+    },
+  });
+  await flushAsync();
+
+  assert.deepEqual(outbound.map((message) => message.method).filter(Boolean), []);
+
+  resolvePrompt(null);
+  await turnStart;
+  await flushAsync();
+
+  assert.deepEqual(outbound.map((message) => message.method).filter(Boolean), [
+    "remodex/event/turn_started",
+    "remodex/event/assistant_delta",
+  ]);
+  assert.equal(
+    outbound.find((message) => message.method === "remodex/event/assistant_delta").params.payload.delta,
+    "Buffered hello"
+  );
+});
+
+test("OpenCode completion grace keeps turn active for late event stream activity", async () => {
+  const { adapter, stateStore, requests, eventHandlers } = createAdapter({
+    completionGraceMs: 30,
+    requestImpl: async (_method, path) => {
+      if (path === "/session/ses_123/diff") {
+        return [{ path: "late.txt", type: "modified" }];
+      }
+      return null;
+    },
+  });
+  stateStore.upsert("thread-opencode", {
+    agentRuntime: "opencode",
+    agentSessionId: "ses_123",
+    runtimeLocked: true,
+  });
+  const outbound = [];
+
+  await adapter.handleRuntimeRequest({
+    parsed: {
+      id: "turn-start-grace",
+      method: "turn/start",
+      params: {
+        threadId: "thread-opencode",
+        turnId: "turn-grace",
+        prompt: "Finish with a late chunk",
+      },
+    },
+    threadId: "thread-opencode",
+    sendResponse(rawMessage) {
+      outbound.push(JSON.parse(rawMessage));
+    },
+  });
+  eventHandlers[0]({
+    type: "message.part.updated",
+    properties: {
+      sessionID: "ses_123",
+      part: {
+        id: "prt_grace",
+        sessionID: "ses_123",
+        messageID: "msg_grace",
+        type: "text",
+        text: "",
+      },
+    },
+  });
+  eventHandlers[0]({
+    type: "message.updated",
+    properties: {
+      sessionID: "ses_123",
+      info: {
+        id: "msg_grace",
+        sessionID: "ses_123",
+        role: "assistant",
+        time: { created: 1, completed: 2 },
+        finish: "stop",
+      },
+    },
+  });
+  await delay(10);
+  eventHandlers[0]({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_123",
+      messageID: "msg_grace",
+      partID: "prt_grace",
+      field: "text",
+      delta: "late chunk",
+    },
+  });
+  await flushAsync();
+
+  assert.equal(outbound.some((message) => message.method === "remodex/event/turn_completed"), false);
+
+  await delay(40);
+  await flushAsync();
+
+  const methods = outbound.map((message) => message.method).filter(Boolean);
+  assert.deepEqual(methods, [
+    "remodex/event/turn_started",
+    "remodex/event/assistant_completed",
+    "remodex/event/assistant_delta",
+    "remodex/event/diff_updated",
+    "remodex/event/turn_completed",
+  ]);
+  assert.equal(requests.at(-1).path, "/session/ses_123/diff");
+});
+
 test("OpenCode permission request waits for phone response and replies to OpenCode", async () => {
   const { adapter, stateStore, requests, eventHandlers } = createAdapter();
   stateStore.upsert("thread-opencode", {
@@ -757,6 +925,7 @@ function createAdapter({
       },
     ],
   },
+  completionGraceMs = 0,
 } = {}) {
   const requests = [];
   const eventHandlers = [];
@@ -798,7 +967,7 @@ function createAdapter({
           return modelCatalog;
         },
       },
-      completionGraceMs: 0,
+      completionGraceMs,
     }),
     eventHandlers,
     requests,
@@ -808,4 +977,8 @@ function createAdapter({
 
 function flushAsync() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

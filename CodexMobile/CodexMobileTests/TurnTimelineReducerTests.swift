@@ -2495,6 +2495,53 @@ final class TurnTimelineReducerTests: XCTestCase {
         XCTAssertEqual(projectionCount, 2)
     }
 
+    func testRenderItemsCacheSignatureChangesForRunningTurnStateOnly() {
+        let messages = [
+            makeMessage(
+                id: "assistant-1",
+                threadID: "thread",
+                role: .assistant,
+                kind: .chat,
+                text: "Streaming",
+                turnID: "turn-1",
+                isStreaming: true
+            ),
+        ]
+        let visibleMessages = messages[...]
+        let idleSignature = TurnTimelineCacheKeyBuilder.renderItemsSignature(
+            threadID: "thread",
+            timelineChangeToken: 1,
+            visibleTailCount: 1,
+            messages: visibleMessages,
+            activeTurnID: nil,
+            isThreadRunning: false,
+            completedTurnIDs: []
+        )
+        let runningWithoutTurnIDSignature = TurnTimelineCacheKeyBuilder.renderItemsSignature(
+            threadID: "thread",
+            timelineChangeToken: 1,
+            visibleTailCount: 1,
+            messages: visibleMessages,
+            activeTurnID: nil,
+            isThreadRunning: true,
+            completedTurnIDs: []
+        )
+        let activeTurnSignature = TurnTimelineCacheKeyBuilder.renderItemsSignature(
+            threadID: "thread",
+            timelineChangeToken: 1,
+            visibleTailCount: 1,
+            messages: visibleMessages,
+            activeTurnID: "turn-1",
+            isThreadRunning: true,
+            completedTurnIDs: []
+        )
+
+        XCTAssertFalse(idleSignature.isThreadRunning)
+        XCTAssertTrue(runningWithoutTurnIDSignature.isThreadRunning)
+        XCTAssertNil(runningWithoutTurnIDSignature.activeTurnID)
+        XCTAssertEqual(activeTurnSignature.activeTurnID, "turn-1")
+    }
+
     func testEnforceIntraTurnOrderPreservesInterleavedMultiItemFlow() {
         let now = Date()
         var order = 0
