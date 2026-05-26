@@ -23,13 +23,22 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
 
         var capturedTurnStartParams: [JSONValue] = []
         service.requestTransportOverride = { method, params in
-            XCTAssertEqual(method, "turn/start")
-            capturedTurnStartParams.append(params ?? .null)
-            return RPCMessage(
-                id: .string(UUID().uuidString),
-                result: .object(["turnId": .string("turn-override")]),
-                includeJSONRPC: false
-            )
+            switch method {
+            case "workspace/checkpointCapture":
+                return self.workspaceCheckpointResponse(kind: "messageStart", threadId: "thread-override")
+            case "workspace/checkpointCopy":
+                return self.workspaceCheckpointResponse(kind: "turnStart", threadId: "thread-override", copied: true)
+            case "turn/start":
+                capturedTurnStartParams.append(params ?? .null)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object(["turnId": .string("turn-override")]),
+                    includeJSONRPC: false
+                )
+            default:
+                XCTFail("Unexpected request method \(method)")
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+            }
         }
 
         try await service.sendTurnStart("Ship it", to: "thread-override")
@@ -257,6 +266,85 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(threadId: "thread-old"), "low")
     }
 
+    func testLockedOpenCodeThreadUsesThreadModelBeforeRuntimeGlobalSelection() {
+        let service = makeService()
+        service.agentRuntimeDescriptors = [.codex, makeOpenCodeDescriptor()]
+        service.setSelectedModelId("opencode-go/deepseek-v4-flash", forAgentRuntime: "opencode")
+        let thread = CodexThread(
+            id: "thread-opencode",
+            agentRuntime: "opencode",
+            agentSessionId: "ses_123",
+            model: "opencode-go/qwen3.6-plus",
+            modelProvider: "opencode-go"
+        )
+
+        XCTAssertEqual(service.selectedModelOption(for: thread)?.id, "opencode-go/qwen3.6-plus")
+        XCTAssertEqual(service.runtimeModelIdentifierForTurn(thread: thread), "opencode-go/qwen3.6-plus")
+    }
+
+    func testLockedCodexThreadComposerUsesThreadRuntimeOverrides() {
+        let service = makeService()
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedReasoningEffort("medium")
+        service.setSelectedServiceTier(.fast)
+        let thread = CodexThread(id: "thread-override", title: "Thread", model: "gpt-5.4")
+        service.setThreadReasoningEffortOverride("high", for: thread.id)
+        service.setThreadServiceTierOverride(nil, for: thread.id)
+
+        let state = TurnComposerRuntimeState.resolve(
+            codex: service,
+            reasoningDisplayOptions: reasoningOptions(),
+            thread: thread,
+            isAgentRuntimeLocked: true
+        )
+
+        XCTAssertEqual(state.effectiveReasoningEffort, "high")
+        XCTAssertEqual(state.selectedReasoningEffort, "high")
+        XCTAssertTrue(state.isSelectedReasoning("high"))
+        XCTAssertNil(state.selectedServiceTier)
+        XCTAssertTrue(state.isSelectedServiceTier(nil))
+        XCTAssertTrue(state.supportsFastMode)
+    }
+
+    func testLockedThreadRuntimeActionsWriteThreadOverridesInsteadOfGlobalDefaults() {
+        let service = makeService()
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedReasoningEffort("medium")
+        service.setSelectedServiceTier(nil)
+        let thread = CodexThread(id: "thread-actions", title: "Thread", model: "gpt-5.4")
+        let actions = TurnComposerRuntimeActions.resolve(codex: service, thread: thread)
+
+        actions.selectReasoning("high")
+        actions.selectServiceTier(.fast)
+
+        XCTAssertEqual(service.selectedReasoningEffort, "medium")
+        XCTAssertNil(service.selectedServiceTier)
+        XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(thread: thread), "high")
+        XCTAssertEqual(service.effectiveServiceTier(for: thread), .fast)
+    }
+
+    func testSelectingProviderForLockedOpenCodeThreadPersistsThreadModel() {
+        let service = makeService()
+        service.agentRuntimeDescriptors = [.codex, makeOpenCodeDescriptor()]
+        var thread = CodexThread(
+            id: "thread-opencode",
+            agentRuntime: "opencode",
+            agentSessionId: "ses_123",
+            model: "opencode-go/deepseek-v4-flash",
+            modelProvider: "opencode-go"
+        )
+        service.upsertThread(thread)
+
+        service.setSelectedRuntimeProviderId("vercel", for: thread)
+
+        thread = service.thread(for: "thread-opencode") ?? thread
+        XCTAssertEqual(thread.model, "vercel/alibaba/qwen3.6-plus")
+        XCTAssertEqual(thread.modelProvider, "vercel")
+        XCTAssertEqual(service.runtimeModelIdentifierForTurn(thread: thread), "vercel/alibaba/qwen3.6-plus")
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "CodexThreadRuntimeOverrideTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
@@ -264,6 +352,30 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         let service = CodexService(defaults: defaults)
         Self.retainedServices.append(service)
         return service
+    }
+
+    private func reasoningOptions() -> [TurnComposerReasoningDisplayOption] {
+        [
+            TurnComposerReasoningDisplayOption(effort: "medium", title: "Medium"),
+            TurnComposerReasoningDisplayOption(effort: "high", title: "High"),
+        ]
+    }
+
+    private func workspaceCheckpointResponse(kind: String, threadId: String, copied: Bool? = nil) -> RPCMessage {
+        var result: RPCObject = [
+            "repoRoot": .string("/tmp/remodex-local"),
+            "checkpointRef": .string("refs/remodex/checkpoints/test"),
+            "checkpointKind": .string(kind),
+            "threadId": .string(threadId),
+        ]
+        if let copied {
+            result["copied"] = .bool(copied)
+        }
+        return RPCMessage(
+            id: .string(UUID().uuidString),
+            result: .object(result),
+            includeJSONRPC: false
+        )
     }
 
     private func makeModel() -> CodexModelOption {
@@ -279,6 +391,77 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
                 CodexReasoningEffortOption(reasoningEffort: "high", description: "High"),
             ],
             defaultReasoningEffort: "medium"
+        )
+    }
+
+    private func makeOpenCodeDescriptor() -> AgentRuntimeDescriptor {
+        AgentRuntimeDescriptor(
+            id: "opencode",
+            displayName: "OpenCode",
+            status: "ready",
+            capabilities: .coreOnly,
+            modelCatalog: AgentRuntimeModelCatalog(
+                defaultModelId: "opencode-go/deepseek-v4-flash",
+                defaultProviderId: "opencode-go",
+                status: nil,
+                statusMessage: nil,
+                providers: [
+                    AgentRuntimeModelProvider(
+                        id: "opencode-go",
+                        displayName: "OpenCode Go",
+                        modelIds: [
+                            "opencode-go/deepseek-v4-flash",
+                            "opencode-go/qwen3.6-plus",
+                        ],
+                        isDefault: true
+                    ),
+                    AgentRuntimeModelProvider(
+                        id: "vercel",
+                        displayName: "Vercel",
+                        modelIds: ["vercel/alibaba/qwen3.6-plus"],
+                        isDefault: false
+                    ),
+                ],
+                models: [
+                    makeOpenCodeModel(
+                        id: "opencode-go/deepseek-v4-flash",
+                        providerID: "opencode-go",
+                        modelID: "deepseek-v4-flash",
+                        isDefault: true
+                    ),
+                    makeOpenCodeModel(
+                        id: "opencode-go/qwen3.6-plus",
+                        providerID: "opencode-go",
+                        modelID: "qwen3.6-plus"
+                    ),
+                    makeOpenCodeModel(
+                        id: "vercel/alibaba/qwen3.6-plus",
+                        providerID: "vercel",
+                        modelID: "alibaba/qwen3.6-plus"
+                    ),
+                ]
+            )
+        )
+    }
+
+    private func makeOpenCodeModel(
+        id: String,
+        providerID: String,
+        modelID: String,
+        isDefault: Bool = false
+    ) -> CodexModelOption {
+        CodexModelOption(
+            id: id,
+            model: id,
+            displayName: id,
+            description: "OpenCode model",
+            isDefault: isDefault,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: nil,
+            providerID: providerID,
+            providerDisplayName: providerID,
+            modelID: modelID,
+            modelDisplayName: modelID
         )
     }
 

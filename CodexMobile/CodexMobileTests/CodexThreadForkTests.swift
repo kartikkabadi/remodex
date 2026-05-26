@@ -57,6 +57,9 @@ final class CodexThreadForkTests: XCTestCase {
                     includeJSONRPC: false
                 )
             default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
                 XCTFail("Unexpected method: \(method)")
                 throw CodexServiceError.invalidInput("Unexpected method")
             }
@@ -75,7 +78,7 @@ final class CodexThreadForkTests: XCTestCase {
         XCTAssertEqual(service.activeThreadId, "fork-local")
     }
 
-    func testForkSendsOnlyThreadIdToThreadFork() async throws {
+    func testForkSendsMinimalParamsToThreadFork() async throws {
         let service = makeService()
         service.isConnected = true
         service.isInitialized = true
@@ -122,6 +125,9 @@ final class CodexThreadForkTests: XCTestCase {
                     includeJSONRPC: false
                 )
             default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
                 XCTFail("Unexpected method: \(method)")
                 throw CodexServiceError.invalidInput("Unexpected method")
             }
@@ -133,7 +139,10 @@ final class CodexThreadForkTests: XCTestCase {
         )
 
         XCTAssertEqual(capturedForkParams["threadId"]?.stringValue, "source-thread")
-        XCTAssertEqual(capturedForkParams.count, 1)
+        XCTAssertEqual(capturedForkParams["excludeTurns"]?.boolValue, true)
+        XCTAssertEqual(capturedForkParams["approvalPolicy"]?.stringValue, "on-request")
+        XCTAssertNil(capturedForkParams["cwd"])
+        XCTAssertEqual(capturedForkParams.count, 3)
         XCTAssertEqual(capturedResumeParams["threadId"]?.stringValue, "fork-local")
         XCTAssertEqual(capturedResumeParams["cwd"]?.stringValue, "/tmp/remodex-worktree")
         XCTAssertEqual(forkedThread.id, "fork-local")
@@ -184,6 +193,9 @@ final class CodexThreadForkTests: XCTestCase {
                     includeJSONRPC: false
                 )
             default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
                 XCTFail("Unexpected method: \(method)")
                 throw CodexServiceError.invalidInput("Unexpected method")
             }
@@ -194,6 +206,77 @@ final class CodexThreadForkTests: XCTestCase {
         XCTAssertEqual(forkedThread.forkedFromThreadId, "source-thread")
         XCTAssertTrue(forkedThread.isForkedThread)
         XCTAssertEqual(service.thread(for: "fork-local")?.forkedFromThreadId, "source-thread")
+    }
+
+    func testForkInheritsOpenCodeRuntimeIdentityWhenResponsesOmitIt() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+        service.threads = [
+            makeSourceThread(
+                agentRuntime: "opencode",
+                agentSessionId: "ses_source",
+                opencodeBuildAgentName: "build-agent",
+                opencodePlanAgentName: "plan-agent"
+            ),
+        ]
+
+        var capturedResumeParams: [String: JSONValue] = [:]
+        service.requestTransportOverride = { method, params in
+            switch method {
+            case "thread/fork":
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("fork-local"),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "thread/resume":
+                capturedResumeParams = params?.objectValue ?? [:]
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("fork-local"),
+                            "cwd": .string("/tmp/remodex"),
+                            "title": .string("Fork Local"),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "thread/read":
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("fork-local"),
+                            "cwd": .string("/tmp/remodex"),
+                            "turns": .array([]),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
+                XCTFail("Unexpected method: \(method)")
+                throw CodexServiceError.invalidInput("Unexpected method")
+            }
+        }
+
+        let forkedThread = try await service.forkThreadIfReady(from: "source-thread", target: .currentProject)
+
+        XCTAssertEqual(capturedResumeParams["agentRuntime"]?.stringValue, "opencode")
+        XCTAssertEqual(capturedResumeParams["opencodeBuildAgentName"]?.stringValue, "build-agent")
+        XCTAssertEqual(capturedResumeParams["opencodePlanAgentName"]?.stringValue, "plan-agent")
+        XCTAssertEqual(forkedThread.agentRuntime, "opencode")
+        XCTAssertEqual(forkedThread.agentSessionId, "ses_source")
+        XCTAssertEqual(service.thread(for: "fork-local")?.agentRuntime, "opencode")
+        XCTAssertEqual(service.thread(for: "fork-local")?.agentSessionId, "ses_source")
     }
 
     func testPersistedForkOriginRehydratesAfterServiceReload() async throws {
@@ -246,6 +329,9 @@ final class CodexThreadForkTests: XCTestCase {
                     includeJSONRPC: false
                 )
             default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
                 XCTFail("Unexpected method: \(method)")
                 throw CodexServiceError.invalidInput("Unexpected method")
             }
@@ -284,7 +370,7 @@ final class CodexThreadForkTests: XCTestCase {
             XCTFail("Expected thread/fork to fail")
         } catch {
             XCTAssertFalse(service.supportsThreadFork)
-            XCTAssertEqual(service.bridgeUpdatePrompt?.title, "Update Remodex on your Mac to use /fork")
+            XCTAssertEqual(service.bridgeUpdatePrompt?.title, "Update Remodex on your device to use /fork")
         }
     }
 
@@ -311,6 +397,9 @@ final class CodexThreadForkTests: XCTestCase {
                     RPCError(code: -32600, message: "no rollout found for thread id fork-local")
                 )
             default:
+                if let response = self.commonForkHydrationResponse(for: method) {
+                    return response
+                }
                 XCTFail("Unexpected method: \(method)")
                 throw CodexServiceError.invalidInput("Unexpected method")
             }
@@ -389,11 +478,45 @@ final class CodexThreadForkTests: XCTestCase {
         return service
     }
 
-    private func makeSourceThread() -> CodexThread {
+    private func commonForkHydrationResponse(for method: String) -> RPCMessage? {
+        switch method {
+        case "thread/turns/list":
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "data": .array([]),
+                    "nextCursor": .null,
+                ]),
+                includeJSONRPC: false
+            )
+        case "thread/list":
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "data": .array([]),
+                    "nextCursor": .null,
+                ]),
+                includeJSONRPC: false
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func makeSourceThread(
+        agentRuntime: String = "codex",
+        agentSessionId: String? = nil,
+        opencodeBuildAgentName: String? = nil,
+        opencodePlanAgentName: String? = nil
+    ) -> CodexThread {
         CodexThread(
             id: "source-thread",
             title: "Source",
             cwd: "/tmp/remodex",
+            agentRuntime: agentRuntime,
+            agentSessionId: agentSessionId,
+            opencodeBuildAgentName: opencodeBuildAgentName,
+            opencodePlanAgentName: opencodePlanAgentName,
             model: "gpt-5.4",
             modelProvider: "openai"
         )

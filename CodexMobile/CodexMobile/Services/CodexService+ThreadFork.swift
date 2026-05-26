@@ -144,6 +144,13 @@ private extension CodexService {
             if decodedThread.modelProvider == nil {
                 decodedThread.modelProvider = sourceThread.modelProvider
             }
+            inheritForkRuntimeIdentity(from: sourceThread, into: &decodedThread)
+            if decodedThread.opencodeBuildAgentName == nil {
+                decodedThread.opencodeBuildAgentName = sourceThread.opencodeBuildAgentName
+            }
+            if decodedThread.opencodePlanAgentName == nil {
+                decodedThread.opencodePlanAgentName = sourceThread.opencodePlanAgentName
+            }
         }
 
         upsertThread(decodedThread, treatAsServerState: true)
@@ -166,7 +173,8 @@ private extension CodexService {
             threadId: decodedThread.id,
             targetProjectPath: targetProjectPath,
             sourceModelIdentifier: sourceModelIdentifier,
-            sourceModelProvider: sourceThread?.modelProvider
+            sourceModelProvider: sourceThread?.modelProvider,
+            sourceThread: sourceThread
         )
         if let hydratedThread {
             return hydratedThread
@@ -177,7 +185,8 @@ private extension CodexService {
             fallbackThread,
             targetProjectPath: targetProjectPath,
             sourceModelIdentifier: sourceModelIdentifier,
-            sourceModelProvider: sourceThread?.modelProvider
+            sourceModelProvider: sourceThread?.modelProvider,
+            sourceThread: sourceThread
         ) ?? fallbackThread
     }
 
@@ -185,7 +194,8 @@ private extension CodexService {
         threadId: String,
         targetProjectPath: String?,
         sourceModelIdentifier: String?,
-        sourceModelProvider: String?
+        sourceModelProvider: String?,
+        sourceThread: CodexThread?
     ) async throws -> CodexThread? {
         for delay in Self.forkHydrationRetryDelays {
             if delay > 0 {
@@ -218,7 +228,8 @@ private extension CodexService {
                     resumedThread ?? thread(for: threadId),
                     targetProjectPath: targetProjectPath,
                     sourceModelIdentifier: sourceModelIdentifier,
-                    sourceModelProvider: sourceModelProvider
+                    sourceModelProvider: sourceModelProvider,
+                    sourceThread: sourceThread
                 )
             }
         }
@@ -227,7 +238,8 @@ private extension CodexService {
             thread(for: threadId),
             targetProjectPath: targetProjectPath,
             sourceModelIdentifier: sourceModelIdentifier,
-            sourceModelProvider: sourceModelProvider
+            sourceModelProvider: sourceModelProvider,
+            sourceThread: sourceThread
         )
     }
 
@@ -236,13 +248,19 @@ private extension CodexService {
         _ thread: CodexThread?,
         targetProjectPath: String?,
         sourceModelIdentifier: String?,
-        sourceModelProvider: String?
+        sourceModelProvider: String?,
+        sourceThread: CodexThread?
     ) -> CodexThread? {
         guard var thread else {
             return nil
         }
 
         var didPatch = false
+        didPatch = inheritForkRuntimeIdentity(from: sourceThread, into: &thread) || didPatch
+        if thread.forkedFromThreadId == nil, let sourceThread {
+            thread.forkedFromThreadId = normalizedInterruptIdentifier(sourceThread.id) ?? sourceThread.id
+            didPatch = true
+        }
         if let targetProjectPath,
            thread.normalizedProjectPath != targetProjectPath {
             thread.cwd = targetProjectPath
@@ -266,5 +284,31 @@ private extension CodexService {
         }
 
         return thread
+    }
+
+    @discardableResult
+    func inheritForkRuntimeIdentity(from sourceThread: CodexThread?, into thread: inout CodexThread) -> Bool {
+        guard let sourceThread else {
+            return false
+        }
+
+        var didPatch = false
+        let sourceRuntime = sourceThread.agentRuntime
+        if sourceRuntime != "codex" || thread.agentRuntime == "codex" {
+            if thread.agentRuntime != sourceRuntime {
+                thread.agentRuntime = sourceRuntime
+                didPatch = true
+            }
+        }
+
+        if sourceRuntime != "codex",
+           let sourceAgentSessionId = sourceThread.agentSessionId,
+           sourceAgentSessionId != thread.agentSessionId,
+           thread.agentSessionId == thread.id {
+            thread.agentSessionId = sourceAgentSessionId
+            didPatch = true
+        }
+
+        return didPatch
     }
 }

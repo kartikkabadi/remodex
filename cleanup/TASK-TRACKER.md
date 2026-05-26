@@ -1,7 +1,16 @@
 # Cleanup Task Tracker
-> **Last updated**: 2026-05-11 23:27
-> **Status**: in progress
-> **Source of truth**: `cleanup`
+> **Last updated**: 2026-05 (post user-approved targeted cleanup of older clone duplication)
+> **Status**: in progress (active work now focused in remodex-build/)
+> **Source of truth**: `cleanup` (in remodex-build/)
+
+## Important Note — Older Clone Duplication Removed (User Approved)
+On user explicit approval ("Yes") to the targeted archival proposal:
+- The duplicated `cleanup/` (May 11 audit + all 270 per-file plans) and `.scratch/` from the older `documents/Projects/remodex/` clone were moved to `documents/Projects/archive/remodex-older-clone-duplicates-2026-05/`.
+- This removes the duplicated slop while preserving history in an explicit archive location.
+- All active cleanup and multi-runtime stabilization work is now in `remodex-build/` (the single source of truth).
+- The older `remodex/` directory remains as a historical snapshot (without the duplicated subtrees).
+- Follow-up (Gate #1, user explicit YES 2026-05-24): The 4 remaining planning stubs (ACTION-PLAN.md, SYNTHESIS-PLAN.md, remodex-audit-plan.md, PLANNING-MOVED.md) from the older clone were moved to `archive/remodex-older-clone-duplicates-2026-05/historical-planning-stubs-2026-05-24/`. Pre/post scoped verification (ls/find/counts) confirmed exact match to approval. Older now clean of these dups; remains lightweight historical snapshot only. All active cleanup/multi-runtime work in `remodex-build/` (single source of truth) + GH issues. Fully reversible. No other files touched.
+- Follow-up (270 plans archival gate, user explicit YES 2026-05-25): The 270 per-file plans + CLEANUP-AUDIT.md from active `remodex-build/cleanup/` (the truth copy after narrow slices) were moved to `archive/remodex-older-clone-duplicates-2026-05/completed-narrow-slices-2026-05-25/` as "completed" for this narrow 2026-05 multi-runtime stabilization pass. Narrow intersecting P0/P1 slices (Incoming, Helpers, CodexThread etc.) reviewed + wontfixed per prior gate (generic major god-object splits out of scope for this stabilization window; see Docs/plans/multi-agent-runtime.md "Current Reality" + blueprint for actual work). High-level TASK-TRACKER.md remains in active place. Pre/post scoped verification (ls/counts) confirmed exact match. All active multi-runtime stabilization work now in Docs/plans/ + GH issues on the fork. Fully reversible. No other files touched.
 
 ## Repository Cleanup Summary
 - Total repo-owned code files reviewed: **270**
@@ -28,7 +37,7 @@
 |---|---|---|---|---:|---|---|---|---|
 | CLN-038 | P0 | TODO | L | 4449 | Services | `CodexMobile/CodexMobile/Services/CodexService+Messages.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-messages-swift.md) | needs cleanup pass |
 | CLN-226 | P0 | TODO | L | 3647 | Tests | `CodexMobile/CodexMobileTests/TurnTimelineReducerTests.swift` | [plan](plans/codexmobile-codexmobiletests-turntimelinereducertests-swift.md) | needs cleanup pass |
-| CLN-034 | P0 | TODO | L | 2815 | Services | `CodexMobile/CodexMobile/Services/CodexService+Incoming.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-incoming-swift.md) | needs cleanup pass |
+| CLN-034 | P0 | WONTFIX (narrow 2026-05 pass) | L | 2815 | Services | `CodexMobile/CodexMobile/Services/CodexService+Incoming.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-incoming-swift.md) | wontfix this pass (generic god-object split is major refactor; narrow multi-runtime stabilization/OpenCode/Cursor intersecting scope only per approved plan execution; see Docs/plans/multi-agent-runtime.md "Current Reality" + blueprint for actual wiring/inheritance work). No code changes/TDD/xcodebuild here. |
 | CLN-155 | P0 | DONE | L | 428 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Messages/TurnMessageComponents.swift` | [plan](plans/codexmobile-codexmobile-views-turn-messages-turnmessagecomponents-swift.md) | reduced below 500 LOC; row role dispatch isolated from user/system/accessory components |
 | CLN-170 | P0 | TODO | L | 2405 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Core/TurnViewModel.swift` | [plan](plans/codexmobile-codexmobile-views-turn-core-turnviewmodel-swift.md) | needs cleanup pass |
 | CLN-052 | P0 | TODO | L | 2314 | Services | `CodexMobile/CodexMobile/Services/CodexService+ThreadsTurns.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-threadsturns-swift.md) | needs cleanup pass |
@@ -51,7 +60,7 @@
 | CLN-153 | P1 | TODO | M | 836 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Messages/TurnMermaidRenderer.swift` | [plan](plans/codexmobile-codexmobile-views-turn-messages-turnmermaidrenderer-swift.md) | needs cleanup pass |
 | CLN-169 | P1 | TODO | M | 817 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Core/TurnViewModel+GitBranchWorktree.swift` | [plan](plans/codexmobile-codexmobile-views-turn-core-turnviewmodel-gitbranchworktree-swift.md) | needs cleanup pass |
 | CLN-230 | P1 | TODO | M | 817 | Tests | `CodexMobile/CodexMobileTests/TurnViewModelQueueTests.swift` | [plan](plans/codexmobile-codexmobiletests-turnviewmodelqueuetests-swift.md) | needs cleanup pass |
-| CLN-032 | P1 | TODO | M | 785 | Services | `CodexMobile/CodexMobile/Services/CodexService+Helpers.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-helpers-swift.md) | needs cleanup pass |
+| CLN-032 | P1 | WONTFIX (narrow 2026-05 pass) | M | 785 | Services | `CodexMobile/CodexMobile/Services/CodexService+Helpers.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-helpers-swift.md) | wontfix this pass (generic god-object split is major refactor; narrow multi-runtime stabilization/OpenCode/Cursor intersecting scope only per approved plan execution; see Docs/plans/multi-agent-runtime.md "Current Reality" + blueprint for actual wiring/inheritance work). No code changes/TDD/xcodebuild here. |
 | CLN-113 | P1 | TODO | M | 778 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Messages/CommandExecutionViews.swift` | [plan](plans/codexmobile-codexmobile-views-turn-messages-commandexecutionviews-swift.md) | needs cleanup pass |
 | CLN-181 | P1 | TODO | M | 776 | Tests | `CodexMobile/CodexMobileTests/CodexGPTAccountTests.swift` | [plan](plans/codexmobile-codexmobiletests-codexgptaccounttests-swift.md) | needs cleanup pass |
 | CLN-053 | P1 | TODO | M | 774 | Services | `CodexMobile/CodexMobile/Services/CodexService+Transport.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-transport-swift.md) | needs cleanup pass |
@@ -66,7 +75,7 @@
 | CLN-050 | P1 | TODO | M | 554 | Services | `CodexMobile/CodexMobile/Services/CodexService+ThreadHistoryPagination.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-threadhistorypagination-swift.md) | needs cleanup pass |
 | CLN-163 | P1 | TODO | M | 550 | Turn UI | `CodexMobile/CodexMobile/Views/Turn/Timeline/TurnTimelineRenderProjection.swift` | [plan](plans/codexmobile-codexmobile-views-turn-timeline-turntimelinerenderprojection-swift.md) | needs cleanup pass |
 | CLN-108 | P1 | TODO | M | 534 | Sidebar UI | `CodexMobile/CodexMobile/Views/SidebarView.swift` | [plan](plans/codexmobile-codexmobile-views-sidebarview-swift.md) | needs cleanup pass |
-| CLN-017 | P1 | TODO | M | 524 | Models | `CodexMobile/CodexMobile/Models/CodexThread.swift` | [plan](plans/codexmobile-codexmobile-models-codexthread-swift.md) | needs cleanup pass |
+| CLN-017 | P1 | WONTFIX (narrow 2026-05 pass) | M | 524 | Models | `CodexMobile/CodexMobile/Models/CodexThread.swift` | [plan](plans/codexmobile-codexmobile-models-codexthread-swift.md) | wontfix this pass (generic god-object split is major refactor; narrow multi-runtime stabilization/OpenCode/Cursor intersecting scope only per approved plan execution; see Docs/plans/multi-agent-runtime.md "Current Reality" + blueprint for actual wiring/inheritance work). No code changes/TDD/xcodebuild here. |
 | CLN-174 | P1 | TODO | M | 517 | Tests | `CodexMobile/CodexMobileTests/AIChangeSetTests.swift` | [plan](plans/codexmobile-codexmobiletests-aichangesettests-swift.md) | needs cleanup pass |
 | CLN-039 | P1 | TODO | M | 511 | Services | `CodexMobile/CodexMobile/Services/CodexService+Notifications.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-notifications-swift.md) | needs cleanup pass |
 | CLN-044 | P1 | TODO | M | 506 | Services | `CodexMobile/CodexMobile/Services/CodexService+RuntimeConfig.swift` | [plan](plans/codexmobile-codexmobile-services-codexservice-runtimeconfig-swift.md) | needs cleanup pass |
