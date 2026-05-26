@@ -1,18 +1,18 @@
 # Multi-agent runtime implementation blueprint
 
-**Status:** Planning complete for implementation handoff (2026-05-23; contracts patched 2026-05-23)  
+**Status:** Historical implementation blueprint; PR45 contains the current fork integration work (updated 2026-05-26)
 **Branch:** `feat/multi-agent-runtime`  
 **Issue tracker:** [kartikkabadi/remodex #16-#29](https://github.com/kartikkabadi/remodex/issues/16)  
 **Primary decisions:** [ADR 002](../adr/002-agent-runtime-and-canonical-events.md), [ADR 003](../adr/003-cursor-agent-runtime.md)
 
-This blueprint turns the parent PRD and issue set into build order, module ownership, schemas, and review notes. It intentionally keeps Remodex local-first: the Mac bridge owns runtime credentials and process control; client surfaces receive sanitized status and canonical events only.
+This blueprint turned the parent PRD and issue set into build order, module ownership, schemas, and review notes. Keep it as design context; verify live status against PR45, [multi-agent-runtime.md](multi-agent-runtime.md), and GitHub issues before treating any "to build" phrasing below as current work.
 
 ## Source facts checked
 
-- Local branch is `feat/multi-agent-runtime`; `origin/main` and `fork/main` are aligned at the handoff base.
+- Local branch is `feat/multi-agent-runtime`; PR45 has been synced with upstream commits through `origin/main` as of 2026-05-26.
 - Current bridge is Codex-centric: `phodex-bridge/src/bridge.js` owns secure relay setup, Codex transport lifecycle, desktop refresh, push tracking, thread state, and RPC routing.
 - `phodex-bridge/src/codex-transport.js` is a Codex adapter today. Keep it Codex-only and wrap it; do not mutate it into the generic runtime layer.
-- `opencode --version` is `1.15.7`; local `opencode serve --help` reports `--hostname 127.0.0.1 --port 0`, while the current official server docs list default port `4096`. Do not rely on defaults; pass `--hostname 127.0.0.1 --port 0` explicitly. `--mdns` widens binding to `0.0.0.0`, so do not enable it.
+- OpenCode source check: local `opencode --version` is `1.15.7`; current `sst/opencode` source is newer (`1.15.10` when checked). Pass `--hostname 127.0.0.1 --port 0` explicitly, but document the behavior honestly: OpenCode prefers `4096` first and falls back to a random free port. `--mdns` widens binding to `0.0.0.0`, so do not enable it.
 - `opencode attach <url>` supports `--session`, `--dir`, and basic-auth flags, which matches the planned desktop handoff path.
 - Cursor Agent is installed locally, but not through this shell's current `PATH`: `/Users/user/.local/bin/agent` points at `/Users/user/.local/share/cursor-agent/versions/2026.05.20-2b5dd59/cursor-agent`, and `agent acp --help` works. `/Applications/Cursor.app/Contents/Resources/app/bin/cursor` is Cursor `3.5.33` and supports the `agent` subcommand. Runtime discovery must check these installed paths before reporting `not_installed`.
 - `origin/codex/add-opencode-provider` and `origin/codex/add-cursor-provider` are reference branches only. Mine icons, tests, ACP JSON-RPC client pieces, and UI affordances; do not merge their `modelProvider` router or OpenCode `opencode run --format json` path.

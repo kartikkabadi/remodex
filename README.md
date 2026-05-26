@@ -34,13 +34,13 @@ Today, the background daemon / trusted auto-reconnect flow is implemented for ma
 
 If you want the public-repo distribution model explained clearly, read [SELF_HOSTING_MODEL.md](SELF_HOSTING_MODEL.md).
 
-## Share status (fork, 2026-05-25)
+## Share status (fork, 2026-05-26)
 
 | Audience | Ready? | Notes |
 |----------|--------|-------|
 | App Store / npm (Codex-only) | Yes | Upstream product path; this fork branch is separate |
-| Collaborators on multi-agent fork | Partial | Node tests green; OpenCode/Cursor experimental — see plan |
-| General public as "finished Remodex" | No | Device smoke, canonical cutover, dynamic models still open ([#16](https://github.com/kartikkabadi/remodex/issues/16)) |
+| Collaborators on multi-agent fork | PR45 review | OpenCode/Cursor/dynamic-model work is in PR45; bridge and relay tests are green after upstream sync — see plan |
+| General public as "finished Remodex" | No | Physical device smoke, canonical cutover proof, and upstream handoff are still open ([#16](https://github.com/kartikkabadi/remodex/issues/16)) |
 
 **Why this fork still matters:** Official Codex-in-ChatGPT mobile is Codex-only. This branch targets **multiple agent runtimes** (OpenCode, Cursor), **self-hosted relay**, and optional Telegram — not the same product surface.
 

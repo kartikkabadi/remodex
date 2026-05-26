@@ -115,6 +115,6 @@ _Avoid_: Trust level, admin mode, Agent
 - "Continue" could mean selecting a thread or submitting model input — resolved: thread selection is a **Thread Choice**; model input is **Codex Input**, and a first plain text message may create the initial **Active Thread**.
 
 **RemodexPad**:
-Native iPad app target and pad-adapted UI (composer, diff, QR). Used for physical iPad testing of multi-agent work. See issue 12 and [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md).
+Native iPad app target and pad-adapted UI (composer, diff, QR). Used for physical iPad testing of multi-agent work. See [#28](https://github.com/kartikkabadi/remodex/issues/28), [#43](https://github.com/kartikkabadi/remodex/issues/43), and [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md).
 
 Telegram hub layout: documented on `feat/telegram-bridge` when that branch lands (no `Docs/telegram-ux.md` on `main` yet).

@@ -6,7 +6,7 @@ Read this before picking work. Rules live in [AGENTS.md](../../AGENTS.md). Issue
 
 | What | Path | Branch |
 |------|------|--------|
-| **All multi-agent work** | `/Users/user/Documents/projects/remodex-build` | `feat/multi-agent-runtime` |
+| **All multi-agent work** | `/Users/user/Documents/Projects/remodex-build` | `feat/multi-agent-runtime` |
 | **GitHub fork** | https://github.com/kartikkabadi/remodex | same branch for PRs |
 | **Upstream** | https://github.com/Emanuele-web04/remodex | `origin/main` for sync reference only |
 
@@ -14,7 +14,7 @@ Read this before picking work. Rules live in [AGENTS.md](../../AGENTS.md). Issue
 
 | Path | Why |
 |------|-----|
-| `/Users/user/Documents/projects/remodex` | Stale snapshot on `main` — Codex-only code, no runtime registry/adapters |
+| `/Users/user/Documents/Projects/remodex` | Stale snapshot on `main` — Codex-only code, no runtime registry/adapters |
 
 ## Read order
 
@@ -28,15 +28,15 @@ Parent epic: [#16](https://github.com/kartikkabadi/remodex/issues/16)
 ## Verify before claiming done
 
 ```bash
-cd phodex-bridge && npm test   # expect 448 pass
-cd ../relay && npm test        # expect 39 pass
+cd phodex-bridge && npm test   # expect all tests to pass
+cd ../relay && npm test        # expect all tests to pass
 ```
 
 After Swift changes: `xcodebuild` per AGENTS.md.
 
 ## Last verified
 
-2026-05-25 — `phodex-bridge` 448/448 pass; `relay` 39/39 pass. Not verified this pass: `xcodebuild`, physical iPhone/iPad smoke.
+2026-05-26 — after syncing `origin/main` into PR45: `phodex-bridge` 475/475 pass; `relay` 41/41 pass; `xcodebuild` arm64 simulator compile succeeded for `CodexMobile` and `RemodexPad`. Physical iPhone/iPad smoke remains human-gated.
 
 ## Session rules
 

@@ -21,13 +21,14 @@ Create a GitHub issue on **kartikkabadi/remodex**.
 
 Run `gh issue view <number> --repo kartikkabadi/remodex --comments`.
 
-## Live queue (2026-05-25)
+## Live queue (2026-05-26)
 
 Confirm labels on GitHub before starting; this table is the operating default.
 
 | Track | Issues | Agent rule |
 |-------|--------|------------|
-| **Delegable code** | [#39](https://github.com/kartikkabadi/remodex/issues/39) → [#40](https://github.com/kartikkabadi/remodex/issues/40) → [#41](https://github.com/kartikkabadi/remodex/issues/41) → [#42](https://github.com/kartikkabadi/remodex/issues/42) | Default start **#39** unless Kartik assigns another |
+| **PR45 close candidates** | [#20](https://github.com/kartikkabadi/remodex/issues/20), [#21](https://github.com/kartikkabadi/remodex/issues/21), [#22](https://github.com/kartikkabadi/remodex/issues/22), [#25](https://github.com/kartikkabadi/remodex/issues/25), [#26](https://github.com/kartikkabadi/remodex/issues/26), [#39](https://github.com/kartikkabadi/remodex/issues/39), [#40](https://github.com/kartikkabadi/remodex/issues/40), [#41](https://github.com/kartikkabadi/remodex/issues/41) | Do not start duplicate code work; verify and close only after PR45 lands |
+| **Needs update / proof** | [#19](https://github.com/kartikkabadi/remodex/issues/19), [#23](https://github.com/kartikkabadi/remodex/issues/23), [#38](https://github.com/kartikkabadi/remodex/issues/38), [#42](https://github.com/kartikkabadi/remodex/issues/42), [#44](https://github.com/kartikkabadi/remodex/issues/44) | Comment with PR45 progress; keep open until acceptance proof or Kartik confirms the next contract |
 | **Device-gated** | [#24](https://github.com/kartikkabadi/remodex/issues/24), [#27](https://github.com/kartikkabadi/remodex/issues/27), [#28](https://github.com/kartikkabadi/remodex/issues/28), [#43](https://github.com/kartikkabadi/remodex/issues/43), [#29](https://github.com/kartikkabadi/remodex/issues/29) | Do **not** close without Kartik physical iPhone/iPad smoke |
 | **Closed (do not reopen)** | [#18](https://github.com/kartikkabadi/remodex/issues/18), [#17](https://github.com/kartikkabadi/remodex/issues/17), [#31](https://github.com/kartikkabadi/remodex/issues/31)–[#37](https://github.com/kartikkabadi/remodex/issues/37) | Reopen only if fresh code contradicts closure with proof |
 
