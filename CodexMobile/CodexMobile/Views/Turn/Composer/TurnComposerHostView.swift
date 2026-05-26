@@ -15,6 +15,7 @@ struct TurnComposerHostView: View {
     let isThreadRunning: Bool
     let isEmptyThread: Bool
     let isWorktreeProject: Bool
+    var activeFileChangeStatus: FileChangeStatusSnapshot? = nil
     let canForkLocally: Bool
     let isInputFocused: Binding<Bool>
     let orderedModelOptions: [CodexModelOption]
@@ -133,6 +134,7 @@ struct TurnComposerHostView: View {
             isEmptyThread: isEmptyThread,
             hasWorkingDirectory: hasComposerWorkingDirectory,
             isWorktreeProject: isWorktreeProject,
+            activeFileChangeStatus: activeFileChangeStatus,
             orderedModelOptions: orderedModelOptions,
             selectedModelID: selectedModelID,
             selectedModelTitle: selectedModelTitle,
