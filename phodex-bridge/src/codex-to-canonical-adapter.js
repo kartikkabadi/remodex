@@ -164,13 +164,16 @@ function mapCodexMethod(method, params) {
 
   if (method === "turn/plan/updated") {
     const plan = params.plan !== undefined ? params.plan : params;
+    const explanation = params.explanation !== undefined ? params.explanation : undefined;
     return {
       method,
       payload: {
         plan,
+        explanation,
       },
       extraParams: {
         plan,
+        explanation,
       },
     };
   }
@@ -274,9 +277,9 @@ function mapCodexMethod(method, params) {
   }
 
   if (method === "serverRequest/resolved") {
-    const requestId = readString(params.requestId)
-      || readString(params.request_id)
-      || readString(params.id);
+    const requestId = readIdentifier(params.requestId)
+      || readIdentifier(params.request_id)
+      || readIdentifier(params.id);
     return {
       method,
       requestId,
@@ -325,7 +328,7 @@ function createCanonicalBridgeMessage({
     agentSessionId: readString(agentSessionId),
     turnId: readString(turnId),
     itemId: readString(itemId),
-    requestId: readString(requestId),
+    requestId: readIdentifier(requestId),
     createdAt: readString(createdAt) || new Date().toISOString(),
     payload: payload && typeof payload === "object" ? payload : {},
   });
@@ -466,6 +469,16 @@ function parseJsonRpcMessage(rawMessage) {
 
 function readString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function readIdentifier(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function omitEmpty(value) {

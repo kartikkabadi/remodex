@@ -140,6 +140,7 @@ test("codex adapter keeps plan methods while adding canonical envelope fields", 
     params: {
       threadId: "thread-plan",
       turnId: "turn-plan",
+      explanation: "Need a careful rollout.",
       plan: {
         steps: [
           { id: "step-1", text: "Inspect", status: "completed" },
@@ -162,6 +163,8 @@ test("codex adapter keeps plan methods while adding canonical envelope fields", 
   assert.equal(planUpdated.params.schemaVersion, 1);
   assert.equal(planUpdated.params.agentRuntime, "codex");
   assert.equal(planUpdated.params.payload.sourceMethod, "turn/plan/updated");
+  assert.equal(planUpdated.params.explanation, "Need a careful rollout.");
+  assert.equal(planUpdated.params.payload.explanation, "Need a careful rollout.");
   assert.equal(planUpdated.params.payload.plan.steps.length, 2);
   assert.equal(planUpdated.params.plan.steps[1].status, "in_progress");
   assert.equal(planDelta.method, "item/plan/delta");
@@ -296,6 +299,25 @@ test("codex adapter maps server request resolution to canonical metadata", () =>
   assert.equal(resolved.params.requestId, "approval-1");
   assert.equal(resolved.params.payload.requestId, "approval-1");
   assert.equal(resolved.params.payload.resolution.decision, "accept");
+});
+
+test("codex adapter preserves numeric server request resolution ids", () => {
+  const resolved = convertFixture({
+    method: "serverRequest/resolved",
+    params: {
+      threadId: "thread-permission",
+      turnId: "turn-permission",
+      requestId: 42,
+      result: {
+        ok: true,
+      },
+    },
+  });
+
+  assert.equal(resolved.method, "serverRequest/resolved");
+  assert.equal(resolved.params.requestId, "42");
+  assert.equal(resolved.params.payload.requestId, "42");
+  assert.equal(resolved.params.payload.resolution.ok, true);
 });
 
 test("codex adapter maps failed turns and error envelopes to canonical error events", () => {
