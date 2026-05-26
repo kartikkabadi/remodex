@@ -920,10 +920,7 @@ async function handleInitializeRequest(state, request, emit) {
 }
 
 /**
- * `collaborationMode/list` — probe OpenCode for available collaboration modes.
- * Returns Codex-shaped mode descriptors. Plan mode is declared as supported
- * iff the OpenCode "plan" agent exists. Caches the agent list for 60 s.
- * On fetch error, returns an empty modes array rather than crashing.
+ * Caches agent list 60 s. On fetch error, returns empty array (does not crash).
  *
  * @param {OpenCodeTransportState} state
  * @param {ParsedJsonRpc} request
@@ -2744,10 +2741,7 @@ function attachOpenCodeSse(state, options) {
   catchUpAfterSseReconnect(state);
 }
 
-/**
- * After SSE reconnects, fetch missed messages for each running binding and
- * emit `item/updated` snapshots for any items not yet emitted via SSE.
- */
+/** @param {OpenCodeTransportState} state */
 async function catchUpAfterSseReconnect(state) {
   const { lastEmittedItemIdByThread, seenBusEventIds } = state.sse;
   if (!lastEmittedItemIdByThread || lastEmittedItemIdByThread.size === 0) {
@@ -2787,12 +2781,9 @@ async function catchUpAfterSseReconnect(state) {
         continue;
       }
 
-      // The OpenCode API returns messages newest-first (evidenced by
-      // loadTurnsForBinding using sortDirection:"desc" as default).
-      // Reverse to oldest-first (chronological) for catch-up scanning.
+      // API returns newest-first; reverse to chronological for catch-up scanning
       const ordered = [...entries].reverse();
 
-      // Find where we left off
       let startIndex = -1;
       for (let i = 0; i < ordered.length; i++) {
         const msgId = readString(ordered[i]?.info?.id) || readString(ordered[i]?.id) || "";
@@ -2802,7 +2793,6 @@ async function catchUpAfterSseReconnect(state) {
         }
       }
 
-      // Emit `item/updated` for messages after the last emitted item
       for (let i = startIndex + 1; i < ordered.length; i++) {
         const msg = ordered[i];
         const msgId = readString(msg?.info?.id) || readString(msg?.id) || synthesizeItemId("item");
@@ -2811,7 +2801,7 @@ async function catchUpAfterSseReconnect(state) {
           continue;
         }
 
-        // Bus events have a stable id for dedup; synthesise one if missing
+        // Bus events have stable IDs for dedup
         const eventId = readString(msg?.info?.id) || msgId;
         if (seenBusEventIds?.has(eventId)) {
           continue;

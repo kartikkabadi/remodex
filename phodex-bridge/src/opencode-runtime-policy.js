@@ -1,8 +1,4 @@
-// FILE: opencode-runtime-policy.js
-// Purpose: Shared OpenCode runtime gates and refusal tables for bridge + transport.
-// Layer: CLI helper
-// Exports: isOpenCodeRuntime, resolveRuntimeTransportFactory, refusal lookups
-// Depends on: none (lazy-requires transport modules in factory helper)
+// Shared OpenCode runtime gates and refusal tables for bridge + transport.
 
 const BUS_EVENT_ID_CACHE_LIMIT = 512;
 const CWD_LOCK_TTL_MS = 4 * 60 * 60 * 1000;

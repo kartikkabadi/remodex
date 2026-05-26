@@ -860,7 +860,6 @@ function startBridge({
     return true;
   }
 
-  // Resolves bridge-owned account helpers like status reads and Mac-side browser opening.
   async function readBridgeManagedAccountResult(method, params) {
     if (isOpenCodeRuntimeActive) {
       const refusal = lookupOpenCodeAccountRefusal(method);
