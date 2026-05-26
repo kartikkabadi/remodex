@@ -15,6 +15,15 @@ const {
 const { validateCanonicalEvent } = require("../src/canonical-events");
 
 test("codex adapter maps turn lifecycle notifications to canonical events", () => {
+  const threadStarted = convertFixture({
+    method: "thread/started",
+    params: {
+      thread: {
+        id: "thread-1",
+        title: "Canonical thread",
+      },
+    },
+  });
   const canonical = convertFixture({
     method: "turn/started",
     params: {
@@ -23,6 +32,10 @@ test("codex adapter maps turn lifecycle notifications to canonical events", () =
     },
   });
 
+  assert.equal(threadStarted.method, "remodex/event/thread_started");
+  assert.equal(threadStarted.params.threadId, "thread-1");
+  assert.equal(threadStarted.params.payload.thread.title, "Canonical thread");
+  assert.deepEqual(validateCanonicalEvent(threadStarted), { valid: true });
   assert.equal(canonical.method, "remodex/event/turn_started");
   assert.equal(canonical.params.threadId, "thread-1");
   assert.equal(canonical.params.agentSessionId, "agent-session-thread-1");
@@ -99,6 +112,63 @@ test("codex adapter maps tool activity and diffs to canonical events", () => {
   assert.equal(toolDelta.method, "remodex/event/tool_delta");
   assert.equal(toolDelta.params.payload.chunk, "On branch main");
   assert.equal(diff.method, "remodex/event/diff_updated");
+});
+
+test("codex adapter maps explicit tool completion fixtures", () => {
+  const completed = convertFixture({
+    method: "codex/event/exec_command_end",
+    params: {
+      threadId: "thread-tools",
+      turnId: "turn-tools",
+      itemId: "tool-1",
+      command: "git status",
+      status: "completed",
+      success: true,
+    },
+  });
+
+  assert.equal(completed.method, "remodex/event/tool_completed");
+  assert.equal(completed.params.itemId, "tool-1");
+  assert.equal(completed.params.payload.toolType, "exec_command_end");
+  assert.equal(completed.params.payload.status, "completed");
+  assert.equal(completed.params.payload.success, true);
+});
+
+test("codex adapter keeps plan methods while adding canonical envelope fields", () => {
+  const planUpdated = convertFixture({
+    method: "turn/plan/updated",
+    params: {
+      threadId: "thread-plan",
+      turnId: "turn-plan",
+      plan: {
+        steps: [
+          { id: "step-1", text: "Inspect", status: "completed" },
+          { id: "step-2", text: "Patch", status: "in_progress" },
+        ],
+      },
+    },
+  });
+  const planDelta = convertFixture({
+    method: "item/plan/delta",
+    params: {
+      threadId: "thread-plan",
+      turnId: "turn-plan",
+      itemId: "plan-item-1",
+      delta: "Need one more fixture.",
+    },
+  });
+
+  assert.equal(planUpdated.method, "turn/plan/updated");
+  assert.equal(planUpdated.params.schemaVersion, 1);
+  assert.equal(planUpdated.params.agentRuntime, "codex");
+  assert.equal(planUpdated.params.payload.sourceMethod, "turn/plan/updated");
+  assert.equal(planUpdated.params.payload.plan.steps.length, 2);
+  assert.equal(planUpdated.params.plan.steps[1].status, "in_progress");
+  assert.equal(planDelta.method, "item/plan/delta");
+  assert.equal(planDelta.params.schemaVersion, 1);
+  assert.equal(planDelta.params.itemId, "plan-item-1");
+  assert.equal(planDelta.params.payload.delta, "Need one more fixture.");
+  assert.equal(planDelta.params.delta, "Need one more fixture.");
 });
 
 test("codex adapter maps rollout message strings and image generation end", () => {
@@ -202,6 +272,54 @@ test("codex adapter stringifies numeric approval ids for permission tracking", (
 
   assert.equal(canonical.id, 42);
   assert.equal(canonical.params.permissionId, "42");
+});
+
+test("codex adapter maps server request resolution to canonical metadata", () => {
+  const resolved = convertFixture({
+    method: "serverRequest/resolved",
+    params: {
+      threadId: "thread-permission",
+      turnId: "turn-permission",
+      requestId: "approval-1",
+      resolution: {
+        decision: "accept",
+      },
+    },
+  });
+
+  assert.equal(resolved.method, "serverRequest/resolved");
+  assert.equal(resolved.params.schemaVersion, 1);
+  assert.equal(resolved.params.requestId, "approval-1");
+  assert.equal(resolved.params.payload.requestId, "approval-1");
+  assert.equal(resolved.params.payload.resolution.decision, "accept");
+});
+
+test("codex adapter maps failed turns and error envelopes to canonical error events", () => {
+  const failed = convertFixture({
+    method: "turn/failed",
+    params: {
+      threadId: "thread-error",
+      turnId: "turn-error",
+      error: {
+        message: "Tool crashed",
+        code: "tool_failed",
+      },
+    },
+  });
+  const error = convertFixture({
+    method: "codex/event/error",
+    params: {
+      threadId: "thread-error",
+      turnId: "turn-error",
+      message: "Runtime went away",
+    },
+  });
+
+  assert.equal(failed.method, "remodex/event/error");
+  assert.equal(failed.params.payload.message, "Tool crashed");
+  assert.equal(failed.params.payload.code, "tool_failed");
+  assert.equal(error.method, "remodex/event/error");
+  assert.equal(error.params.payload.message, "Runtime went away");
 });
 
 test("codex adapter ignores non-approval server requests", () => {
