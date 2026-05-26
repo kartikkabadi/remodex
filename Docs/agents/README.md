@@ -6,8 +6,8 @@ Read this before picking work. Rules live in [AGENTS.md](../../AGENTS.md). Issue
 
 | What | Path | Branch |
 |------|------|--------|
-| **All multi-agent work** | `/Users/user/Documents/Projects/remodex-build` | `feat/multi-agent-runtime` |
-| **GitHub fork** | https://github.com/kartikkabadi/remodex | same branch for PRs |
+| **All multi-agent work** | `/Users/user/Documents/Projects/remodex-build` | fork `main`; branch per remaining issue |
+| **GitHub fork** | https://github.com/kartikkabadi/remodex | fork `main` |
 | **Upstream** | https://github.com/Emanuele-web04/remodex | `origin/main` for sync reference only |
 
 ## Do not use
@@ -36,13 +36,13 @@ After Swift changes: `xcodebuild` per AGENTS.md.
 
 ## Last verified
 
-2026-05-26 — after syncing `origin/main` into PR45: `phodex-bridge` 475/475 pass; `relay` 41/41 pass; `xcodebuild` arm64 simulator compile succeeded for `CodexMobile` and `RemodexPad`. Physical iPhone/iPad smoke remains human-gated.
+2026-05-26 — after PR45 merged to fork `main` as `e9c46eb`: `phodex-bridge` 475/475 pass; `relay` 41/41 pass; `xcodebuild` arm64 simulator compile succeeded for `CodexMobile` and `RemodexPad`. Physical iPhone/iPad smoke remains human-gated.
 
 ## Session rules
 
 - One GitHub issue per agent session unless Kartik assigns a bundle.
 - Preserve dirty work. Do not `git reset --hard`, `git clean`, or delete worktrees without Kartik's explicit OK.
-- Fork-first on this branch; upstream PR prep ([#29](https://github.com/kartikkabadi/remodex/issues/29)) stays blocked until Kartik device proof on #24–#28 / #43.
+- Fork-first on this repo; upstream PR prep ([#29](https://github.com/kartikkabadi/remodex/issues/29)) stays blocked until Kartik device proof on #24–#28 / #43.
 
 ## Fork vs upstream positioning
 

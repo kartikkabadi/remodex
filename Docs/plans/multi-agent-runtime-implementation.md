@@ -1,15 +1,15 @@
 # Multi-agent runtime implementation blueprint
 
-**Status:** Historical implementation blueprint; PR45 contains the current fork integration work (updated 2026-05-26)
-**Branch:** `feat/multi-agent-runtime`  
+**Status:** Historical implementation blueprint; PR45 landed the current fork integration work on fork `main` (updated 2026-05-26)
+**Branch:** fork `main`
 **Issue tracker:** [kartikkabadi/remodex #16-#29](https://github.com/kartikkabadi/remodex/issues/16)  
 **Primary decisions:** [ADR 002](../adr/002-agent-runtime-and-canonical-events.md), [ADR 003](../adr/003-cursor-agent-runtime.md)
 
-This blueprint turned the parent PRD and issue set into build order, module ownership, schemas, and review notes. Keep it as design context; verify live status against PR45, [multi-agent-runtime.md](multi-agent-runtime.md), and GitHub issues before treating any "to build" phrasing below as current work.
+This blueprint turned the parent PRD and issue set into build order, module ownership, schemas, and review notes. Keep it as design context; verify live status against [multi-agent-runtime.md](multi-agent-runtime.md) and GitHub issues before treating any "to build" phrasing below as current work.
 
 ## Source facts checked
 
-- Local branch is `feat/multi-agent-runtime`; PR45 has been synced with upstream commits through `origin/main` as of 2026-05-26.
+- Fork `main` includes PR45 through merge commit `e9c46eb`; upstream `origin/main` remains the sync reference only.
 - Current bridge is Codex-centric: `phodex-bridge/src/bridge.js` owns secure relay setup, Codex transport lifecycle, desktop refresh, push tracking, thread state, and RPC routing.
 - `phodex-bridge/src/codex-transport.js` is a Codex adapter today. Keep it Codex-only and wrap it; do not mutate it into the generic runtime layer.
 - OpenCode source check: local `opencode --version` is `1.15.7`; current `sst/opencode` source is newer (`1.15.10` when checked). Pass `--hostname 127.0.0.1 --port 0` explicitly, but document the behavior honestly: OpenCode prefers `4096` first and falls back to a random free port. `--mdns` widens binding to `0.0.0.0`, so do not enable it.

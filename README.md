@@ -10,7 +10,7 @@
 
 Control multiple **Agent Runtimes** (primarily **Codex** with full parity; partial **OpenCode** including selectable **OpenCode Agent** personas such as build/plan; **Cursor** in Core scope) from your iPhone or iPad (Native Remodex App and co-equal client surfaces). Remodex is a local-first open-source bridge + clients that keeps the chosen **Agent Runtime** executing on your Mac (bridge owns processes/credentials via registry + adapters); phones/clients connect through a paired secure session.
 
-**Multi-agent V1 status (partial but real on this branch):** Codex retains full existing parity. OpenCode + Cursor use the shared `agent-runtime-registry`, runtime adapters, `canonical-events.js` layer (`remodex/event/*` + `plan.*`) and `RemodexEventAdapter` on iOS for one timeline pipeline. See [CONTEXT.md](CONTEXT.md) (exact glossary) and [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md) (locked decisions, PR map, issue tracker at https://github.com/kartikkabadi/remodex — epic https://github.com/kartikkabadi/remodex/issues/16; slices e.g. #18–#27 for registry/canonical/OpenCode/Cursor). Cursor V1 is Core-only per ADR 003 (hides queue/steer/photos). Implementation blueprint: [Docs/plans/multi-agent-runtime-implementation.md](Docs/plans/multi-agent-runtime-implementation.md). Legacy threads backfill as `agentRuntime: "codex"`.
+**Multi-agent V1 status (partial but real on this fork):** Codex retains full existing parity. OpenCode + Cursor use the shared `agent-runtime-registry`, runtime adapters, `canonical-events.js` layer (`remodex/event/*` + `plan.*`) and `RemodexEventAdapter` on iOS for one timeline pipeline. See [CONTEXT.md](CONTEXT.md) (exact glossary) and [Docs/plans/multi-agent-runtime.md](Docs/plans/multi-agent-runtime.md) (locked decisions, PR map, issue tracker at https://github.com/kartikkabadi/remodex — epic https://github.com/kartikkabadi/remodex/issues/16; slices e.g. #18–#27 for registry/canonical/OpenCode/Cursor). Cursor V1 is Core-only per ADR 003 (hides queue/steer/photos). Implementation blueprint: [Docs/plans/multi-agent-runtime-implementation.md](Docs/plans/multi-agent-runtime-implementation.md). Legacy threads backfill as `agentRuntime: "codex"`.
 
 ## Key App Features
 
@@ -39,12 +39,12 @@ If you want the public-repo distribution model explained clearly, read [SELF_HOS
 | Audience | Ready? | Notes |
 |----------|--------|-------|
 | App Store / npm (Codex-only) | Yes | Upstream product path; this fork branch is separate |
-| Collaborators on multi-agent fork | PR45 review | OpenCode/Cursor/dynamic-model work is in PR45; bridge and relay tests are green after upstream sync — see plan |
+| Collaborators on multi-agent fork | Partial | PR45 is merged on the fork with green bridge/relay tests and simulator builds; device smoke and proof issues remain open — see plan |
 | General public as "finished Remodex" | No | Physical device smoke, canonical cutover proof, and upstream handoff are still open ([#16](https://github.com/kartikkabadi/remodex/issues/16)) |
 
 **Why this fork still matters:** Official Codex-in-ChatGPT mobile is Codex-only. This branch targets **multiple agent runtimes** (OpenCode, Cursor), **self-hosted relay**, and optional Telegram — not the same product surface.
 
-**Prerequisites for OpenCode/Cursor on this branch:** OpenCode CLI, Cursor `agent acp`, Codex CLI auth on the Mac. **Agents:** read [Docs/agents/README.md](Docs/agents/README.md).
+**Prerequisites for OpenCode/Cursor on this fork:** OpenCode CLI, Cursor `agent acp`, Codex CLI auth on the Mac. **Agents:** read [Docs/agents/README.md](Docs/agents/README.md).
 
 > **I am very early in this project. Expect bugs.**
 >

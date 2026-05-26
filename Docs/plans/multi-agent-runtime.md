@@ -1,7 +1,7 @@
 # Multi-agent runtime — index
 
-**Status:** PR45 integration branch active (verified 2026-05-26)
-**Branch:** `feat/multi-agent-runtime` on [kartikkabadi/remodex](https://github.com/kartikkabadi/remodex) from `origin/main`  
+**Status:** PR45 merged to fork `main` as `e9c46eb` (verified 2026-05-26)
+**Branch:** fork `main` on [kartikkabadi/remodex](https://github.com/kartikkabadi/remodex); upstream `origin/main` remains sync reference only
 **Parent issue:** https://github.com/kartikkabadi/remodex/issues/16  
 **Implementation blueprint:** [multi-agent-runtime-implementation.md](multi-agent-runtime-implementation.md)
 **Domain language:** [CONTEXT.md](../../CONTEXT.md)  
@@ -15,15 +15,14 @@ Execution detail lives in **GitHub issues on the fork** (not local `.scratch/`).
 ## Current Reality (verified 2026-05-26)
 
 **Canonical local surface:** `/Users/user/Documents/Projects/remodex-build` on
-`feat/multi-agent-runtime`. Treat `/Users/user/Documents/Projects/remodex` as a
+fork `main`. Treat `/Users/user/Documents/Projects/remodex` as a
 historical/stale snapshot for this lane unless Kartik explicitly asks to inspect
 it. Session bootstrap: [Docs/agents/README.md](../agents/README.md).
 
 **Live tracker state:** Parent epic #16 is open. #17/#18 and #31-#37 are closed.
-PR45 combines the fork-side OpenCode, Cursor, dynamic provider/model, and iPad
-integration work. After PR45 lands, close or update the issues listed in
-[Docs/agents/issue-tracker.md](../agents/issue-tracker.md); PR45 does not
-auto-close them.
+PR45 is merged on the fork; #20-#22, #25/#26, and #39-#41 were closed after
+merge. Remaining open issues are acceptance-proof, device-smoke, upstream
+handoff, and Grok lanes. See [Docs/agents/issue-tracker.md](../agents/issue-tracker.md).
 
 **Verification run after upstream sync:**
 - `cd phodex-bridge && npm test` -> 475 pass, 0 fail.
@@ -32,16 +31,17 @@ auto-close them.
   succeeded on an iPad simulator destination.
 - Physical iPhone and iPad smoke remain human-gated.
 
-**Immediate operating note:** do not start duplicate work for #39-#41; PR45
-contains the code path. #42 still needs real running-turn proof tied to the
-physical iPad smoke gate (#43). Do not unblock upstream PR prep #29 without
-fresh iPhone/iPad runtime proof.
+**Immediate operating note:** do not reopen #39-#41 or start duplicate dynamic
+model work without fresh contradictory proof. #42 still needs real running-turn
+proof tied to the physical iPad smoke gate (#43). Do not unblock upstream PR
+prep #29 without fresh iPhone/iPad runtime proof.
 
 ## Brownfield gaps (still accurate)
 
-Foundation is in place (#18 closed). PR45 carries most fork-side implementation
-work, but canonical cutover proof, E2E/device proof, and upstream handoff gates
-are still tracked on GitHub. See [Docs/agents/issue-tracker.md](../agents/issue-tracker.md) for the live queue.
+Foundation is in place (#18 closed). PR45 landed most fork-side implementation
+work on fork `main`, but canonical cutover proof, E2E/device proof, and
+upstream handoff gates are still tracked on GitHub. See
+[Docs/agents/issue-tracker.md](../agents/issue-tracker.md) for the live queue.
 
 Do not merge upstream `modelProvider` router branches wholesale. Mine patterns; implement ADR shape.
 
@@ -79,7 +79,7 @@ Do not merge upstream `modelProvider` router branches wholesale. Mine patterns; 
 
 ## Upstream PR map
 
-PR45 is the fork integration branch, not the final upstream slicing plan. If
+PR45 was the fork integration branch, not the final upstream slicing plan. If
 Kartik later wants upstream PRs, split from the landed fork work into:
 
 | PR | Scope | Device QA |
@@ -129,13 +129,12 @@ The superseded model-catalog issues are #31-#37. Replacement plan:
 | Issue | Code reality | Blocker |
 |-------|--------------|---------|
 | #19, #23 | Partial — canonical layer exists; some Codex/iOS paths still handle raw `codex/event/*` | Big-bang cutover proof not finished |
-| #20, #22 | Code-complete candidate in PR45 | Close after PR45 lands with bridge/OpenCode proof |
-| #21 | Code-complete candidate in PR45 | Close after PR45 lands with iOS runtime UX proof |
+| #20-#22 | Closed after PR45 merge | Reopen only with contradictory proof |
 | #24, #27 | Not proven E2E | Kartik iPhone smoke |
-| #25, #26 | Code-complete candidate in PR45 | Close after PR45 lands with Cursor adapter proof |
+| #25, #26 | Closed after PR45 merge | Reopen only with contradictory proof |
 | #28, #43 | Not proven on iPad | Kartik iPad smoke |
 | #29 | Not started for upstream PR | #24–#28 proof |
-| #39–#41 | Code-complete candidate in PR45 | Close after PR45 lands with dynamic model proof |
+| #39–#41 | Closed after PR45 merge | Reopen only with contradictory proof |
 | #42 | Code-progress in PR45 | Keep open until running-turn gap proof via #43 |
 | #38 | PRD parent | Keep open until #39–#43 are resolved |
 
