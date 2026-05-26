@@ -12,6 +12,7 @@ const path = require("node:path");
 const {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
+  canonicalizeCodexServerRequestForRelay,
   createMacOSBridgeWakeAssertion,
   disableUnsupportedReasoningSummaryForTurnStart,
   fetchAdaptiveThreadTurnsListForRelay,
@@ -181,6 +182,63 @@ test("normalizeRelayBoundJsonRpcMessage keeps server-origin approval requests", 
   });
 
   assert.equal(normalizeRelayBoundJsonRpcMessage(raw), raw);
+});
+
+test("canonicalizeCodexServerRequestForRelay maps approvals to canonical permission requests", () => {
+  const raw = JSON.stringify({
+    id: "approval-1",
+    method: "item/fileChange/requestApproval",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      path: "README.md",
+      reason: "Edit README",
+      permissions: {
+        edit: true,
+      },
+    },
+  });
+  const threadAgentState = {
+    get(threadId) {
+      assert.equal(threadId, "thread-1");
+      return { agentSessionId: "session-1" };
+    },
+  };
+
+  const canonical = JSON.parse(canonicalizeCodexServerRequestForRelay(raw, {
+    threadAgentState,
+    env: {},
+    now: () => "2026-05-26T00:00:00.000Z",
+  }));
+
+  assert.equal(canonical.id, "approval-1");
+  assert.equal(canonical.method, "remodex/request/permission");
+  assert.equal(canonical.params.schemaVersion, 1);
+  assert.equal(canonical.params.agentRuntime, "codex");
+  assert.equal(canonical.params.threadId, "thread-1");
+  assert.equal(canonical.params.agentSessionId, "session-1");
+  assert.equal(canonical.params.permissionId, "approval-1");
+  assert.equal(canonical.params.payload.sourceMethod, "item/fileChange/requestApproval");
+  assert.equal(canonical.params.payload.request.command, "README.md");
+  assert.equal(canonical.params.payload.request.permissions.edit, true);
+});
+
+test("canonicalizeCodexServerRequestForRelay preserves raw approvals when rollback is enabled", () => {
+  const raw = JSON.stringify({
+    id: "approval-rollback",
+    method: "item/fileChange/requestApproval",
+    params: {
+      threadId: "thread-rollback",
+    },
+  });
+
+  assert.equal(
+    canonicalizeCodexServerRequestForRelay(raw, {
+      env: { REMODEX_CANONICAL_CODEX_EVENTS: "0" },
+    }),
+    raw
+  );
 });
 
 test("disableUnsupportedReasoningSummaryForTurnStart disables summaries for Codex Spark", () => {

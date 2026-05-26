@@ -7,7 +7,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { convertCodexNotificationToCanonical } = require("../src/codex-to-canonical-adapter");
+const {
+  PERMISSION_REQUEST_METHOD,
+  convertCodexNotificationToCanonical,
+  convertCodexServerRequestToCanonical,
+} = require("../src/codex-to-canonical-adapter");
 const { validateCanonicalEvent } = require("../src/canonical-events");
 
 test("codex adapter maps turn lifecycle notifications to canonical events", () => {
@@ -147,6 +151,53 @@ test("codex adapter accepts already-parsed notification objects", () => {
 
   assert.equal(canonical.method, "remodex/event/user_message");
   assert.equal(canonical.params.payload.text, "Object input");
+});
+
+test("codex adapter maps approval server requests to canonical permission requests", () => {
+  const canonical = convertCodexServerRequestToCanonical({
+    jsonrpc: "2.0",
+    id: "approval-1",
+    method: "item/commandExecution/requestApproval",
+    params: {
+      threadId: "thread-permission",
+      turnId: "turn-permission",
+      itemId: "item-permission",
+      command: "git status",
+      reason: "Inspect repository state",
+      permissions: {
+        shell: true,
+      },
+    },
+  }, {
+    now: () => "2026-05-23T00:00:00.000Z",
+    resolveAgentSessionId({ threadId }) {
+      return `agent-session-${threadId}`;
+    },
+  });
+
+  assert.equal(canonical.id, "approval-1");
+  assert.equal(canonical.method, PERMISSION_REQUEST_METHOD);
+  assert.equal(canonical.params.agentRuntime, "codex");
+  assert.equal(canonical.params.threadId, "thread-permission");
+  assert.equal(canonical.params.agentSessionId, "agent-session-thread-permission");
+  assert.equal(canonical.params.turnId, "turn-permission");
+  assert.equal(canonical.params.itemId, "item-permission");
+  assert.equal(canonical.params.permissionId, "approval-1");
+  assert.equal(canonical.params.payload.sourceMethod, "item/commandExecution/requestApproval");
+  assert.equal(canonical.params.payload.request.command, "git status");
+  assert.equal(canonical.params.payload.request.reason, "Inspect repository state");
+  assert.equal(canonical.params.payload.request.permissions.shell, true);
+});
+
+test("codex adapter ignores non-approval server requests", () => {
+  assert.equal(convertCodexServerRequestToCanonical({
+    jsonrpc: "2.0",
+    id: "question-1",
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-question",
+    },
+  }), null);
 });
 
 test("codex adapter ignores responses and unknown notifications", () => {
