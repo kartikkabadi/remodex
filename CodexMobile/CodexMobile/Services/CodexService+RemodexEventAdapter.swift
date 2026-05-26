@@ -154,6 +154,7 @@ extension CodexService {
             ?? firstJSONValue(payload, keys: ["permissions"])
             ?? .object([:])
         adapted["sourceMethod"] = payload["sourceMethod"]
+        let approvalMethod = remodexApprovalRequestMethod(payload: payload, request: request)
 
         let requestID = message.id
             ?? params["permissionId"]
@@ -162,9 +163,26 @@ extension CodexService {
 
         return RPCMessage(
             id: requestID,
-            method: "item/permissions/requestApproval",
+            method: approvalMethod,
             params: .object(adapted)
         )
+    }
+
+    private func remodexApprovalRequestMethod(payload: IncomingParamsObject, request: IncomingParamsObject) -> String {
+        let rawMethod = firstJSONValue(payload, keys: ["sourceMethod"])?.stringValue
+            ?? firstJSONValue(request, keys: ["sourceMethod"])?.stringValue
+        guard let sourceMethod = rawMethod?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return "item/permissions/requestApproval"
+        }
+        switch sourceMethod {
+        case "item/commandExecution/requestApproval",
+             "item/fileChange/requestApproval",
+             "item/fileRead/requestApproval",
+             "item/permissions/requestApproval":
+            return sourceMethod
+        default:
+            return "item/permissions/requestApproval"
+        }
     }
 
     private func remodexPlanDeltaValue(_ value: JSONValue) -> JSONValue {

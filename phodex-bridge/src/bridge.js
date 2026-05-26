@@ -72,7 +72,10 @@ const {
 const { buildApplyPatchFileChangeItem } = require("./apply-patch-changes");
 const { createAgentRuntimeRegistry } = require("./agent-runtime-registry");
 const { createThreadAgentStateStore } = require("./thread-agent-state");
-const { convertCodexNotificationToCanonical } = require("./codex-to-canonical-adapter");
+const {
+  convertCodexNotificationToCanonical,
+  convertCodexServerRequestToCanonical,
+} = require("./codex-to-canonical-adapter");
 const { createOpenCodeServerManager } = require("./opencode-server");
 const { createOpenCodeRuntimeAdapter } = require("./opencode-runtime-adapter");
 const { createCursorRuntimeAdapter } = require("./cursor-runtime-adapter");
@@ -1026,6 +1029,12 @@ function startBridge({
 
     const parsed = safeParseJSON(normalizedMessage);
     const responseId = parsed?.id;
+    const method = readString(parsed?.method);
+    const isServerRequest = responseId != null && method && isRelayBoundServerRequestMethod(method);
+    if (isServerRequest) {
+      return canonicalizeCodexServerRequestForRelay(normalizedMessage, { threadAgentState });
+    }
+
     if (responseId == null) {
       const sanitizedForImage = sanitizeLiveGeneratedImageMessageForRelay(normalizedMessage);
       if (!sanitizedForImage) {
@@ -2349,6 +2358,39 @@ function readTurnsListNextCursor(result) {
   return undefined;
 }
 
+function canonicalizeCodexServerRequestForRelay(rawMessage, {
+  threadAgentState = null,
+  env = process.env,
+  now,
+} = {}) {
+  const parsed = parseBridgeJSON(rawMessage);
+  const method = readString(parsed?.method);
+  const requestId = parsed?.id;
+  if (requestId == null || !method || !isRelayBoundServerRequestMethod(method)) {
+    return rawMessage;
+  }
+  if (env?.REMODEX_CANONICAL_CODEX_EVENTS === "0" || env?.REMODEX_CANONICAL_CODEX_EVENTS === "false") {
+    return rawMessage;
+  }
+
+  try {
+    const converted = convertCodexServerRequestToCanonical(rawMessage, {
+      agentRuntime: "codex",
+      now,
+      resolveAgentSessionId: ({ threadId }) => {
+        const rec = threadAgentState && typeof threadAgentState.get === "function"
+          ? threadAgentState.get(readString(threadId))
+          : null;
+        return rec?.agentSessionId || readString(threadId) || "";
+      },
+    });
+    return converted ? JSON.stringify(converted) : rawMessage;
+  } catch (err) {
+    console.warn(`[remodex] Codex request canonicalization failed (raw fallback, no regression): ${err?.message || err}`);
+    return rawMessage;
+  }
+}
+
 function hasRelayCursor(cursor) {
   return cursor !== undefined && cursor !== null && cursor !== "";
 }
@@ -3641,6 +3683,7 @@ function persistBridgePreferences(
 module.exports = {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
+  canonicalizeCodexServerRequestForRelay,
   createMacOSBridgeWakeAssertion,
   disableUnsupportedReasoningSummaryForTurnStart,
   fetchAdaptiveThreadTurnsListForRelay,

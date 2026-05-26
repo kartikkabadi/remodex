@@ -143,6 +143,45 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
         XCTAssertEqual(approval?.params?.objectValue?["permissions"]?.objectValue?["shell"]?.boolValue, true)
     }
 
+    func testCanonicalCodexApprovalRequestsPreserveResponseSemantics() throws {
+        let service = makeService()
+        let cases: [(threadID: String, requestID: JSONValue, sourceMethod: String, command: String)] = [
+            ("thread-command", .string("command-approval-1"), "item/commandExecution/requestApproval", "npm test"),
+            ("thread-file", .integer(42), "item/fileChange/requestApproval", "README.md"),
+        ]
+
+        for testCase in cases {
+            service.handleIncomingRPCMessage(RPCMessage(
+                id: testCase.requestID,
+                method: "remodex/request/permission",
+                params: .object([
+                    "agentRuntime": .string("codex"),
+                    "threadId": .string(testCase.threadID),
+                    "turnId": .string("turn-\(testCase.threadID)"),
+                    "permissionId": testCase.requestID,
+                    "payload": .object([
+                        "sourceMethod": .string(testCase.sourceMethod),
+                        "request": .object([
+                            "command": .string(testCase.command),
+                            "reason": .string("Approval required"),
+                            "permissions": .object([
+                                "shell": .bool(true),
+                            ]),
+                        ]),
+                    ]),
+                ])
+            ))
+
+            let approval = try XCTUnwrap(service.pendingApproval(for: testCase.threadID))
+            XCTAssertEqual(approval.method, testCase.sourceMethod)
+            XCTAssertEqual(approval.command, testCase.command)
+            XCTAssertEqual(
+                service.approvalResponseResult(for: approval, decision: "accept"),
+                .object(["decision": .string("accept")])
+            )
+        }
+    }
+
     func testRuntimeInventorySelectsReadyDefaultAndExposesCapabilities() {
         let service = makeService()
         service.learnAgentRuntimesFromInitializeResponse(RPCMessage(

@@ -6,8 +6,11 @@
 
 const {
   CANONICAL_EVENT_TYPES,
+  CANONICAL_SCHEMA_VERSION,
   createCanonicalEvent,
 } = require("./canonical-events");
+
+const PERMISSION_REQUEST_METHOD = "remodex/request/permission";
 
 function convertCodexNotificationToCanonical(rawMessage, {
   agentRuntime = "codex",
@@ -47,6 +50,69 @@ function convertCodexNotificationToCanonical(rawMessage, {
       raw: params,
     },
   });
+}
+
+function convertCodexServerRequestToCanonical(rawMessage, {
+  agentRuntime = "codex",
+  resolveAgentSessionId,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const parsed = parseJsonRpcMessage(rawMessage);
+  if (!parsed || parsed.id == null) {
+    return null;
+  }
+
+  const method = readString(parsed.method);
+  const params = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+  if (!isApprovalRequestMethod(method)) {
+    return null;
+  }
+
+  const threadId = extractThreadId(params);
+  const turnId = extractTurnId(params);
+  const itemId = extractItemId(params);
+  const agentSessionId = typeof resolveAgentSessionId === "function"
+    ? resolveAgentSessionId({ threadId, params, method })
+    : threadId;
+  const permissionId = readString(params.permissionId)
+    || readString(params.permission_id)
+    || readString(params.requestId)
+    || readString(params.request_id)
+    || (parsed.id != null ? String(parsed.id) : "");
+
+  return {
+    jsonrpc: "2.0",
+    id: parsed.id,
+    method: PERMISSION_REQUEST_METHOD,
+    params: omitEmpty({
+      schemaVersion: CANONICAL_SCHEMA_VERSION,
+      agentRuntime: readString(agentRuntime) || "codex",
+      threadId,
+      agentSessionId,
+      turnId,
+      itemId,
+      permissionId,
+      createdAt: readString(params.createdAt) || readString(params.timestamp) || now(),
+      payload: {
+        sourceMethod: method,
+        request: {
+          ...params,
+          reason: readString(params.reason)
+            || readString(params.message)
+            || readString(params.description),
+          command: readString(params.command)
+            || readString(params.path)
+            || readString(params.filePath)
+            || readString(params.title),
+          permissions: params.permissions && typeof params.permissions === "object"
+            ? params.permissions
+            : params.options && typeof params.options === "object"
+              ? params.options
+              : {},
+        },
+      },
+    }),
+  };
 }
 
 function mapCodexMethod(method, params) {
@@ -229,6 +295,13 @@ function isToolCompletedMethod(method) {
     || method === "codex/event/image_generation_end";
 }
 
+function isApprovalRequestMethod(method) {
+  return method === "item/commandExecution/requestApproval"
+    || method === "item/fileChange/requestApproval"
+    || method === "item/fileRead/requestApproval"
+    || method === "item/permissions/requestApproval";
+}
+
 function extractToolPayload(params, method) {
   return {
     toolType: method.replace(/^codex\/event\//, ""),
@@ -299,7 +372,20 @@ function readString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function omitEmpty(value) {
+  const next = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === "" || entry === undefined || entry === null) {
+      continue;
+    }
+    next[key] = entry;
+  }
+  return next;
+}
+
 module.exports = {
   convertCodexNotificationToCanonical,
+  convertCodexServerRequestToCanonical,
   mapCodexMethod,
+  PERMISSION_REQUEST_METHOD,
 };
