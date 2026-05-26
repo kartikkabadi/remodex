@@ -11,7 +11,7 @@ import XCTest
 final class CodexServiceRemodexEventAdapterTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
-    func testRawCodexEventWireIngressUsesLegacyFallbackHandlers() {
+    func testRawCodexEventWireIngressUsesLegacyFallbackHandlersInDebugBuilds() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
 
@@ -23,9 +23,13 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
             ])
         ))
 
+        #if DEBUG
         XCTAssertEqual(service.messages(for: threadID).count, 1)
         XCTAssertEqual(service.messages(for: threadID).first?.role, .user)
         XCTAssertEqual(service.messages(for: threadID).first?.text, "Fallback prompt")
+        #else
+        XCTAssertEqual(service.messages(for: threadID).count, 0)
+        #endif
     }
 
     func testCanonicalTurnAndAssistantDeltaUseExistingTimelinePipeline() {
@@ -424,6 +428,66 @@ final class CodexServiceRemodexEventAdapterTests: XCTestCase {
         XCTAssertEqual(imageRows.count, 1)
         XCTAssertEqual(imageRows[0].turnId, turnID)
         XCTAssertEqual(imageRows[0].text, "![Generated image](</Users/example/generated image.png>)")
+    }
+
+    func testCanonicalCodexToolCommandUsesNonRawIngressMethods() throws {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+        let itemID = "command-\(UUID().uuidString)"
+
+        let started = canonicalEvent(
+            type: "tool_started",
+            threadID: threadID,
+            turnID: turnID,
+            itemID: itemID,
+            payload: [
+                "sourceMethod": .string("codex/event/exec_command_begin"),
+                "raw": .object([
+                    "call_id": .string(itemID),
+                    "command": .string("npm test"),
+                    "status": .string("running"),
+                ]),
+            ],
+            agentRuntime: "codex"
+        )
+        let adaptedStarted = service.remodexAdaptedRPCMessage(started)
+
+        XCTAssertEqual(adaptedStarted.method, "item/commandExecution/terminalInteraction")
+        XCTAssertFalse(adaptedStarted.method?.hasPrefix("codex/event/") ?? true)
+
+        service.handleIncomingRPCMessage(started)
+        var commandRows = service.messages(for: threadID).filter { $0.kind == .commandExecution }
+        XCTAssertEqual(commandRows.count, 1)
+        XCTAssertTrue(commandRows[0].text.contains("npm test"))
+        XCTAssertTrue(commandRows[0].isStreaming)
+
+        let completed = canonicalEvent(
+            type: "tool_completed",
+            threadID: threadID,
+            turnID: turnID,
+            itemID: itemID,
+            payload: [
+                "sourceMethod": .string("codex/event/exec_command_end"),
+                "raw": .object([
+                    "call_id": .string(itemID),
+                    "command": .string("npm test"),
+                    "status": .string("completed"),
+                    "exit_code": .integer(0),
+                ]),
+            ],
+            agentRuntime: "codex"
+        )
+        let adaptedCompleted = service.remodexAdaptedRPCMessage(completed)
+
+        XCTAssertEqual(adaptedCompleted.method, "item/commandExecution/terminalInteraction")
+        XCTAssertFalse(adaptedCompleted.method?.hasPrefix("codex/event/") ?? true)
+
+        service.handleIncomingRPCMessage(completed)
+        commandRows = service.messages(for: threadID).filter { $0.kind == .commandExecution }
+        let commandRow = try XCTUnwrap(commandRows.first)
+        XCTAssertTrue(commandRow.text.contains("npm test"))
+        XCTAssertFalse(commandRow.isStreaming)
     }
 
     private func canonicalEvent(

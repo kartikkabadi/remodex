@@ -70,12 +70,10 @@ extension CodexService {
             return RPCMessage(method: "item/completed", params: .object(adapted))
 
         case "tool_started", "tool_delta", "tool_completed":
-            if let legacyMethod = remodexLegacyCodexToolMethod(from: payload) {
-                return RPCMessage(method: legacyMethod, params: .object(remodexLegacyCodexToolParams(base: base, payload: payload)))
-            }
-            var adapted = base
-            adapted["delta"] = remodexToolDeltaValue(eventType: eventType, payload: payload)
-            return RPCMessage(method: "item/toolCall/outputDelta", params: .object(adapted))
+            return RPCMessage(
+                method: remodexCanonicalToolHandlerMethod(eventType: eventType, payload: payload),
+                params: .object(remodexCanonicalToolParams(eventType: eventType, base: base, payload: payload))
+            )
 
         case "image_generation_end":
             var adapted = base
@@ -207,25 +205,37 @@ extension CodexService {
         }
     }
 
-    private func remodexLegacyCodexToolMethod(from payload: IncomingParamsObject) -> String? {
+    private func remodexCanonicalToolHandlerMethod(eventType: String, payload: IncomingParamsObject) -> String {
         let rawToolType = firstJSONValue(payload, keys: ["toolType", "tool_type", "sourceMethod"])?.stringValue
         let toolType = rawToolType?
             .replacingOccurrences(of: "codex/event/", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         switch toolType {
-        case "exec_command_begin",
-             "exec_command_output_delta",
-             "exec_command_end",
-             "background_event",
-             "patch_apply_begin",
-             "patch_apply_end":
-            return "codex/event/\(toolType ?? "")"
+        case "exec_command_begin", "exec_command_end":
+            return "item/commandExecution/terminalInteraction"
+        case "exec_command_output_delta":
+            return "item/commandExecution/outputDelta"
+        case "patch_apply_begin":
+            return "item/fileChange/started"
+        case "patch_apply_end":
+            return "item/fileChange/completed"
         default:
-            return nil
+            switch eventType {
+            case "tool_started":
+                return "item/toolCall/started"
+            case "tool_completed":
+                return "item/toolCall/completed"
+            default:
+                return "item/toolCall/outputDelta"
+            }
         }
     }
 
-    private func remodexLegacyCodexToolParams(base: IncomingParamsObject, payload: IncomingParamsObject) -> IncomingParamsObject {
+    private func remodexCanonicalToolParams(
+        eventType: String,
+        base: IncomingParamsObject,
+        payload: IncomingParamsObject
+    ) -> IncomingParamsObject {
         var adapted = base
         if let raw = payload["raw"]?.objectValue {
             for (key, value) in raw where adapted[key] == nil {
@@ -236,9 +246,39 @@ extension CodexService {
             adapted[key] = value
         }
         if adapted["event"] == nil {
-            adapted["event"] = .object(payload)
+            adapted["event"] = .object(remodexCanonicalToolEventPayload(eventType: eventType, payload: payload))
         }
+        adapted["delta"] = remodexToolDeltaValue(eventType: eventType, payload: payload)
         return adapted
+    }
+
+    private func remodexCanonicalToolEventPayload(eventType: String, payload: IncomingParamsObject) -> IncomingParamsObject {
+        var eventPayload = payload["raw"]?.objectValue ?? payload
+        if eventPayload["event_type"] == nil,
+           let sourceMethod = firstJSONValue(payload, keys: ["toolType", "tool_type", "sourceMethod"])?.stringValue {
+            eventPayload["event_type"] = .string(sourceMethod.replacingOccurrences(of: "codex/event/", with: ""))
+        }
+        if eventPayload["type"] == nil {
+            eventPayload["type"] = .string(remodexCanonicalToolItemType(eventType: eventType, payload: payload))
+        }
+        if eventPayload["status"] == nil {
+            eventPayload["status"] = .string(eventType == "tool_completed" ? "completed" : "inProgress")
+        }
+        return eventPayload
+    }
+
+    private func remodexCanonicalToolItemType(eventType: String, payload: IncomingParamsObject) -> String {
+        let rawToolType = firstJSONValue(payload, keys: ["toolType", "tool_type", "sourceMethod"])?
+            .stringValue?
+            .replacingOccurrences(of: "codex/event/", with: "")
+        switch rawToolType {
+        case "exec_command_begin", "exec_command_output_delta", "exec_command_end":
+            return "commandExecution"
+        case "patch_apply_begin", "patch_apply_end":
+            return "fileChange"
+        default:
+            return "toolCall"
+        }
     }
 
     private func firstJSONValue(_ object: IncomingParamsObject, keys: [String]) -> JSONValue? {

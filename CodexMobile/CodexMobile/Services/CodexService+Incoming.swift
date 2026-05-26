@@ -207,13 +207,22 @@ extension CodexService {
         case "turn/plan/updated":
             handleTurnPlanUpdated(paramsObject)
 
-        case "item/agentMessage/delta",
-             "codex/event/agent_message_content_delta",
-             "codex/event/agent_message_delta":
+        case "item/agentMessage/delta":
             appendAgentDelta(from: paramsObject)
 
-        case "timeline/user_message", "codex/event/user_message":
+        #if DEBUG
+        case "codex/event/agent_message_content_delta",
+             "codex/event/agent_message_delta":
+            appendAgentDelta(from: paramsObject)
+        #endif
+
+        case "timeline/user_message":
             appendMirroredUserMessage(from: paramsObject)
+
+        #if DEBUG
+        case "codex/event/user_message":
+            appendMirroredUserMessage(from: paramsObject)
+        #endif
 
         case "item/plan/delta":
             appendPlanDelta(from: paramsObject)
@@ -240,6 +249,7 @@ extension CodexService {
              "item/command_execution/terminalInteraction":
             handleCommandExecutionTerminalInteraction(from: paramsObject)
 
+        #if DEBUG
         case "codex/event/exec_command_begin",
              "codex/event/exec_command_output_delta",
              "codex/event/exec_command_end",
@@ -251,19 +261,29 @@ extension CodexService {
             if handleLegacyCodexNamedEvent(method: method, paramsObject: paramsObject) {
                 return
             }
+        #endif
 
-        case "turn/diff/updated", "codex/event/turn_diff_updated", "codex/event/turn_diff":
+        case "turn/diff/updated":
             handleTurnDiffUpdated(paramsObject)
 
+        #if DEBUG
+        case "codex/event/turn_diff_updated", "codex/event/turn_diff":
+            handleTurnDiffUpdated(paramsObject)
+        #endif
+
+        #if DEBUG
         case "codex/event/patch_apply_begin", "codex/event/patch_apply_end":
             if handleLegacyPatchApplyMethod(method: method, paramsObject: paramsObject) {
                 return
             }
+        #endif
 
+        #if DEBUG
         case "codex/event":
             if handleLegacyCodexEnvelopeEvent(paramsObject) {
                 return
             }
+        #endif
 
         case "image_generation_end":
             if handleLegacyCodexEventType(
@@ -286,14 +306,29 @@ extension CodexService {
         case "account/rateLimits/updated":
             handleRateLimitsUpdated(paramsObject)
 
-        case "item/completed", "codex/event/item_completed", "codex/event/agent_message":
+        case "item/completed":
             appendCompletedAgentText(from: paramsObject)
 
-        case "item/started", "codex/event/item_started":
+        #if DEBUG
+        case "codex/event/item_completed", "codex/event/agent_message":
+            appendCompletedAgentText(from: paramsObject)
+        #endif
+
+        case "item/started":
             handleItemStarted(paramsObject)
 
-        case "error", "codex/event/error", "turn/failed":
+        #if DEBUG
+        case "codex/event/item_started":
+            handleItemStarted(paramsObject)
+        #endif
+
+        case "error", "turn/failed":
             handleErrorNotification(paramsObject)
+
+        #if DEBUG
+        case "codex/event/error":
+            handleErrorNotification(paramsObject)
+        #endif
 
         case "serverRequest/resolved":
             handleServerRequestResolved(paramsObject)
@@ -305,10 +340,12 @@ extension CodexService {
             handleTerminalEvent(paramsObject)
 
         default:
+            #if DEBUG
             if method.hasPrefix("codex/event/"),
                handleLegacyCodexNamedEvent(method: method, paramsObject: paramsObject) {
                 return
             }
+            #endif
             if handleToolCallNotificationFallback(method: method, paramsObject: paramsObject) {
                 return
             }
@@ -327,8 +364,13 @@ extension CodexService {
     ) {
         let isDesktopMirroredEvent = paramsObject?["remodexDesktopMirror"]?.boolValue == true
             || paramsObject?["remodexRolloutLiveMirror"]?.boolValue == true
+        #if DEBUG
+        let isLegacyCodexActivityMethod = method.hasPrefix("codex/event")
+        #else
+        let isLegacyCodexActivityMethod = false
+        #endif
         let isMirrorActivityMethod = method.hasPrefix("item/")
-            || method.hasPrefix("codex/event")
+            || isLegacyCodexActivityMethod
             || method == "turn/activity"
             || method == "turn/plan/updated"
             || method == "turn/diff/updated"
