@@ -650,7 +650,7 @@ test("OpenCode turn/start buffers early event stream messages until prompt_async
 
 test("OpenCode completion grace keeps turn active for late event stream activity", async () => {
   const { adapter, stateStore, requests, eventHandlers } = createAdapter({
-    completionGraceMs: 30,
+    completionGraceMs: 50,
     requestImpl: async (_method, path) => {
       if (path === "/session/ses_123/diff") {
         return [{ path: "late.txt", type: "modified" }];
@@ -706,7 +706,6 @@ test("OpenCode completion grace keeps turn active for late event stream activity
       },
     },
   });
-  await delay(10);
   eventHandlers[0]({
     type: "message.part.delta",
     properties: {
@@ -721,8 +720,7 @@ test("OpenCode completion grace keeps turn active for late event stream activity
 
   assert.equal(outbound.some((message) => message.method === "remodex/event/turn_completed"), false);
 
-  await delay(40);
-  await flushAsync();
+  await waitUntil(() => outbound.some((message) => message.method === "remodex/event/turn_completed"));
 
   const methods = outbound.map((message) => message.method).filter(Boolean);
   assert.deepEqual(methods, [
@@ -981,4 +979,15 @@ function flushAsync() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(predicate, { timeoutMs = 1_000, intervalMs = 10 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (predicate()) {
+      return;
+    }
+    await delay(intervalMs);
+  }
+  assert.fail("Timed out waiting for condition.");
 }
