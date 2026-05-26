@@ -112,7 +112,7 @@ All terms an executing agent will encounter. Use these exactly.
 
 ## 5. Pre-T1 work (two commits)
 
-✅ **[VERIFIED 2026-05-26: PT-1 and PT-2 already implemented in existing 6 commits on branch.]** The `coerceMessageString` helper exists at L1909-1927 (used at 7 sites) and `mapProvidersConfigToModelList` at L2323-2355 already emits per-entry `providerId`, composite IDs, `supportedVariants`, and `supportsFastMode`. These sections are retained for reference and verification only — no new implementation needed.
+[VERIFIED 2026-05-26: PT-1 and PT-2 already implemented in existing 6 commits on branch.] The `coerceMessageString` helper exists at L1909-1927 (used at 7 sites) and `mapProvidersConfigToModelList` at L2323-2355 already emits per-entry `providerId`, composite IDs, `supportedVariants`, and `supportsFastMode`. These sections are retained for reference and verification only. No new implementation needed.
 
 ### PT-1: String coercion at all JSON-RPC error and notification message sites
 
@@ -194,7 +194,7 @@ All terms an executing agent will encounter. Use these exactly.
 
 Eight commits. Each lands separately, each gets a full thermo-nuclear + architecture + unslop review.
 
-### T1-1: `initialize` capabilities truthful ✅ [Done: 28b0894]
+### T1-1: `initialize` capabilities truthful [Done: 28b0894]
 
 **Status.** Already implemented in the existing 6 commits. `handleInitializeRequest` at L899-917 returns the exact capabilities object with `experimentalApi: false`, `agentRuntime: "opencode"`, `supportsCollaborationMode: true`, etc. Verified against live code. No further implementation needed — retained in T1 for traceability.
 
@@ -1342,17 +1342,17 @@ Read it before relitigating any of those choices.
 Updated as commits land.
 
 - [x] Pre-T1 (verified-existing; no new implementation)
-  - [x] PT-1 string coercion ✅ [Done: 28b0894, verified 2026-05-26]
-  - [x] PT-2 catalog shape ✅ [Done: 28b0894, verified 2026-05-26]
-- [x] T1 bridge core ✅ [Done: 2026-05-26, all 8 commits implemented]
-  - [x] T1-1 initialize capabilities ✅ [Done: 28b0894, verified 2026-05-26]
-  - [x] T1-2 collaborationMode/list ✅ [Done: 2026-05-26]
-  - [x] T1-3 thread/status/changed ✅ [Done: 2026-05-26]
-  - [x] T1-4 SSE reconnect hardening ✅ [Done: 2026-05-26]
-  - [x] T1-5 account refusals in policy ✅ [Done: 2026-05-26]
-  - [x] T1-6 thread/contextWindow/read refusal ✅ [Done: 2026-05-26]
-  - [x] T1-7 push notification verification ✅ [Done: 2026-05-26, verified transport-agnostic]
-  - [x] T1-8 thread/name/set OpenCode sync ✅ [Done: 2026-05-26]
+  - [x] PT-1 string coercion [Done: 28b0894, verified 2026-05-26]
+  - [x] PT-2 catalog shape [Done: 28b0894, verified 2026-05-26]
+- [x] T1 bridge core [Done: 2026-05-26, all 8 commits implemented]
+  - [x] T1-1 initialize capabilities [Done: 28b0894, verified 2026-05-26]
+  - [x] T1-2 collaborationMode/list [Done: 2026-05-26]
+  - [x] T1-3 thread/status/changed [Done: 2026-05-26]
+  - [x] T1-4 SSE reconnect hardening [Done: 2026-05-26]
+  - [x] T1-5 account refusals in policy [Done: 2026-05-26]
+  - [x] T1-6 thread/contextWindow/read refusal [Done: 2026-05-26]
+  - [x] T1-7 push notification verification [Done: 2026-05-26, verified transport-agnostic]
+  - [x] T1-8 thread/name/set OpenCode sync [Done: 2026-05-26]
 - [ ] T2 iOS pickers
   - [ ] T2-1 bridge agent/list handler
   - [ ] T2-2 ThreadBinding.agent + turn/start passthrough
