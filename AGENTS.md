@@ -38,6 +38,12 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 - Preserve the QR/local-relay pairing path: do not regress the scanner -> saved pairing -> connect flow by letting onboarding/auto-reconnect race manual scan control.
 - For local relay recovery, keep resumed desktop-thread live mirroring and rollout fallback logic intact so reopened/running threads still recover state even when the rollout file is older than the recent-candidate window.
 
+## Active development (OpenCode lane)
+
+- Work on branch `multi-agents/opencode` (from official `Emanuele-web04/remodex` `main`).
+- Tracer: https://github.com/kartikkabadi/remodex/issues/53
+- Fork `main` (`8c15fcd`) is archive-only. Do not extend the old 38-commit multi-agent stack.
+
 ## Build guardrails
 
 - Do not run Xcode tests unless the user explicitly asks. Do not decide to run them on your own.
