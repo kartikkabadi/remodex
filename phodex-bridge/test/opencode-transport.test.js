@@ -2388,6 +2388,59 @@ test("T2-3 turn/start persists agent on binding for thread/read without manual s
   assert.equal(thread.agent, "build");
 });
 
+test("T2-10 turn/start persists variant on binding when only variant param is sent", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-variant", {
+    remodexThreadId: "thread-variant",
+    opencodeSessionId: "sess-variant",
+    cwd: "/tmp/workspace",
+    model: { provider: "anthropic", model: "claude-sonnet-4-20250514", variant: "fast" },
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async () => ({ ok: true, status: 200, text: async () => "{}" });
+
+  const turnLines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({
+      id: "t2-10-variant",
+      method: "turn/start",
+      params: {
+        threadId: "thread-variant",
+        input: [{ type: "text", text: "Use thinking variant" }],
+        variant: "thinking",
+      },
+    }),
+    (line) => turnLines.push(line),
+  );
+
+  for (let attempt = 0; attempt < 20 && turnLines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const binding = state.bindingsByThreadId.get("thread-variant");
+  assert.ok(binding);
+  assert.equal(binding.model?.variant, "thinking");
+  assert.equal(binding.model?.model, "claude-sonnet-4-20250514");
+
+  const readLines = [];
+  routeInboundJsonRpc(state, JSON.stringify({
+    id: "t2-10-read-variant",
+    method: "thread/read",
+    params: { threadId: "thread-variant" },
+  }), (line) => readLines.push(line));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const response = readLines.find((line) => JSON.parse(line).id === "t2-10-read-variant");
+  assert.ok(response);
+  const thread = JSON.parse(response).result.thread;
+  assert.equal(thread.variant, "thinking");
+});
+
 test("T2-3 thread/read emits null agentRuntime fields when binding model and agent are missing", async () => {
   const state = createRouteTestState();
   state.bindingsByThreadId.set("thread-2", {

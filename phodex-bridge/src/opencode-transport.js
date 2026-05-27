@@ -1305,8 +1305,7 @@ async function handleTurnStartRequest(state, request, emit) {
     throw transportError("turn_start_failed", result.message);
   }
 
-  binding.model = readModelFromParams(params) || binding.model;
-  binding.agent = agent ?? binding.agent;
+  applyBindingRuntimeFromTurnParams(binding, params, agent);
   binding.activeRemodexTurnId = turnId;
   binding.turnPhase = "running";
   binding.updatedAt = Date.now();
@@ -2406,6 +2405,32 @@ function readModelFromParams(params = {}) {
     model,
     variant: readString(params.variant) || undefined,
   };
+}
+
+/**
+ * Persists resolved model, variant, and agent on the thread binding after turn/start.
+ *
+ * @param {ThreadBinding} binding
+ * @param {Record<string, unknown>} params
+ * @param {string|undefined} agent
+ */
+function applyBindingRuntimeFromTurnParams(binding, params = {}, agent) {
+  const modelFromParams = readModelFromParams(params);
+  if (modelFromParams) {
+    binding.model = modelFromParams;
+  } else {
+    const variantOnly = readString(params.variant);
+    if (variantOnly) {
+      if (binding.model && typeof binding.model === "object") {
+        binding.model = { ...binding.model, variant: variantOnly };
+      } else {
+        binding.model = { provider: "opencode", model: "", variant: variantOnly };
+      }
+    }
+  }
+  if (agent) {
+    binding.agent = agent;
+  }
 }
 
 function readModelReference(value) {
