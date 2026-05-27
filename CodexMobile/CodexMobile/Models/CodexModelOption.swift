@@ -6,6 +6,60 @@
 
 import Foundation
 
+struct AgentOption: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+    let mode: String?
+    let isCustom: Bool
+    let description: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case displayNameSnake = "display_name"
+        case mode
+        case isCustom
+        case isCustomSnake = "is_custom"
+        case description
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        mode: String? = nil,
+        isCustom: Bool = false,
+        description: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.mode = mode
+        self.isCustom = isCustom
+        self.description = description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? id
+        mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isCustomSnake)
+            ?? false
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encode(isCustom, forKey: .isCustom)
+        try container.encodeIfPresent(description, forKey: .description)
+    }
+}
+
 struct VariantOption: Codable, Hashable, Sendable {
     let id: String
     let displayName: String

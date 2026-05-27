@@ -6,60 +6,6 @@
 
 import Foundation
 
-struct AgentOption: Identifiable, Codable, Hashable, Sendable {
-    let id: String
-    let displayName: String
-    let mode: String?
-    let isCustom: Bool
-    let description: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case displayName
-        case displayNameSnake = "display_name"
-        case mode
-        case isCustom
-        case isCustomSnake = "is_custom"
-        case description
-    }
-
-    init(
-        id: String,
-        displayName: String,
-        mode: String? = nil,
-        isCustom: Bool = false,
-        description: String? = nil
-    ) {
-        self.id = id
-        self.displayName = displayName
-        self.mode = mode
-        self.isCustom = isCustom
-        self.description = description
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
-            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
-            ?? id
-        mode = try container.decodeIfPresent(String.self, forKey: .mode)
-        isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom)
-            ?? container.decodeIfPresent(Bool.self, forKey: .isCustomSnake)
-            ?? false
-        description = try container.decodeIfPresent(String.self, forKey: .description)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(displayName, forKey: .displayName)
-        try container.encodeIfPresent(mode, forKey: .mode)
-        try container.encode(isCustom, forKey: .isCustom)
-        try container.encodeIfPresent(description, forKey: .description)
-    }
-}
-
 private let runtimeDebugTimestampFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -189,6 +135,7 @@ extension CodexService {
             let decodedAgents = items.compactMap { decodeModel(AgentOption.self, from: $0) }
             availableAgents = Self.orderedAgentOptions(from: decodedAgents)
             agentsErrorMessage = nil
+            normalizeRuntimeSelectionsAfterModelsUpdate()
 
             debugRuntimeLog("agent/list success count=\(decodedAgents.count)")
         } catch {
@@ -449,6 +396,9 @@ extension CodexService {
 
     // Keeps the model pill honest while bridge runtime metadata is still in flight.
     func isRuntimeSelectionLoadingForComposer() -> Bool {
+        if supportsAgents, availableAgents.isEmpty, isAgentListLoading {
+            return true
+        }
         guard visibleSelectedModelIDForComposer() == nil else {
             return false
         }
@@ -851,6 +801,7 @@ extension CodexService {
             if selectedReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
                 selectedReasoningEffort = nil
             }
+            pruneInvalidAgentAndVariantSelections()
             persistRuntimeSelections()
             return
         }
@@ -891,7 +842,81 @@ extension CodexService {
             self.selectedGitWriterModelId = nil
         }
 
+        pruneInvalidAgentAndVariantSelections()
         persistRuntimeSelections()
+    }
+
+    func pruneInvalidAgentAndVariantSelections() {
+        if !availableAgents.isEmpty {
+            let validAgentIds = Set(availableAgents.map(\.id))
+            if let selectedAgentId = selectedAgentId(),
+               !validAgentIds.contains(selectedAgentId) {
+                setSelectedAgentId(nil)
+            }
+
+            for threadId in Array(threadRuntimeOverridesByThreadID.keys) {
+                guard var override = threadRuntimeOverridesByThreadID[threadId],
+                      override.overridesAgent,
+                      let agentId = normalizedRuntimeSelectionIdentifier(override.agentId),
+                      !validAgentIds.contains(agentId) else {
+                    continue
+                }
+                override.agentId = nil
+                override.overridesAgent = false
+                if override.isEmpty {
+                    threadRuntimeOverridesByThreadID.removeValue(forKey: threadId)
+                } else {
+                    threadRuntimeOverridesByThreadID[threadId] = override
+                }
+            }
+        }
+
+        guard let resolvedModel = selectedModelOption(from: availableModels) else {
+            return
+        }
+
+        let supportedReasoning = Set(resolvedModel.supportedReasoningEfforts.map(\.reasoningEffort))
+        let validVariantIds = Set(resolvedModel.supportedVariants.map(\.id))
+
+        if let selectedVariantId = selectedVariantId(),
+           !validVariantIds.isEmpty,
+           !validVariantIds.contains(selectedVariantId) {
+            setSelectedVariantId(nil)
+        }
+
+        for threadId in Array(threadRuntimeOverridesByThreadID.keys) {
+            guard var override = threadRuntimeOverridesByThreadID[threadId] else {
+                continue
+            }
+            var changed = false
+
+            if override.overridesVariant,
+               let variantId = normalizedRuntimeSelectionIdentifier(override.variantId),
+               !validVariantIds.isEmpty,
+               !validVariantIds.contains(variantId) {
+                override.variantId = nil
+                override.overridesVariant = false
+                changed = true
+            }
+
+            if override.overridesReasoning,
+               let reasoningEffort = normalizedRuntimeSelectionIdentifier(override.reasoningEffort),
+               !supportedReasoning.isEmpty,
+               !supportedReasoning.contains(reasoningEffort) {
+                override.reasoningEffort = nil
+                override.overridesReasoning = false
+                changed = true
+            }
+
+            guard changed else {
+                continue
+            }
+            if override.isEmpty {
+                threadRuntimeOverridesByThreadID.removeValue(forKey: threadId)
+            } else {
+                threadRuntimeOverridesByThreadID[threadId] = override
+            }
+        }
     }
 }
 

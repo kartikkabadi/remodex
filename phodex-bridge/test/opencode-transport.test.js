@@ -2331,6 +2331,63 @@ test("T2-3 thread/read emits agentRuntime opencode from publicThreadFromBinding"
   assert.equal(thread.agent, "plan");
 });
 
+test("T2-3 turn/start persists agent on binding for thread/read without manual seeding", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/session/sess-1") && !String(url).includes("prompt_async")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ title: "Build Thread" }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const turnLines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({
+      id: "t2-3-turn-agent",
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Build it" }],
+        agent: "build",
+      },
+    }),
+    (line) => turnLines.push(line),
+  );
+
+  for (let attempt = 0; attempt < 20 && turnLines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const readLines = [];
+  routeInboundJsonRpc(state, JSON.stringify({
+    id: "t2-3-read-agent",
+    method: "thread/read",
+    params: { threadId: "thread-1" },
+  }), (line) => readLines.push(line));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const response = readLines.find((line) => JSON.parse(line).id === "t2-3-read-agent");
+  assert.ok(response);
+  const thread = JSON.parse(response).result.thread;
+  assert.equal(thread.agent, "build");
+});
+
 test("T2-3 thread/read emits null agentRuntime fields when binding model and agent are missing", async () => {
   const state = createRouteTestState();
   state.bindingsByThreadId.set("thread-2", {

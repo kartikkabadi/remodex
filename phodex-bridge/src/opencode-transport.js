@@ -80,6 +80,7 @@ const {
  * @property {string} opencodeSessionId
  * @property {string} cwd                       Absolute workspace path; header for `x-opencode-directory`.
  * @property {{ provider: string, model: string, variant?: string }|null} model
+ * @property {string|null} [agent]                  Last agent used for turn/start (e.g. build, plan).
  * @property {string|null} activeRemodexTurnId
  * @property {string|null} [lastFailedTurnId]   Set when boot marks a running turn failed.
  * @property {"idle"|"running"|"failed"|"interrupted"} turnPhase
@@ -1305,6 +1306,7 @@ async function handleTurnStartRequest(state, request, emit) {
   }
 
   binding.model = readModelFromParams(params) || binding.model;
+  binding.agent = agent ?? binding.agent;
   binding.activeRemodexTurnId = turnId;
   binding.turnPhase = "running";
   binding.updatedAt = Date.now();
@@ -2303,6 +2305,7 @@ function normalizeThreadBinding(entry) {
     opencodeSessionId: readString(entry?.opencodeSessionId),
     cwd: readString(entry?.cwd) || process.cwd(),
     model: entry?.model && typeof entry.model === "object" ? entry.model : null,
+    agent: readString(entry?.agent) || null,
     activeRemodexTurnId: readString(entry?.activeRemodexTurnId) || null,
     lastFailedTurnId: readString(entry?.lastFailedTurnId) || null,
     turnPhase: turnPhase === "running"

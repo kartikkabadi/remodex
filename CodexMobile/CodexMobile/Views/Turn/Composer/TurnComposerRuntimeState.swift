@@ -30,8 +30,8 @@ struct TurnComposerRuntimeState: Equatable {
     }
 
     var selectedAgentTitle: String {
-        if let agentsErrorMessage {
-            return agentsErrorMessage
+        guard !orderedAgentOptions.isEmpty else {
+            return "Select agent"
         }
         guard let id = selectedAgentID else { return "Select agent" }
         return orderedAgentOptions.first(where: { $0.id == id })?.displayName ?? id
@@ -47,7 +47,7 @@ struct TurnComposerRuntimeState: Equatable {
     }
 
     func isSelectedReasoning(_ effort: String) -> Bool {
-        (selectedReasoningEffort ?? effectiveReasoningEffort) == effort
+        effectiveReasoningEffort == effort
     }
 
     func isSelectedServiceTier(_ serviceTier: CodexServiceTier?) -> Bool {
