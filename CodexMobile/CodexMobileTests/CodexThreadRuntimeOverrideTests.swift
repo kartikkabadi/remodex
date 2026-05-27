@@ -21,22 +21,17 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         service.setThreadReasoningEffortOverride("high", for: "thread-override")
         service.setThreadServiceTierOverride(nil, for: "thread-override")
 
-        var capturedTurnStartParams: [JSONValue] = []
-        service.requestTransportOverride = { method, params in
-            XCTAssertEqual(method, "turn/start")
-            capturedTurnStartParams.append(params ?? .null)
-            return RPCMessage(
-                id: .string(UUID().uuidString),
-                result: .object(["turnId": .string("turn-override")]),
-                includeJSONRPC: false
-            )
-        }
+        let capturedTurnStartParams = TurnStartParamsCapture()
+        service.requestTransportOverride = turnStartTransportOverride(
+            capture: capturedTurnStartParams,
+            turnId: "turn-override"
+        )
 
         try await service.sendTurnStart("Ship it", to: "thread-override")
 
-        XCTAssertEqual(capturedTurnStartParams.count, 1)
-        XCTAssertEqual(capturedTurnStartParams[0].objectValue?["effort"]?.stringValue, "high")
-        XCTAssertNil(capturedTurnStartParams[0].objectValue?["serviceTier"]?.stringValue)
+        XCTAssertEqual(capturedTurnStartParams.values.count, 1)
+        XCTAssertEqual(capturedTurnStartParams.values[0].objectValue?["effort"]?.stringValue, "high")
+        XCTAssertNil(capturedTurnStartParams.values[0].objectValue?["serviceTier"]?.stringValue)
     }
 
     func testThreadServiceTierOverridePersistsExplicitNormalSelection() {
@@ -203,7 +198,9 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
             reasoningEffort: "high",
             serviceTierRawValue: "fast",
             overridesReasoning: true,
-            overridesServiceTier: true
+            overridesServiceTier: true,
+            overridesAgent: false,
+            overridesVariant: false
         )
         let thread = try await service.startThread(runtimeOverride: override)
 
@@ -240,11 +237,143 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
             reasoningEffort: "low",
             serviceTierRawValue: "fast",
             overridesReasoning: true,
-            overridesServiceTier: true
+            overridesServiceTier: true,
+            overridesAgent: false,
+            overridesVariant: false
         )
         _ = try await service.startThread(runtimeOverride: override)
 
         XCTAssertNil(capturedThreadStartParams.first?.objectValue?["serviceTier"]?.stringValue)
+    }
+
+    func testLearnBridgeRuntimeCapabilitiesFromInitializeResponse() {
+        let service = makeService()
+        let response = RPCMessage(
+            id: .string(UUID().uuidString),
+            result: .object([
+                "capabilities": .object([
+                    "agentRuntime": .string("opencode"),
+                    "supportsAgents": .bool(true),
+                    "supportsVariants": .bool(true),
+                    "requiresOpenaiAuth": .bool(false),
+                ]),
+            ]),
+            includeJSONRPC: false
+        )
+
+        service.learnBridgeRuntimeCapabilitiesFromInitializeResponse(response)
+
+        XCTAssertEqual(service.connectedBridgeProvider, "opencode")
+        XCTAssertTrue(service.isOpenCodeRuntimeConnected)
+        XCTAssertTrue(service.supportsAgents)
+        XCTAssertFalse(service.requiresOpenaiAuth)
+    }
+
+    func testConnectedBridgeProviderDefaultsToCodexWhenCapabilitiesMissing() {
+        let service = makeService()
+        let response = RPCMessage(
+            id: .string(UUID().uuidString),
+            result: .object([:]),
+            includeJSONRPC: false
+        )
+
+        service.learnBridgeRuntimeCapabilitiesFromInitializeResponse(response)
+
+        XCTAssertEqual(service.connectedBridgeProvider, "codex")
+        XCTAssertFalse(service.isOpenCodeRuntimeConnected)
+        XCTAssertTrue(service.requiresOpenaiAuth)
+    }
+
+    func testResolvedVariantIdPrefersThreadOverrideThenGlobalThenModelDefault() {
+        let service = makeService()
+        service.availableModels = [
+            CodexModelOption(
+                id: "gpt-5.4",
+                model: "gpt-5.4",
+                displayName: "GPT-5.4",
+                description: "Test model",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: nil,
+                defaultVariant: "balanced"
+            ),
+        ]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedVariantId("fast")
+        service.setThreadVariantIdOverride("high", for: "thread-variant")
+
+        XCTAssertEqual(service.resolvedVariantId(for: "thread-variant"), "high")
+        XCTAssertEqual(service.resolvedVariantId(for: "thread-other"), "fast")
+        XCTAssertEqual(service.resolvedVariantId(), "fast")
+
+        service.setSelectedVariantId(nil)
+        XCTAssertEqual(service.resolvedVariantId(for: "thread-other"), "balanced")
+    }
+
+    func testTurnStartIncludesAgentAndVariantForOpenCodeRuntime() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
+            agentRuntime: "opencode",
+            supportsAgents: true,
+            supportsVariants: true,
+            requiresOpenaiAuth: false
+        )
+        service.availableModels = [makeModel()]
+        service.setSelectedAgentId("build")
+        service.setSelectedVariantId("high")
+        service.setThreadAgentIdOverride("custom", for: "thread-opencode")
+        service.setThreadVariantIdOverride("thinking", for: "thread-opencode")
+
+        let capturedTurnStartParams = TurnStartParamsCapture()
+        service.requestTransportOverride = turnStartTransportOverride(
+            capture: capturedTurnStartParams,
+            turnId: "turn-opencode"
+        )
+
+        try await service.sendTurnStart("Ship it", to: "thread-opencode")
+
+        XCTAssertEqual(capturedTurnStartParams.values.count, 1)
+        XCTAssertEqual(capturedTurnStartParams.values[0].objectValue?["agent"]?.stringValue, "custom")
+        XCTAssertEqual(capturedTurnStartParams.values[0].objectValue?["variant"]?.stringValue, "thinking")
+    }
+
+    func testTurnStartOmitsAgentAndVariantForCodexRuntime() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.bridgeRuntimeCapabilities = .codexDefault
+        service.setSelectedAgentId("build")
+        service.setSelectedVariantId("high")
+
+        let capturedTurnStartParams = TurnStartParamsCapture()
+        service.requestTransportOverride = turnStartTransportOverride(
+            capture: capturedTurnStartParams,
+            turnId: "turn-codex"
+        )
+
+        try await service.sendTurnStart("Ship it", to: "thread-codex")
+
+        XCTAssertEqual(capturedTurnStartParams.values.count, 1)
+        XCTAssertNil(capturedTurnStartParams.values[0].objectValue?["agent"])
+        XCTAssertNil(capturedTurnStartParams.values[0].objectValue?["variant"])
+    }
+
+    func testResolvedAgentIdPrefersThreadOverrideThenGlobalThenPlanAgent() {
+        let service = makeService()
+        service.setSelectedAgentId("build")
+        service.setThreadAgentIdOverride("custom", for: "thread-agent")
+
+        XCTAssertEqual(service.resolvedAgentId(for: "thread-agent"), "custom")
+        XCTAssertEqual(service.resolvedAgentId(for: "thread-other"), "build")
+
+        service.setSelectedAgentId(nil)
+        XCTAssertEqual(
+            service.resolvedAgentId(for: "thread-plan", collaborationMode: .plan),
+            "plan"
+        )
+
+        service.planSessionSourceByThread["thread-plan"] = .requested
+        XCTAssertEqual(service.resolvedAgentId(for: "thread-plan"), "plan")
     }
 
     func testUnsupportedThreadReasoningOverrideIsNotReportedAsActive() {
@@ -255,6 +384,45 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
 
         XCTAssertFalse(service.isThreadReasoningEffortOverridden("thread-old"))
         XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(threadId: "thread-old"), "low")
+    }
+
+    private final class TurnStartParamsCapture: @unchecked Sendable {
+        var values: [JSONValue] = []
+    }
+
+    private func turnStartTransportOverride(
+        capture: TurnStartParamsCapture,
+        turnId: String
+    ) -> @Sendable (String, JSONValue?) -> RPCMessage {
+        { method, params in
+            switch method {
+            case "workspace/checkpointCapture":
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object(["kind": .string("messageStart")]),
+                    includeJSONRPC: false
+                )
+            case "workspace/checkpointCopy":
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "kind": .string("turnStart"),
+                        "copied": .bool(true),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "turn/start":
+                capture.values.append(params ?? .null)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object(["turnId": .string(turnId)]),
+                    includeJSONRPC: false
+                )
+            default:
+                XCTFail("Unexpected method \(method)")
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+            }
+        }
     }
 
     private func makeService() -> CodexService {

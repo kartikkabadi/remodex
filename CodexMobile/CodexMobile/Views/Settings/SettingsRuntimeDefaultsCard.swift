@@ -15,7 +15,7 @@ struct SettingsRuntimeDefaultsCard: View {
     var body: some View {
         SettingsCard(
             title: "Composer Defaults",
-            footer: "Used for new chats. Git writer model applies to commit messages and PR drafts."
+            footer: composerDefaultsFooter
         ) {
             SettingsMenuPickerRow(
                 title: "Model",
@@ -24,38 +24,51 @@ struct SettingsRuntimeDefaultsCard: View {
                 selection: runtimeModelSelection
             )
 
-            SettingsMenuPickerRow(
-                title: "Reasoning",
-                value: runtimeReasoningTitle,
-                options: runtimeReasoningPickerOptions,
-                selection: runtimeReasoningSelection,
-                isDisabled: runtimeReasoningOptions.isEmpty
-            )
-
-            if codex.selectedModelSupportsServiceTier(.fast) {
+            if showsCodexComposerDefaults {
                 SettingsMenuPickerRow(
-                    title: "Speed",
-                    value: runtimeServiceTierTitle,
-                    options: runtimeServiceTierPickerOptions,
-                    selection: runtimeServiceTierSelection
+                    title: "Reasoning",
+                    value: runtimeReasoningTitle,
+                    options: runtimeReasoningPickerOptions,
+                    selection: runtimeReasoningSelection,
+                    isDisabled: runtimeReasoningOptions.isEmpty
+                )
+
+                if codex.selectedModelSupportsServiceTier(.fast) {
+                    SettingsMenuPickerRow(
+                        title: "Speed",
+                        value: runtimeServiceTierTitle,
+                        options: runtimeServiceTierPickerOptions,
+                        selection: runtimeServiceTierSelection
+                    )
+                }
+
+                SettingsMenuPickerRow(
+                    title: "Access",
+                    value: runtimeAccessTitle,
+                    options: runtimeAccessPickerOptions,
+                    selection: runtimeAccessSelection
+                )
+
+                SettingsMenuPickerRow(
+                    title: "Git Writer",
+                    value: gitWriterModelTitle,
+                    options: gitWriterModelPickerOptions,
+                    selection: gitWriterModelSelection,
+                    isDisabled: gitWriterModelOptions.isEmpty
                 )
             }
-
-            SettingsMenuPickerRow(
-                title: "Access",
-                value: runtimeAccessTitle,
-                options: runtimeAccessPickerOptions,
-                selection: runtimeAccessSelection
-            )
-
-            SettingsMenuPickerRow(
-                title: "Git Writer",
-                value: gitWriterModelTitle,
-                options: gitWriterModelPickerOptions,
-                selection: gitWriterModelSelection,
-                isDisabled: gitWriterModelOptions.isEmpty
-            )
         }
+    }
+
+    private var showsCodexComposerDefaults: Bool {
+        !codex.isOpenCodeRuntimeConnected
+    }
+
+    private var composerDefaultsFooter: String {
+        if codex.isOpenCodeRuntimeConnected {
+            return "Model defaults for new OpenCode chats. Agent and variant choices live in the composer."
+        }
+        return "Used for new chats. Git writer model applies to commit messages and PR drafts."
     }
 
     private var runtimeModelOptions: [CodexModelOption] {

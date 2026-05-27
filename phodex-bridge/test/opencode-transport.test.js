@@ -2204,6 +2204,174 @@ test("T1-6 thread/contextWindow/read is refused for OpenCode threads", () => {
   assert.equal(refusal.errorCode, "context_not_supported");
 });
 
+test("T2-2 turn/start with agent and variant passes through to prompt_async body", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+
+  const fetchCalls = [];
+  state.options.fetchImpl = async (url, init) => {
+    fetchCalls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({
+      id: "t2-2-a",
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Plan this" }],
+        agent: "plan",
+        variant: "thinking",
+      },
+    }),
+    (line) => lines.push(line),
+  );
+
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const promptCall = fetchCalls.find((entry) => entry.url.includes("/prompt_async"));
+  assert.ok(promptCall, `expected prompt_async fetch, saw: ${fetchCalls.map((entry) => entry.url).join(", ")}`);
+  assert.equal(promptCall.body.agent, "plan");
+  assert.equal(promptCall.body.variant, "thinking");
+});
+
+test("T2-2 turn/start omits agent from prompt_async body when param absent", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+
+  const fetchCalls = [];
+  state.options.fetchImpl = async (url, init) => {
+    fetchCalls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({
+      id: "t2-2-b",
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "No agent" }],
+      },
+    }),
+    (line) => lines.push(line),
+  );
+
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const promptCall = fetchCalls.find((entry) => entry.url.includes("/prompt_async"));
+  assert.ok(promptCall);
+  assert.equal("agent" in promptCall.body, false);
+});
+
+test("T2-3 thread/read emits agentRuntime opencode from publicThreadFromBinding", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: { model: "claude-sonnet-4-20250514", provider: "anthropic", variant: "thinking" },
+    agent: "plan",
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/session/sess-1")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ title: "My Thread" }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  routeInboundJsonRpc(state, JSON.stringify({
+    id: 99,
+    method: "thread/read",
+    params: { threadId: "thread-1" },
+  }), (line) => lines.push(line));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const response = lines.find((line) => JSON.parse(line).id === 99);
+  assert.ok(response);
+  const thread = JSON.parse(response).result.thread;
+  assert.equal(thread.agentRuntime, "opencode");
+  assert.equal(thread.providerId, "anthropic");
+  assert.equal(thread.variant, "thinking");
+  assert.equal(thread.agent, "plan");
+});
+
+test("T2-3 thread/read emits null agentRuntime fields when binding model and agent are missing", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-2", {
+    remodexThreadId: "thread-2",
+    opencodeSessionId: "sess-2",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/session/sess-2")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ title: "No Model Thread" }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  routeInboundJsonRpc(state, JSON.stringify({
+    id: 100,
+    method: "thread/read",
+    params: { threadId: "thread-2" },
+  }), (line) => lines.push(line));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const response = lines.find((line) => JSON.parse(line).id === 100);
+  assert.ok(response);
+  const thread = JSON.parse(response).result.thread;
+  assert.equal(thread.agentRuntime, "opencode");
+  assert.equal(thread.providerId, null);
+  assert.equal(thread.variant, null);
+  assert.equal(thread.agent, null);
+});
+
 function createRouteTestState() {
   return {
     server: {

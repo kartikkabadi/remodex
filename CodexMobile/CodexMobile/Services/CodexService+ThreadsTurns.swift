@@ -2343,6 +2343,14 @@ extension CodexService {
         ) {
             params["collaborationMode"] = collaborationModePayload
         }
+        if isOpenCodeRuntimeConnected {
+            if let agent = resolvedAgentId(for: threadId, collaborationMode: collaborationMode) {
+                params["agent"] = .string(agent)
+            }
+            if let variant = resolvedVariantId(for: threadId) {
+                params["variant"] = .string(variant)
+            }
+        }
         return params
     }
 

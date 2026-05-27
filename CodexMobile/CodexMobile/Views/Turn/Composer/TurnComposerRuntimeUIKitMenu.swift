@@ -1,6 +1,6 @@
 // FILE: TurnComposerRuntimeUIKitMenu.swift
 // Purpose: Builds the hierarchical UIKit menu for the composer runtime pill
-//          (Model / Intelligence / Speed) consumed by UIKitMenuButton.
+//          (Model / Intelligence / Speed / Agent) consumed by UIKitMenuButton.
 // Layer: View Helper
 // Exports: TurnComposerRuntimeUIKitMenuBuilder
 // Depends on: UIKit, TurnComposerRuntimeState, TurnComposerRuntimeActions,
@@ -9,8 +9,8 @@
 //
 // Design notes
 // ------------
-// * Top-level menu has three submenus: Model, Intelligence, Speed. Each parent
-//   carries `subtitle:` (current selection) so the row renders as the
+// * Top-level menu has four submenus: Model, Intelligence, Speed, Agent. Each
+//   parent carries `subtitle:` (current selection) so the row renders as the
 //   "Label / Value / >" pill you see in the screenshot.
 // * Submenus use `UIMenu.Options.singleSelection` so UIKit draws/clears the
 //   checkmarks for us. We pass `.on` for the active item as a hint; UIKit
@@ -18,6 +18,13 @@
 // * Long model lists keep the existing "featured + Other models…" split so the
 //   menu stays glanceable. The "Other models" action opens the existing
 //   SwiftUI sheet via an injected callback.
+// * The Agent submenu is visible only for OpenCode threads
+//   (isOpenCodeThread == true). For Codex/standard threads it returns nil.
+// * The Intelligence menu adapts to the runtime: variant selection for OpenCode,
+//   reasoning effort for Codex.
+// * The Speed menu adapts to the runtime: fast model selection for OpenCode,
+//   service tier for Codex.
+// * The Model menu groups options by providerId when the data is available.
 
 import UIKit
 
@@ -48,6 +55,10 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             children.append(speedMenu)
         }
 
+        if let agentMenu = agentMenu(input) {
+            children.append(agentMenu)
+        }
+
         return UIMenu(title: "", options: [.displayInline], children: children)
     }
 
@@ -73,6 +84,29 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 ]
             }
 
+            let grouped = Dictionary(grouping: input.orderedModelOptions) { model in
+                model.providerId ?? ""
+            }
+            let sortedKeys = grouped.keys.sorted()
+
+            if sortedKeys.count > 1 || (sortedKeys.count == 1 && sortedKeys[0] != "") {
+                var items: [UIMenuElement] = []
+                for key in sortedKeys {
+                    let models = grouped[key]!
+                    let providerName = key.isEmpty ? "Other" : key
+                    let providerChildren = models.map { model in
+                        modelAction(model: model, input: input)
+                    }
+                    let submenu = UIMenu(
+                        title: providerName,
+                        options: [.singleSelection],
+                        children: providerChildren
+                    )
+                    items.append(submenu)
+                }
+                return items
+            }
+
             let featured = featuredOrderedModels(input)
             var items: [UIMenuElement] = featured.map { model in
                 modelAction(model: model, input: input)
@@ -95,7 +129,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             return items
         }()
 
-        // singleSelection paints the checkmark on the `.on` child for us.
         return UIMenu(
             title: "Model",
             subtitle: subtitle,
@@ -142,9 +175,43 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         return result
     }
 
-    // MARK: - Intelligence (reasoning effort)
+    // MARK: - Intelligence
 
     private static func intelligenceMenu(_ input: Input) -> UIMenu? {
+        if input.runtimeState.isOpenCodeThread {
+            return openCodeIntelligenceMenu(input)
+        }
+        return codexIntelligenceMenu(input)
+    }
+
+    private static func openCodeIntelligenceMenu(_ input: Input) -> UIMenu? {
+        let variants = input.runtimeState.orderedVariantOptions
+        guard !variants.isEmpty else { return nil }
+
+        let actions: [UIMenuElement] = variants.map { variant in
+            UIAction(
+                title: variant.displayName,
+                state: input.runtimeState.isSelectedVariant(variant.id) ? .on : .off
+            ) { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.selectVariant(variant.id)
+            }
+        }
+
+        let subtitle = input.runtimeState.selectedVariantID
+            .flatMap { id in variants.first(where: { $0.id == id })?.displayName }
+            ?? "Select variant"
+
+        return UIMenu(
+            title: "Intelligence",
+            subtitle: subtitle,
+            image: RemodexIcon.menuUIImage(systemName: "brain"),
+            options: [.singleSelection],
+            children: actions
+        )
+    }
+
+    private static func codexIntelligenceMenu(_ input: Input) -> UIMenu? {
         let options = input.runtimeState.reasoningDisplayOptions
         guard !options.isEmpty else { return nil }
 
@@ -174,6 +241,46 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Speed
 
     private static func speedMenu(_ input: Input) -> UIMenu? {
+        if input.runtimeState.isOpenCodeThread {
+            return openCodeSpeedMenu(input)
+        }
+        return codexSpeedMenu(input)
+    }
+
+    private static func openCodeSpeedMenu(_ input: Input) -> UIMenu? {
+        let fastModels = input.orderedModelOptions.filter { $0.supportsFastMode }
+        guard !fastModels.isEmpty else { return nil }
+
+        let actions: [UIMenuElement] = fastModels.map { model in
+            let title = TurnComposerMetaMapper.modelTitle(for: model)
+            return UIAction(
+                title: title,
+                state: model.id == input.selectedModelID ? .on : .off
+            ) { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.selectModel(model.id)
+            }
+        }
+
+        let subtitle: String = {
+            if let selectedID = input.selectedModelID,
+               fastModels.contains(where: { $0.id == selectedID }),
+               let model = input.orderedModelOptions.first(where: { $0.id == selectedID }) {
+                return TurnComposerMetaMapper.modelTitle(for: model)
+            }
+            return "Select fast model"
+        }()
+
+        return UIMenu(
+            title: "Speed",
+            subtitle: subtitle,
+            image: UIImage(systemName: "bolt.fill"),
+            options: [.singleSelection],
+            children: actions
+        )
+    }
+
+    private static func codexSpeedMenu(_ input: Input) -> UIMenu? {
         guard input.runtimeState.supportsFastMode else { return nil }
 
         let normalAction = UIAction(
@@ -187,8 +294,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let tierActions: [UIMenuElement] = CodexServiceTier.allCases.map { tier in
             UIAction(
                 title: tier.displayName,
-                // Keep the Fast tier on the native SF bolt to match the speed
-                // badge in the composer; other tiers can use Central artwork.
                 image: tier == .fast
                     ? UIImage(systemName: tier.iconName)
                     : RemodexIcon.menuUIImage(systemName: tier.iconName),
@@ -212,6 +317,43 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             image: UIImage(systemName: "bolt.fill"),
             options: [.singleSelection],
             children: [normalAction] + tierActions
+        )
+    }
+
+    // MARK: - Agent
+
+    private static func agentMenu(_ input: Input) -> UIMenu? {
+        guard input.runtimeState.isOpenCodeThread else { return nil }
+        let agents = input.runtimeState.orderedAgentOptions
+        guard !agents.isEmpty else {
+            if input.runtimeState.isAgentListLoading {
+                return UIMenu(title: "Agent", subtitle: "Loading…", children: [
+                    disabledInfoAction(title: "Loading agents…"),
+                ])
+            }
+            return nil
+        }
+
+        let actions: [UIMenuElement] = agents.map { agent in
+            let action = UIAction(
+                title: agent.displayName,
+                state: input.runtimeState.isSelectedAgent(agent.id) ? .on : .off
+            ) { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.selectAgent(agent.id)
+            }
+            if input.runtimeState.agentMenuDisabled {
+                action.attributes.insert(.disabled)
+            }
+            return action
+        }
+
+        return UIMenu(
+            title: "Agent",
+            subtitle: input.runtimeState.selectedAgentTitle,
+            image: RemodexIcon.menuUIImage(systemName: "person.2"),
+            options: [.singleSelection],
+            children: actions
         )
     }
 

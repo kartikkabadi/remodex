@@ -102,11 +102,14 @@ struct TurnComposerHostView: View {
             voiceAudioLevels: voiceAudioLevels,
             voiceRecordingDuration: voiceRecordingDuration
         )
+        let planCollaborationMode: CodexCollaborationModeKind? = viewModel.isPlanModeArmed ? .plan : nil
         let runtimeState = TurnComposerRuntimeState.resolve(
             codex: codex,
-            reasoningDisplayOptions: reasoningDisplayOptions
+            reasoningDisplayOptions: reasoningDisplayOptions,
+            threadId: thread.id,
+            collaborationMode: planCollaborationMode
         )
-        let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex)
+        let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex, threadId: thread.id)
         let selectedModelID = codex.visibleSelectedModelIDForComposer()
         let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer()
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil

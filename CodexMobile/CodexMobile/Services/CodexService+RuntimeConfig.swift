@@ -6,6 +6,60 @@
 
 import Foundation
 
+struct AgentOption: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+    let mode: String?
+    let isCustom: Bool
+    let description: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case displayNameSnake = "display_name"
+        case mode
+        case isCustom
+        case isCustomSnake = "is_custom"
+        case description
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        mode: String? = nil,
+        isCustom: Bool = false,
+        description: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.mode = mode
+        self.isCustom = isCustom
+        self.description = description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? id
+        mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isCustomSnake)
+            ?? false
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encode(isCustom, forKey: .isCustom)
+        try container.encodeIfPresent(description, forKey: .description)
+    }
+}
+
 private let runtimeDebugTimestampFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -28,6 +82,10 @@ private enum RuntimeSelectionDefaults {
         }
         return reasoningEffort
     }
+}
+
+private enum OpenCodeRuntimeSelectionDefaults {
+    static let planAgentId = "plan"
 }
 
 extension CodexService {
@@ -102,6 +160,42 @@ extension CodexService {
             debugRuntimeLog("model/list success count=\(decodedModels.count)")
         } catch {
             handleModelListFailure(error)
+            throw error
+        }
+    }
+
+    func fetchAgentList() async throws {
+        isAgentListLoading = true
+        defer { isAgentListLoading = false }
+
+        do {
+            let response = try await sendRequest(
+                method: "agent/list",
+                params: .object([:]),
+                timeoutNanoseconds: RuntimeConfigLoadingPolicy.modelListTimeoutNanoseconds,
+                timeoutMessage: "agent/list timed out while syncing agent options."
+            )
+
+            guard let resultObject = response.result?.objectValue else {
+                throw CodexServiceError.invalidResponse("agent/list response missing payload")
+            }
+
+            let items =
+                resultObject["agents"]?.arrayValue
+                ?? resultObject["items"]?.arrayValue
+                ?? resultObject["data"]?.arrayValue
+                ?? []
+
+            let decodedAgents = items.compactMap { decodeModel(AgentOption.self, from: $0) }
+            availableAgents = Self.orderedAgentOptions(from: decodedAgents)
+            agentsErrorMessage = nil
+
+            debugRuntimeLog("agent/list success count=\(decodedAgents.count)")
+        } catch {
+            let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalized = message.isEmpty ? "Unable to load agents" : message
+            agentsErrorMessage = normalized
+            debugRuntimeLog("agent/list failed: \(normalized)")
             throw error
         }
     }
@@ -204,6 +298,132 @@ extension CodexService {
     func setSelectedAccessMode(_ accessMode: CodexAccessMode) {
         selectedAccessMode = accessMode
         persistRuntimeSelections()
+    }
+
+    func selectedAgentId() -> String? {
+        normalizedRuntimeSelectionIdentifier(
+            defaults.string(forKey: Self.selectedAgentIdDefaultsKey)
+        )
+    }
+
+    func setSelectedAgentId(_ agentId: String?) {
+        let normalized = normalizedRuntimeSelectionIdentifier(agentId)
+        if let normalized {
+            defaults.set(normalized, forKey: Self.selectedAgentIdDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.selectedAgentIdDefaultsKey)
+        }
+    }
+
+    func selectedVariantId() -> String? {
+        normalizedRuntimeSelectionIdentifier(
+            defaults.string(forKey: Self.selectedVariantIdDefaultsKey)
+        )
+    }
+
+    func setSelectedVariantId(_ variantId: String?) {
+        let normalized = normalizedRuntimeSelectionIdentifier(variantId)
+        if let normalized {
+            defaults.set(normalized, forKey: Self.selectedVariantIdDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.selectedVariantIdDefaultsKey)
+        }
+    }
+
+    func setThreadAgentIdOverride(_ agentId: String?, for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        let normalizedAgentId = normalizedRuntimeSelectionIdentifier(agentId)
+        guard let normalizedAgentId else {
+            clearThreadAgentIdOverride(for: normalizedThreadID)
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.agentId = normalizedAgentId
+            override.overridesAgent = true
+        }
+    }
+
+    func clearThreadAgentIdOverride(for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.agentId = nil
+            override.overridesAgent = false
+        }
+    }
+
+    func setThreadVariantIdOverride(_ variantId: String?, for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        let normalizedVariantId = normalizedRuntimeSelectionIdentifier(variantId)
+        guard let normalizedVariantId else {
+            clearThreadVariantIdOverride(for: normalizedThreadID)
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.variantId = normalizedVariantId
+            override.overridesVariant = true
+        }
+    }
+
+    func clearThreadVariantIdOverride(for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.variantId = nil
+            override.overridesVariant = false
+        }
+    }
+
+    func resolvedAgentId(
+        for threadId: String? = nil,
+        collaborationMode: CodexCollaborationModeKind? = nil
+    ) -> String? {
+        if let threadOverride = threadRuntimeOverride(for: threadId),
+           threadOverride.overridesAgent,
+           let agentId = normalizedRuntimeSelectionIdentifier(threadOverride.agentId) {
+            return agentId
+        }
+
+        if let selectedAgentId = selectedAgentId() {
+            return selectedAgentId
+        }
+
+        if collaborationMode == .plan {
+            return OpenCodeRuntimeSelectionDefaults.planAgentId
+        }
+
+        if let normalizedThreadID = normalizedInterruptIdentifier(threadId),
+           currentPlanSessionSource(for: normalizedThreadID) != nil {
+            return OpenCodeRuntimeSelectionDefaults.planAgentId
+        }
+
+        return nil
+    }
+
+    func resolvedVariantId(for threadId: String? = nil) -> String? {
+        if let threadOverride = threadRuntimeOverride(for: threadId),
+           threadOverride.overridesVariant,
+           let variantId = normalizedRuntimeSelectionIdentifier(threadOverride.variantId) {
+            return variantId
+        }
+
+        if let selectedVariantId = selectedVariantId() {
+            return selectedVariantId
+        }
+
+        return selectedModelOption()?.defaultVariant
     }
 
     func selectedModelOption() -> CodexModelOption? {
@@ -500,8 +720,12 @@ private extension CodexService {
         var currentOverride = threadRuntimeOverridesByThreadID[threadId] ?? CodexThreadRuntimeOverride(
             reasoningEffort: nil,
             serviceTierRawValue: nil,
+            agentId: nil,
+            variantId: nil,
             overridesReasoning: false,
-            overridesServiceTier: false
+            overridesServiceTier: false,
+            overridesAgent: false,
+            overridesVariant: false
         )
 
         mutate(&currentOverride)
@@ -605,9 +829,20 @@ private extension CodexService {
 
         defaults.set(encodedOverrides, forKey: macScopedDefaultsKey(Self.threadRuntimeOverridesDefaultsKey))
     }
+
+    func normalizedRuntimeSelectionIdentifier(_ rawValue: String?) -> String? {
+        let normalized = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized, !normalized.isEmpty else {
+            return nil
+        }
+        return normalized
+    }
 }
 
 extension CodexService {
+    static let selectedAgentIdDefaultsKey = "codex.selectedAgentId"
+    static let selectedVariantIdDefaultsKey = "codex.selectedVariantId"
+
     func normalizeRuntimeSelectionsAfterModelsUpdate() {
         guard !availableModels.isEmpty else {
             if selectedModelId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
@@ -657,5 +892,19 @@ extension CodexService {
         }
 
         persistRuntimeSelections()
+    }
+}
+
+extension CodexService {
+    static func orderedAgentOptions(from agents: [AgentOption]) -> [AgentOption] {
+        let priority = ["build", "plan", "general", "explore"]
+        return agents.sorted { lhs, rhs in
+            let leftRank = priority.firstIndex(of: lhs.id) ?? Int.max
+            let rightRank = priority.firstIndex(of: rhs.id) ?? Int.max
+            if leftRank != rightRank {
+                return leftRank < rightRank
+            }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        }
     }
 }

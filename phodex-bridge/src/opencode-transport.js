@@ -2383,6 +2383,10 @@ function publicThreadFromBinding(binding) {
     model: binding.model?.model ?? null,
     modelProvider: "opencode",
     provider: "opencode",
+    agentRuntime: "opencode",
+    providerId: binding.model?.provider ?? null,
+    variant: binding.model?.variant ?? null,
+    agent: binding.agent ?? null,
     createdAt: new Date(binding.updatedAt).toISOString(),
     updatedAt: new Date(binding.updatedAt).toISOString(),
   };

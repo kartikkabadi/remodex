@@ -193,6 +193,7 @@ extension CodexService {
         supportsStructuredSkillInput = true
         supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
+        bridgeRuntimeCapabilities = .codexDefault
         hasResolvedRateLimitsSnapshot = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
@@ -351,6 +352,7 @@ extension CodexService {
                 timeoutMessage: "Connection timed out while reconnecting. Try again."
             )
             learnTurnPaginationSupportFromInitializeResponse(initializeResponse)
+            learnBridgeRuntimeCapabilitiesFromInitializeResponse(initializeResponse)
             // A successful modern initialize means the runtime accepted the experimental
             // capability negotiation. Keep plan-mode sends enabled unless the runtime
             // explicitly rejects `collaborationMode` on a turn request later.
@@ -377,6 +379,7 @@ extension CodexService {
                     timeoutMessage: "Connection timed out while reconnecting. Try again."
                 )
                 learnTurnPaginationSupportFromInitializeResponse(initializeResponse)
+                learnBridgeRuntimeCapabilitiesFromInitializeResponse(initializeResponse)
             } catch {
                 if let incompatibleAppVersionError = incompatibleBridgeAppVersionError(from: error) {
                     throw incompatibleAppVersionError
@@ -632,6 +635,9 @@ extension CodexService {
                 return
             }
             try? await self.listModels()
+            if self.supportsAgents {
+                try? await self.fetchAgentList()
+            }
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false
             }
@@ -683,6 +689,7 @@ extension CodexService {
         hasPresentedThreadForkBridgeUpdatePrompt = false
         hasPresentedMinimumBridgePackageUpdatePrompt = false
         lastPresentedAvailableBridgePackageVersion = nil
+        bridgeRuntimeCapabilities = .codexDefault
         clearAllRunningState()
         readyThreadIDs.removeAll()
         failedThreadIDs.removeAll()
@@ -1317,5 +1324,29 @@ extension CodexService {
         return normalized.hasPrefix("fe80:")
             || normalized.hasPrefix("fc")
             || normalized.hasPrefix("fd")
+    }
+}
+
+extension CodexService {
+    func learnBridgeRuntimeCapabilitiesFromInitializeResponse(_ response: RPCMessage) {
+        guard let capabilitiesObject = response.result?.objectValue?["capabilities"]?.objectValue else {
+            bridgeRuntimeCapabilities = .codexDefault
+            debugRuntimeLog("initialize capabilities missing; defaulting agentRuntime=codex")
+            return
+        }
+
+        let agentRuntime = capabilitiesObject["agentRuntime"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedRuntime = (agentRuntime?.isEmpty == false) ? agentRuntime! : "codex"
+
+        bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
+            agentRuntime: normalizedRuntime,
+            supportsAgents: capabilitiesObject["supportsAgents"]?.boolValue == true,
+            supportsVariants: capabilitiesObject["supportsVariants"]?.boolValue == true,
+            requiresOpenaiAuth: capabilitiesObject["requiresOpenaiAuth"]?.boolValue != false
+        )
+        debugRuntimeLog(
+            "initialize capabilities agentRuntime=\(bridgeRuntimeCapabilities.agentRuntime) supportsAgents=\(bridgeRuntimeCapabilities.supportsAgents)"
+        )
     }
 }

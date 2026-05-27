@@ -153,8 +153,12 @@ struct CodexBridgeUpdatePrompt: Identifiable, Equatable, Sendable {
 struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     var reasoningEffort: String?
     var serviceTierRawValue: String?
+    var agentId: String?
+    var variantId: String?
     var overridesReasoning: Bool
     var overridesServiceTier: Bool
+    var overridesAgent: Bool = false
+    var overridesVariant: Bool = false
 
     var serviceTier: CodexServiceTier? {
         guard let serviceTierRawValue else {
@@ -164,7 +168,7 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     }
 
     var isEmpty: Bool {
-        !overridesReasoning && !overridesServiceTier
+        !overridesReasoning && !overridesServiceTier && !overridesAgent && !overridesVariant
     }
 }
 
@@ -389,6 +393,7 @@ final class CodexService {
     var messageRevisionByThread: [String: Int] = [:]
     var syncRealtimeEnabled = true
     var availableModels: [CodexModelOption] = []
+    var availableAgents: [AgentOption] = []
     var selectedModelId: String?
     var hasPersistedSelectedModelId = false
     var selectedGitWriterModelId: String?
@@ -406,6 +411,8 @@ final class CodexService {
     // Holds the most recent account-specific error without colliding with transport-level failures.
     var gptAccountErrorMessage: String?
     var isLoadingModels = false
+    var isAgentListLoading = false
+    var agentsErrorMessage: String?
     // Coalesces post-connect model refreshes behind thread hydration so composer metadata cannot be skipped.
     @ObservationIgnored var pendingRuntimeOptionRefresh = false
     @ObservationIgnored var runtimeOptionRefreshTask: Task<Void, Never>?
@@ -573,6 +580,23 @@ final class CodexService {
     var connectedServerIdentity: String?
     // Tracks whether the bridge is proxying a real Codex endpoint or a spawned local app-server.
     var codexTransportMode: CodexRuntimeTransportMode = .unknown
+    // Connected agent runtime from initialize capabilities (ADR-001: not transport mode).
+    var bridgeRuntimeCapabilities: CodexBridgeRuntimeCapabilities = .codexDefault
+    var connectedBridgeProvider: String {
+        bridgeRuntimeCapabilities.agentRuntime
+    }
+    var requiresOpenaiAuth: Bool {
+        bridgeRuntimeCapabilities.requiresOpenaiAuth
+    }
+    var supportsAgents: Bool {
+        bridgeRuntimeCapabilities.supportsAgents
+    }
+    var supportsVariants: Bool {
+        bridgeRuntimeCapabilities.supportsVariants
+    }
+    var isOpenCodeRuntimeConnected: Bool {
+        bridgeRuntimeCapabilities.isOpenCodeConnected
+    }
     var bridgeHostPlatform: CodexBridgeHostPlatform {
         if let hostPlatform = gptAccountSnapshot.hostPlatform {
             return hostPlatform

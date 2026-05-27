@@ -6,6 +6,36 @@
 
 import Foundation
 
+struct VariantOption: Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+
+    init(id: String, displayName: String) {
+        self.id = id
+        self.displayName = displayName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case displayNameSnake = "display_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? id
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+    }
+}
+
 struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let model: String
@@ -15,6 +45,9 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
     let supportsFastMode: Bool
     let supportedReasoningEfforts: [CodexReasoningEffortOption]
     let defaultReasoningEffort: String?
+    let providerId: String?
+    let supportedVariants: [VariantOption]
+    let defaultVariant: String?
 
     init(
         id: String,
@@ -24,7 +57,10 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         isDefault: Bool,
         supportsFastMode: Bool = false,
         supportedReasoningEfforts: [CodexReasoningEffortOption],
-        defaultReasoningEffort: String?
+        defaultReasoningEffort: String?,
+        providerId: String? = nil,
+        supportedVariants: [VariantOption] = [],
+        defaultVariant: String? = nil
     ) {
         self.id = id
         self.model = model
@@ -34,6 +70,9 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         self.supportsFastMode = supportsFastMode
         self.supportedReasoningEfforts = supportedReasoningEfforts
         self.defaultReasoningEffort = defaultReasoningEffort
+        self.providerId = providerId
+        self.supportedVariants = supportedVariants
+        self.defaultVariant = defaultVariant
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -58,6 +97,12 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         case supportedReasoningEffortsSnake = "supported_reasoning_efforts"
         case defaultReasoningEffort
         case defaultReasoningEffortSnake = "default_reasoning_effort"
+        case providerId
+        case providerIdSnake = "provider_id"
+        case supportedVariants
+        case supportedVariantsSnake = "supported_variants"
+        case defaultVariant
+        case defaultVariantSnake = "default_variant"
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +163,26 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
 
         let normalizedDefault = defaultEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
         defaultReasoningEffort = (normalizedDefault?.isEmpty == true) ? nil : normalizedDefault
+
+        let camelProviderId = try container.decodeIfPresent(String.self, forKey: .providerId)
+        let snakeProviderId = try container.decodeIfPresent(String.self, forKey: .providerIdSnake)
+        providerId = camelProviderId ?? snakeProviderId
+
+        let camelVariants = try container.decodeIfPresent(
+            [VariantOption].self,
+            forKey: .supportedVariants
+        )
+        let snakeVariants = try container.decodeIfPresent(
+            [VariantOption].self,
+            forKey: .supportedVariantsSnake
+        )
+        supportedVariants = camelVariants ?? snakeVariants ?? []
+
+        let camelDefaultVariant = try container.decodeIfPresent(String.self, forKey: .defaultVariant)
+        let snakeDefaultVariant = try container.decodeIfPresent(String.self, forKey: .defaultVariantSnake)
+        let normalizedDefaultVariant = (camelDefaultVariant ?? snakeDefaultVariant)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        defaultVariant = (normalizedDefaultVariant?.isEmpty == true) ? nil : normalizedDefaultVariant
     }
 
     // Codex model/list has shipped several field spellings; keep this parser
