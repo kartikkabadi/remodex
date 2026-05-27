@@ -63,4 +63,8 @@ Agents must not mark device rows pass without Kartik’s results.
 
 ## Deferred (T3 — tracker issues, Wave 4)
 
-See fork issues filed 2026-05-28 (labels `opencode`, `t3`).
+- [#55](https://github.com/kartikkabadi/remodex/issues/55) slash commands
+- [#56](https://github.com/kartikkabadi/remodex/issues/56) autocomplete / rich bus
+- [#57](https://github.com/kartikkabadi/remodex/issues/57) `thread/name/set` vs git-handler
+- [#58](https://github.com/kartikkabadi/remodex/issues/58) split transport (post-merge)
+- [#59](https://github.com/kartikkabadi/remodex/issues/59) optional session-jsonl-history
