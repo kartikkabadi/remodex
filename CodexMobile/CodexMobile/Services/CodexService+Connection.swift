@@ -634,9 +634,17 @@ extension CodexService {
                 self.pendingRuntimeOptionRefresh = true
                 return
             }
-            try? await self.listModels()
+            do {
+                try await self.listModels()
+            } catch {
+                self.debugRuntimeLog("runtime option refresh model/list failed: \(error.localizedDescription)")
+            }
             if self.supportsAgents {
-                try? await self.fetchAgentList()
+                do {
+                    try await self.fetchAgentList()
+                } catch {
+                    self.debugRuntimeLog("runtime option refresh agent/list failed: \(error.localizedDescription)")
+                }
             }
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false

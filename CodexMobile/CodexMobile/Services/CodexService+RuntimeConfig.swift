@@ -35,6 +35,17 @@ private enum OpenCodeRuntimeSelectionDefaults {
 }
 
 extension CodexService {
+    static func normalizedPreferredAgentRuntime(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return trimmed == "opencode" ? "opencode" : "codex"
+    }
+
+    func setPreferredAgentRuntime(_ runtime: String) {
+        let normalized = Self.normalizedPreferredAgentRuntime(runtime)
+        preferredAgentRuntime = normalized
+        defaults.set(normalized, forKey: Self.preferredAgentRuntimeDefaultsKey)
+    }
+
     // Resolves the effective per-chat override record after normalizing the thread id.
     func threadRuntimeOverride(for threadId: String?) -> CodexThreadRuntimeOverride? {
         guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {

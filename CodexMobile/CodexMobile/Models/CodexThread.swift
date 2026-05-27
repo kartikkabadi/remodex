@@ -83,6 +83,8 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
     var agentRole: String?
     var model: String?
     var modelProvider: String?
+    /// Which agent runtime created this thread (`codex` or `opencode`). Display-only for sidebar branding.
+    var agentRuntime: String
     var syncState: CodexThreadSyncState
 
     // --- Public initializer ---------------------------------------------------
@@ -103,6 +105,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         agentRole: String? = nil,
         model: String? = nil,
         modelProvider: String? = nil,
+        agentRuntime: String = "codex",
         syncState: CodexThreadSyncState = .live
     ) {
         self.id = id
@@ -120,6 +123,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         self.agentRole = Self.normalizeIdentifier(agentRole)
         self.model = Self.normalizeIdentifier(model)
         self.modelProvider = Self.normalizeIdentifier(modelProvider)
+        self.agentRuntime = Self.normalizeAgentRuntime(agentRuntime)
         self.syncState = syncState
     }
 
@@ -153,6 +157,8 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         case model
         case modelProvider
         case modelProviderSnake = "model_provider"
+        case agentRuntime
+        case agentRuntimeSnake = "agent_runtime"
         case syncState
     }
 
@@ -212,6 +218,10 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
             keys: [.modelProvider, .modelProviderSnake],
             metadataKeys: ["modelProvider", "model_provider", "modelProviderId", "model_provider_id"]
         )
+        agentRuntime = Self.decodeAgentRuntime(
+            from: container,
+            metadata: metadata
+        )
         syncState = try container.decodeIfPresent(CodexThreadSyncState.self, forKey: .syncState) ?? .live
     }
 
@@ -235,7 +245,12 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(Self.normalizeIdentifier(agentRole), forKey: .agentRole)
         try container.encodeIfPresent(Self.normalizeIdentifier(model), forKey: .model)
         try container.encodeIfPresent(Self.normalizeIdentifier(modelProvider), forKey: .modelProvider)
+        try container.encode(agentRuntime, forKey: .agentRuntime)
         try container.encode(syncState, forKey: .syncState)
+    }
+
+    var isOpenCodeAgentRuntime: Bool {
+        agentRuntime.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "opencode"
     }
 }
 
@@ -546,6 +561,42 @@ extension CodexThread {
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizeAgentRuntime(_ value: String?) -> String {
+        guard let value else {
+            return "codex"
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.isEmpty ? "codex" : trimmed
+    }
+
+    private static func decodeAgentRuntime(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        metadata: [String: JSONValue]?
+    ) -> String {
+        for key in [CodingKeys.agentRuntime, .agentRuntimeSnake] {
+            if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+                return normalizeAgentRuntime(value)
+            }
+        }
+
+        for metadataKey in ["agentRuntime", "agent_runtime"] {
+            if let value = metadata?[metadataKey]?.stringValue {
+                return normalizeAgentRuntime(value)
+            }
+        }
+
+        if let provider = decodeThreadIdentity(
+            from: container,
+            metadata: metadata,
+            keys: [.modelProvider, .modelProviderSnake],
+            metadataKeys: ["modelProvider", "model_provider", "provider"]
+        ), provider.lowercased() == "opencode" {
+            return "opencode"
+        }
+
+        return "codex"
     }
 
     private static func normalizeProjectPath(_ value: String?) -> String? {

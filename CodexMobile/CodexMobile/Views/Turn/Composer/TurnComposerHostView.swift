@@ -62,7 +62,8 @@ struct TurnComposerHostView: View {
                     hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
                     isPlanModeArmed: viewModel.isPlanModeArmed
                 )
-                    && !availableForkDestinations.isEmpty
+                    && !availableForkDestinations.isEmpty,
+                hidesStatusCommand: codex.isOpenCodeRuntimeConnected
             ),
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
             isFileAutocompleteVisible: viewModel.isFileAutocompleteVisible,

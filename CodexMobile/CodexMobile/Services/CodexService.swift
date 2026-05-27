@@ -402,6 +402,8 @@ final class CodexService {
     // Per-chat runtime overrides let the composer diverge from app-wide defaults.
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var selectedAccessMode: CodexAccessMode = .onRequest
+    /// Next bridge pairing preference (ADR-001). Does not switch the live connected runtime.
+    var preferredAgentRuntime: String = "codex"
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
     var gptAccountSnapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot() {
         didSet {
@@ -597,6 +599,25 @@ final class CodexService {
     var isOpenCodeRuntimeConnected: Bool {
         bridgeRuntimeCapabilities.isOpenCodeConnected
     }
+
+    var preferredRuntimeMismatchHint: String? {
+        guard isConnected, isInitialized else {
+            return nil
+        }
+        let connected = connectedBridgeProvider
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let preferred = preferredAgentRuntime
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !connected.isEmpty, !preferred.isEmpty, connected != preferred else {
+            return nil
+        }
+        if preferred == "opencode" {
+            return "Connected to a Codex bridge. Switch on this Mac to use OpenCode."
+        }
+        return "Connected to an OpenCode bridge. Switch on this Mac to use Codex."
+    }
     var bridgeHostPlatform: CodexBridgeHostPlatform {
         if let hostPlatform = gptAccountSnapshot.hostPlatform {
             return hostPlatform
@@ -721,6 +742,7 @@ final class CodexService {
     static let threadRuntimeOverridesDefaultsKey = "codex.threadRuntimeOverrides"
     static let planSessionSourcesDefaultsKey = "codex.planSessionSources"
     static let selectedAccessModeDefaultsKey = "codex.selectedAccessMode"
+    static let preferredAgentRuntimeDefaultsKey = "codex.preferredAgentRuntime"
     static let locallyArchivedThreadIDsKey = "codex.locallyArchivedThreadIDs"
     static let locallyDeletedThreadIDsKey = "codex.locallyDeletedThreadIDs"
     static let forkedThreadOriginsDefaultsKey = "codex.forkedThreadOrigins"
@@ -807,6 +829,12 @@ final class CodexService {
             self.selectedAccessMode = parsedAccessMode
         } else {
             self.selectedAccessMode = .onRequest
+        }
+
+        if let savedPreferredRuntime = defaults.string(forKey: Self.preferredAgentRuntimeDefaultsKey) {
+            self.preferredAgentRuntime = CodexService.normalizedPreferredAgentRuntime(savedPreferredRuntime)
+        } else {
+            self.preferredAgentRuntime = "codex"
         }
 
         self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()

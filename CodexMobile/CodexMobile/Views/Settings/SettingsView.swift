@@ -68,8 +68,10 @@ struct SettingsView: View {
                 }
             )
             SettingsUsageCard()
-            SettingsGPTAccountCard {
-                presentSettingsSheet(.macLoginInfo)
+            if codex.requiresOpenaiAuth {
+                SettingsGPTAccountCard {
+                    presentSettingsSheet(.macLoginInfo)
+                }
             }
             SettingsArchivedChatsCard()
             SettingsAboutCard {

@@ -18,6 +18,13 @@ struct SettingsRuntimeDefaultsCard: View {
             footer: composerDefaultsFooter
         ) {
             SettingsMenuPickerRow(
+                title: "Preferred runtime",
+                value: preferredRuntimeTitle,
+                options: preferredRuntimePickerOptions,
+                selection: preferredRuntimeSelection
+            )
+
+            SettingsMenuPickerRow(
                 title: "Model",
                 value: runtimeModelTitle,
                 options: runtimeModelPickerOptions,
@@ -65,10 +72,35 @@ struct SettingsRuntimeDefaultsCard: View {
     }
 
     private var composerDefaultsFooter: String {
-        if codex.isOpenCodeRuntimeConnected {
-            return "Model defaults for new OpenCode chats. Agent and variant choices live in the composer."
+        var parts: [String] = []
+        if let mismatchHint = codex.preferredRuntimeMismatchHint {
+            parts.append(mismatchHint)
         }
-        return "Used for new chats. Git writer model applies to commit messages and PR drafts."
+        if codex.isOpenCodeRuntimeConnected {
+            parts.append("Model defaults for new OpenCode chats. Agent and variant choices live in the composer.")
+        } else {
+            parts.append("Used for new chats. Git writer model applies to commit messages and PR drafts.")
+        }
+        parts.append("Preferred runtime applies the next time you pair this Mac's bridge.")
+        return parts.joined(separator: " ")
+    }
+
+    private var preferredRuntimePickerOptions: [SettingsMenuPickerOption<String>] {
+        [
+            SettingsMenuPickerOption(value: "codex", title: "Codex"),
+            SettingsMenuPickerOption(value: "opencode", title: "OpenCode"),
+        ]
+    }
+
+    private var preferredRuntimeTitle: String {
+        codex.preferredAgentRuntime == "opencode" ? "OpenCode" : "Codex"
+    }
+
+    private var preferredRuntimeSelection: Binding<String> {
+        Binding(
+            get: { CodexService.normalizedPreferredAgentRuntime(codex.preferredAgentRuntime) },
+            set: { codex.setPreferredAgentRuntime($0) }
+        )
     }
 
     private var runtimeModelOptions: [CodexModelOption] {

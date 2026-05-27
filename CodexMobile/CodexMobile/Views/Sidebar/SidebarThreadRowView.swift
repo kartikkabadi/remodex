@@ -81,6 +81,8 @@ struct SidebarThreadRowView: View {
                 // Keep trailing metadata inside the main stack so long titles truncate before it.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        RuntimeProviderLogo(agentRuntime: thread.agentRuntime, size: 13)
+
                         // Pinned glyph hidden on the row itself: pinned threads already
                         // live under the "Pinned" section header, so the per-row badge
                         // was redundant. Kept the `isPinned` plumbing for the context

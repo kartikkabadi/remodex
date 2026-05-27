@@ -326,12 +326,21 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         guard input.runtimeState.isOpenCodeThread else { return nil }
         let agents = input.runtimeState.orderedAgentOptions
         guard !agents.isEmpty else {
+            if let errorMessage = input.runtimeState.agentsErrorMessage?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !errorMessage.isEmpty {
+                return UIMenu(title: "Agent", subtitle: "Unavailable", children: [
+                    disabledInfoAction(title: errorMessage),
+                ])
+            }
             if input.runtimeState.isAgentListLoading {
                 return UIMenu(title: "Agent", subtitle: "Loading…", children: [
                     disabledInfoAction(title: "Loading agents…"),
                 ])
             }
-            return nil
+            return UIMenu(title: "Agent", subtitle: "No agents", children: [
+                disabledInfoAction(title: "No agents available from this bridge."),
+            ])
         }
 
         let actions: [UIMenuElement] = agents.map { agent in

@@ -479,4 +479,96 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
             defaultReasoningEffort: "low"
         )
     }
+
+    func testCodexThreadDecodesAgentRuntimeFromThreadReadPayload() throws {
+        let payload: JSONValue = .object([
+            "id": .string("thread-opencode"),
+            "agentRuntime": .string("opencode"),
+        ])
+        let data = try JSONEncoder().encode(payload)
+        let thread = try JSONDecoder().decode(CodexThread.self, from: data)
+
+        XCTAssertEqual(thread.agentRuntime, "opencode")
+        XCTAssertTrue(thread.isOpenCodeAgentRuntime)
+    }
+
+    func testCodexThreadDefaultsAgentRuntimeToCodexWhenMissing() throws {
+        let payload: JSONValue = .object([
+            "id": .string("thread-codex"),
+        ])
+        let data = try JSONEncoder().encode(payload)
+        let thread = try JSONDecoder().decode(CodexThread.self, from: data)
+
+        XCTAssertEqual(thread.agentRuntime, "codex")
+        XCTAssertFalse(thread.isOpenCodeAgentRuntime)
+    }
+
+    func testPreferredAgentRuntimePersistsAcrossServiceInstances() {
+        let suiteName = "CodexThreadRuntimeOverrideTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let firstService = CodexService(defaults: defaults)
+        Self.retainedServices.append(firstService)
+        firstService.setPreferredAgentRuntime("opencode")
+
+        let secondService = CodexService(defaults: defaults)
+        Self.retainedServices.append(secondService)
+        XCTAssertEqual(secondService.preferredAgentRuntime, "opencode")
+    }
+
+    func testPreferredRuntimeMismatchHintWhenConnectedRuntimeDiffers() {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+        service.setPreferredAgentRuntime("opencode")
+        service.learnBridgeRuntimeCapabilitiesFromInitializeResponse(
+            RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "capabilities": .object([
+                        "agentRuntime": .string("codex"),
+                        "supportsAgents": .bool(false),
+                        "supportsVariants": .bool(false),
+                        "requiresOpenaiAuth": .bool(true),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        )
+
+        XCTAssertEqual(
+            service.preferredRuntimeMismatchHint,
+            "Connected to a Codex bridge. Switch on this Mac to use OpenCode."
+        )
+    }
+
+    func testFetchAgentListSurfacesErrorMessageWithoutThrowingFromRefreshPath() async {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+        service.bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
+            agentRuntime: "opencode",
+            supportsAgents: true,
+            supportsVariants: true,
+            requiresOpenaiAuth: false
+        )
+        service.requestTransportOverride = { method, _ in
+            if method == "agent/list" {
+                throw CodexServiceError.rpcError(
+                    RPCError(code: -32000, message: "agent catalog offline")
+                )
+            }
+            return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+        }
+
+        do {
+            try await service.fetchAgentList()
+            XCTFail("Expected fetchAgentList to throw")
+        } catch {
+            // Expected.
+        }
+
+        XCTAssertEqual(service.agentsErrorMessage, "RPC error -32000: agent catalog offline")
+    }
 }
