@@ -1152,6 +1152,46 @@ test("T1-2 collaborationMode/list returns unsupported when plan agent missing", 
   assert.equal(parsed.result.modes[0].supported, false);
 });
 
+test("T2-1 agent/list returns filtered native and custom agents", async () => {
+  const state = createRouteTestState();
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/agent")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify([
+          { id: "build", name: "Build" },
+          { id: "plan", name: "Plan" },
+          { id: "compaction", name: "Compaction" },
+          { id: "my-agent", name: "My Agent", description: "Custom" },
+        ]),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+  const lines = [];
+  routeInboundJsonRpc(
+    state,
+    JSON.stringify({ id: 44, method: "agent/list", params: {} }),
+    (line) => lines.push(line),
+  );
+  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.id, 44);
+  assert.ok(Array.isArray(parsed.result.agents));
+  assert.equal(parsed.result.agents.length, 3);
+  assert.deepEqual(
+    parsed.result.agents.map((entry) => entry.id).sort(),
+    ["build", "my-agent", "plan"],
+  );
+  const custom = parsed.result.agents.find((entry) => entry.id === "my-agent");
+  assert.equal(custom.isCustom, true);
+  assert.equal(custom.displayName, "My Agent");
+});
+
 test("handleUnsupportedMethod refuses voice/transcribe and turn/steer", () => {
   const lines = [];
   const emit = (line) => lines.push(line);

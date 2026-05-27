@@ -835,6 +835,7 @@ const INBOUND_REQUEST_HANDLERS = {
   "thread/name/set": handleThreadNameSetRequest,
   "turn/start": handleTurnStartRequest,
   "turn/interrupt": handleTurnInterruptRequest,
+  "agent/list": handleAgentListRequest,
   "collaborationMode/list": handleCollaborationModeListRequest,
 };
 
@@ -920,6 +921,88 @@ async function handleInitializeRequest(state, request, emit) {
   }));
 }
 
+const HIDDEN_OPENCODE_AGENT_IDS = new Set(["compaction", "title", "summary"]);
+const NATIVE_OPENCODE_AGENT_IDS = new Set(["build", "plan", "general", "explore", "scout"]);
+
+/**
+ * Fetches `/agent` from opencode serve and caches for 60 s.
+ *
+ * @param {OpenCodeTransportState} state
+ * @returns {Promise<object[]>}
+ */
+async function fetchOpenCodeAgentListRaw(state) {
+  const cached = state.agentsCache;
+  if (cached && Date.now() - cached.fetchedAt < 60_000) {
+    return cached.agents;
+  }
+
+  await ensureOpenCodeServer(state.server, state.options);
+  const result = await openCodeFetch(state.server, "/agent", {
+    method: "GET",
+    fetchImpl: state.options.fetchImpl,
+  });
+  if (!result.__opencodeError && Array.isArray(result)) {
+    state.agentsCache = { agents: result, fetchedAt: Date.now() };
+    return result;
+  }
+
+  state.agentsCache = { agents: [], fetchedAt: Date.now() };
+  return [];
+}
+
+/**
+ * Maps OpenCode agents to Codex-shaped picker entries for iOS `agent/list`.
+ *
+ * @param {object[]} agents
+ * @returns {object[]}
+ */
+function mapOpenCodeAgentsForPicker(agents) {
+  const filtered = [];
+  for (const agent of agents) {
+    if (!agent || typeof agent.id !== "string") {
+      continue;
+    }
+    const id = agent.id.toLowerCase();
+    if (HIDDEN_OPENCODE_AGENT_IDS.has(id)) {
+      continue;
+    }
+    filtered.push({
+      id: agent.id,
+      displayName: agent.name || agent.id,
+      mode: agent.id,
+      isCustom: !NATIVE_OPENCODE_AGENT_IDS.has(id),
+      description: agent.description != null ? String(agent.description) : undefined,
+    });
+  }
+  return filtered;
+}
+
+/**
+ * `agent/list` returns build/plan/custom agents from `GET /agent`.
+ *
+ * @param {OpenCodeTransportState} state
+ * @param {ParsedJsonRpc} request
+ * @param {(line: string) => void} emit
+ * @returns {Promise<void>}
+ */
+async function handleAgentListRequest(state, request, emit) {
+  try {
+    const agents = await fetchOpenCodeAgentListRaw(state);
+    emit(makeJsonRpcResponse(request.id, { agents: mapOpenCodeAgentsForPicker(agents) }));
+  } catch (error) {
+    console.warn(
+      `${state.options.logPrefix || "[remodex]"} Failed to fetch agent list:`,
+      error,
+    );
+    emit(makeJsonRpcError(
+      request.id,
+      -32603,
+      "Failed to fetch agent list from OpenCode.",
+      { errorCode: "agent_list_fetch_failed" },
+    ));
+  }
+}
+
 /**
  * Caches agent list 60 s. On fetch error, returns empty array (does not crash).
  *
@@ -930,26 +1013,10 @@ async function handleInitializeRequest(state, request, emit) {
  */
 async function handleCollaborationModeListRequest(state, request, emit) {
   let agents = [];
-
-  const cached = state.agentsCache;
-  if (cached && Date.now() - cached.fetchedAt < 60_000) {
-    agents = cached.agents;
-  } else {
-    try {
-      await ensureOpenCodeServer(state.server, state.options);
-      const result = await openCodeFetch(state.server, "/agent", {
-        method: "GET",
-        fetchImpl: state.options.fetchImpl,
-      });
-      if (!result.__opencodeError && Array.isArray(result)) {
-        agents = result;
-        state.agentsCache = { agents, fetchedAt: Date.now() };
-      } else {
-        state.agentsCache = { agents: [], fetchedAt: Date.now() };
-      }
-    } catch {
-      state.agentsCache = { agents: [], fetchedAt: Date.now() };
-    }
+  try {
+    agents = await fetchOpenCodeAgentListRaw(state);
+  } catch {
+    agents = [];
   }
 
   const hasPlan = agents.some(
