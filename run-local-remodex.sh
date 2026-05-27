@@ -13,10 +13,11 @@ BRIDGE_DIR="${ROOT_DIR}/phodex-bridge"
 RELAY_DIR="${ROOT_DIR}/relay"
 RELAY_SERVER_MODULE="${RELAY_DIR}/server.js"
 
-RELAY_BIND_HOST="${RELAY_BIND_HOST:-0.0.0.0}"
+RELAY_BIND_HOST="${RELAY_BIND_HOST:-127.0.0.1}"
 RELAY_PORT="${RELAY_PORT:-9000}"
 RELAY_HOSTNAME="${RELAY_HOSTNAME:-}"
 RELAY_URL="${RELAY_URL:-}"
+REMODEX_PROVIDER_FLAG=""
 RELAY_BRIDGE_HOST=""
 RELAY_PID=""
 BRIDGE_PID=""
@@ -35,17 +36,22 @@ usage() {
 Usage: ./run-local-remodex.sh [options]
 
 Options:
-  --hostname HOSTNAME   Hostname or IP the iPhone should use to reach the relay
-  --relay-url URL       Full relay URL to advertise, for tunnels or reverse proxies
-  --bind-host HOST      Interface/address the local relay should listen on
+  --opencode            Start the bridge with REMODEX_PROVIDER=opencode (OpenCode runtime)
+  --hostname HOSTNAME   Hostname or IP advertised in the pairing URL (does not widen bind)
+  --relay-url URL       Full relay URL to advertise (Tailscale wss:// preferred for phone)
+  --bind-host HOST      Interface/address the local relay listens on (default loopback)
   --port PORT           Relay port to listen on
   --help                Show this help text
 
 Defaults:
-  --bind-host           0.0.0.0
+  --bind-host           127.0.0.1 (Mac-only / simulator loopback via PrivateOverrides)
   --port                9000
   --hostname            macOS LocalHostName.local, then hostname, then localhost
   --relay-url           auto-built as ws://<hostname>:<port>/relay
+
+Phone or same-LAN device pairing requires an explicit profile (see Docs/plans/opencode-local-dev.md):
+  --bind-host 0.0.0.0 --hostname <Mac-LAN-IP>   trusted LAN only
+  --relay-url wss://<tailscale-host>/relay/...   preferred for physical iPhone
 EOF
 }
 
@@ -77,6 +83,10 @@ parse_args() {
         require_value "--port" "$#"
         RELAY_PORT="$2"
         shift 2
+        ;;
+      --opencode)
+        REMODEX_PROVIDER_FLAG="opencode"
+        shift
         ;;
       --help)
         usage
@@ -332,7 +342,7 @@ start_embedded_relay() {
   node <<'NODE' &
 const { createRelayServer } = require(process.env.RELAY_SERVER_MODULE);
 
-const host = process.env.RELAY_BIND_HOST || "0.0.0.0";
+const host = process.env.RELAY_BIND_HOST || "127.0.0.1";
 const port = Number.parseInt(process.env.RELAY_PORT || "9000", 10);
 const { server } = createRelayServer();
 
@@ -370,7 +380,11 @@ start_bridge() {
   # This local helper should print the QR in the current terminal immediately.
   # Use the foreground bridge path instead of the macOS launchd wrapper so QR
   # rendering does not depend on daemon state being written back first.
-  REMODEX_RELAY="${RELAY_URL}" node ./bin/remodex.js run &
+  if [[ -n "${REMODEX_PROVIDER_FLAG}" ]]; then
+    REMODEX_RELAY="${RELAY_URL}" REMODEX_PROVIDER="${REMODEX_PROVIDER_FLAG}" node ./bin/remodex.js run &
+  else
+    REMODEX_RELAY="${RELAY_URL}" node ./bin/remodex.js run &
+  fi
   BRIDGE_PID=$!
 }
 
