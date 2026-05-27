@@ -110,6 +110,38 @@ The app uses SwiftUI and the current project target is iOS 18.6. No CocoaPods or
 5. Try git operations from the phone (commit, push, branch switching)
 6. Reopen the app and verify that the trusted reconnect path is used instead of forcing a fresh QR immediately
 
+### OpenCode runtime (sim or device)
+
+Use **one** launcher (relay + bridge). Do not start a second `npm start` while it is running.
+
+Full profiles: [`Docs/plans/opencode-local-dev.md`](Docs/plans/opencode-local-dev.md).
+
+**Simulator (loopback default):**
+
+```sh
+cp CodexMobile/BuildSupport/PrivateOverrides.xcconfig.example \
+   CodexMobile/BuildSupport/PrivateOverrides.xcconfig
+# Set PHODEX_DEFAULT_RELAY_URL = ws://127.0.0.1:9000/relay
+
+./run-local-remodex.sh --opencode
+```
+
+Pair in the sim with **Paste pairing code** (camera QR is unreliable). Requires `opencode` on PATH (or `REMODEX_OPENCODE_COMMAND`).
+
+**Physical iPhone (explicit profile):**
+
+```sh
+# LAN (trusted network only)
+./run-local-remodex.sh --opencode --bind-host 0.0.0.0 --hostname <Mac-LAN-IP>
+
+# Or Tailscale (preferred)
+./run-local-remodex.sh --opencode --relay-url wss://<tailscale-host>/relay/...
+```
+
+After connect, Settings shows the connected runtime. Use composer menus for model → variant → agent, then send a turn. `/status` is hidden on OpenCode.
+
+Physical iPhone remains the final ship check (background, Local Network, real Wi‑Fi). See [`Docs/plans/opencode-runtime-status.md`](Docs/plans/opencode-runtime-status.md).
+
 ### Environment variables
 
 For OSS/local development, prefer the launcher above. If you want to point the bridge process at your own relay manually without the launcher, export `REMODEX_RELAY` in your shell:

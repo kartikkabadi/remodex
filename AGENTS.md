@@ -41,8 +41,12 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 ## Active development (OpenCode lane)
 
 - Work on branch `multi-agents/opencode` (from official `Emanuele-web04/remodex` `main`).
-- Tracer: https://github.com/kartikkabadi/remodex/issues/53
+- Tracer: https://github.com/kartikkabadi/remodex/issues/53 · PR: https://github.com/kartikkabadi/remodex/pull/54
 - Fork `main` (`8c15fcd`) is archive-only. Do not extend the old 38-commit multi-agent stack.
+- **Docs:** `Docs/adr/001-opencode-runtime-shape.md`, `Docs/plans/opencode-runtime.md`, `opencode-runtime-status.md`, `opencode-local-dev.md`, `opencode-sim-qa-runbook.md`
+- **Relay default:** loopback (`127.0.0.1`); phone QA uses explicit LAN or Tailscale profile in `opencode-local-dev.md` (not default QR alone).
+- **Launcher:** `./run-local-remodex.sh --opencode` — do not run a second bridge via `npm start` while the launcher is up.
+- **Subagents on this lane:** `composer-2.5` only (never `composer-2.5-fast`).
 
 ## Build guardrails
 
