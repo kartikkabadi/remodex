@@ -57,6 +57,6 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 ## Local quick runbook
 
 ```bash
-cd phodex-bridge
-npm start
+./run-local-remodex.sh              # Codex (loopback relay + bridge)
+./run-local-remodex.sh --opencode     # OpenCode lane
 ```

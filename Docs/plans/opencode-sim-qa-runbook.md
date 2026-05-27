@@ -6,7 +6,7 @@
 
 ## Prerequisites (Wave 1 exit gate)
 
-- [ ] Wave 0 + 1a pushed to `fork/multi-agents/opencode`
+- [ ] Wave 0 + 1a pushed to `multi-agents/opencode` on fork `kartikkabadi/remodex`
 - [ ] `127.0.0.1` in `run-local-remodex.sh`, embedded relay snippet, `relay/server.js`
 - [ ] `Docs/adr/001-opencode-runtime-shape.md` on branch
 - [ ] `PrivateOverrides.xcconfig` with `ws://127.0.0.1:9000/relay`
