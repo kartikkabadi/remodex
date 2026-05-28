@@ -136,14 +136,44 @@ extension CodexService {
     ) async throws -> CodexThread {
         let normalizedPreferredProjectPath = CodexThreadStartProjectBinding.normalizedProjectPath(preferredProjectPath)
         // Brand-new chats start from app defaults; per-chat overrides are inherited only on continuation.
-        let explicitServiceTier = runtimeOverride?.overridesServiceTier == true
-            ? normalizedServiceTierForSelectedModel(runtimeOverride?.serviceTier)?.rawValue
-            : runtimeServiceTierForTurn()
+        let runtimeOverrideModelOption = runtimeOverride?.overridesModel == true
+            ? modelOption(
+                forSelectionKey: CodexModelOption.selectionKey(
+                    provider: runtimeOverride?.modelProvider,
+                    modelId: runtimeOverride?.modelId
+                )
+            )
+            : nil
+        let explicitModelIdentifier = runtimeOverride?.overridesModel == true
+            ? runtimeOverrideModelOption?.model ?? runtimeOverride?.modelId
+            : runtimeModelIdentifierForTurn()
+        let explicitModelProvider = runtimeOverride?.overridesModel == true
+            ? (
+                runtimeOverrideModelOption?.modelProvider
+                    ?? CodexModelOption.normalizedProvider(runtimeOverride?.modelProvider)
+            )
+            : runtimeModelProviderForTurn()
+        let explicitServiceTier: String? = {
+            guard runtimeOverride?.overridesServiceTier == true else {
+                return runtimeServiceTierForTurn()
+            }
+            guard let serviceTier = runtimeOverride?.serviceTier else {
+                return nil
+            }
+            if let runtimeOverrideModelOption {
+                return runtimeOverrideModelOption.supportsServiceTier(serviceTier) ? serviceTier.rawValue : nil
+            }
+            if runtimeOverride?.overridesModel == true {
+                return serviceTier.rawValue
+            }
+            return normalizedServiceTierForSelectedModel(serviceTier)?.rawValue
+        }()
         var includesServiceTier = explicitServiceTier != nil
 
         while true {
             let params = CodexThreadStartProjectBinding.makeThreadStartParams(
-                modelIdentifier: runtimeModelIdentifierForTurn(),
+                modelIdentifier: explicitModelIdentifier,
+                modelProvider: explicitModelProvider,
                 preferredProjectPath: normalizedPreferredProjectPath,
                 serviceTier: includesServiceTier ? explicitServiceTier : nil
             )
@@ -997,6 +1027,7 @@ enum CodexThreadStartProjectBinding {
 
     static func makeThreadStartParams(
         modelIdentifier: String?,
+        modelProvider: String? = nil,
         preferredProjectPath: String?,
         serviceTier: String?
     ) -> RPCObject {
@@ -1004,6 +1035,9 @@ enum CodexThreadStartProjectBinding {
 
         if let modelIdentifier {
             params["model"] = .string(modelIdentifier)
+        }
+        if let modelProvider {
+            params["modelProvider"] = .string(CodexModelOption.normalizedProvider(modelProvider))
         }
 
         if let preferredProjectPath {
@@ -1180,7 +1214,7 @@ extension CodexService {
         let requestedSignature = CodexThreadResumeRequestSignature(
             projectPath: CodexThreadStartProjectBinding.normalizedProjectPath(preferredProjectPath)
                 ?? thread(for: threadId)?.gitWorkingDirectory,
-            modelIdentifier: modelIdentifierOverride ?? runtimeModelIdentifierForTurn()
+            modelIdentifier: modelIdentifierOverride ?? runtimeModelIdentifierForTurn(threadId: threadId)
         )
         let refreshGeneration = currentPerThreadRefreshGeneration(for: threadId)
         if let existingTask = threadResumeTaskByThreadID[threadId] {
@@ -2336,8 +2370,14 @@ extension CodexService {
         ]
         // Keep the legacy top-level fields populated so plan-mode turns still honor
         // the user's selected model on runtimes that do not read collaboration settings.
-        if let modelIdentifier = runtimeModelIdentifierForTurn() {
+        let modelProvider = runtimeModelProviderForTurn(threadId: threadId)
+        if let modelIdentifier = runtimeModelIdentifierForTurn(threadId: threadId) {
             params["model"] = .string(modelIdentifier)
+        }
+        params["modelProvider"] = .string(modelProvider)
+        if modelProvider != "codex",
+           let workingDirectory = thread(for: threadId)?.gitWorkingDirectory {
+            params["cwd"] = .string(workingDirectory)
         }
         if let effort = selectedReasoningEffortForSelectedModel(threadId: threadId) {
             params["effort"] = .string(effort)
@@ -2364,8 +2404,8 @@ extension CodexService {
             return nil
         }
 
-        let resolvedModel = runtimeModelIdentifierForTurn()
-            ?? selectedModelOption()?.model
+        let resolvedModel = runtimeModelIdentifierForTurn(threadId: threadId)
+            ?? selectedModelOption(threadId: threadId)?.model
             ?? availableModels.first?.model
             ?? selectedModelId
         guard let resolvedModel,
@@ -2390,6 +2430,7 @@ extension CodexService {
             "mode": .string(mode.rawValue),
             "settings": .object([
                 "model": .string(resolvedModel),
+                "model_provider": .string(runtimeModelProviderForTurn(threadId: threadId)),
                 "reasoning_effort": selectedReasoningEffortForSelectedModel(
                     threadId: threadId
                 ).map(JSONValue.string) ?? .null,

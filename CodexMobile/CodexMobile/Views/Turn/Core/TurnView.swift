@@ -1276,16 +1276,18 @@ struct TurnView: View {
 
     private var reasoningDisplayOptions: [TurnComposerReasoningDisplayOption] {
         TurnComposerMetaMapper.reasoningDisplayOptions(
-            from: codex.supportedReasoningEffortsForSelectedModel().map(\.reasoningEffort)
+            from: codex.supportedReasoningEffortsForSelectedModel(threadId: thread.id).map(\.reasoningEffort)
         )
     }
 
     private var selectedModelTitle: String {
-        if let selectedModel = codex.selectedModelOption() {
+        if let selectedModel = codex.selectedModelOption(threadId: thread.id) {
             return TurnComposerMetaMapper.modelTitle(for: selectedModel)
         }
 
-        return TurnComposerMetaMapper.modelTitle(forIdentifier: codex.selectedModelId)
+        return TurnComposerMetaMapper.modelTitle(
+            forIdentifier: codex.visibleSelectedModelIDForComposer(threadId: thread.id) ?? codex.selectedModelId
+        )
     }
 
     private var approvalForThread: CodexApprovalRequest? {

@@ -32,15 +32,20 @@ struct TurnComposerRuntimeState: Equatable {
 
     static func resolve(
         codex: CodexService,
+        threadId: String? = nil,
         reasoningDisplayOptions: [TurnComposerReasoningDisplayOption]
     ) -> TurnComposerRuntimeState {
+        let selectedModel = codex.selectedModelOption(threadId: threadId)
+        let threadOverride = codex.threadRuntimeOverride(for: threadId)
         return TurnComposerRuntimeState(
             reasoningDisplayOptions: reasoningDisplayOptions,
-            effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(),
-            selectedReasoningEffort: codex.selectedReasoningEffort,
-            reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || codex.selectedModelOption() == nil,
-            selectedServiceTier: codex.effectiveServiceTier(),
-            supportsFastMode: codex.selectedModelSupportsServiceTier(.fast)
+            effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(threadId: threadId),
+            selectedReasoningEffort: threadOverride?.overridesReasoning == true
+                ? threadOverride?.reasoningEffort
+                : codex.selectedReasoningEffort,
+            reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || selectedModel == nil,
+            selectedServiceTier: codex.effectiveServiceTier(for: threadId),
+            supportsFastMode: codex.selectedModelSupportsServiceTier(.fast, threadId: threadId)
         )
     }
 }

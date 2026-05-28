@@ -15,9 +15,8 @@
 // * Submenus use `UIMenu.Options.singleSelection` so UIKit draws/clears the
 //   checkmarks for us. We pass `.on` for the active item as a hint; UIKit
 //   reconciles state when singleSelection is set.
-// * Long model lists keep the existing "featured + Other models…" split so the
-//   menu stays glanceable. The "Other models" action opens the existing
-//   SwiftUI sheet via an injected callback.
+// * Model options are grouped by runtime provider so Codex/Cursor/OpenCode/etc.
+//   can share one picker without colliding on ids or display labels.
 
 import UIKit
 
@@ -31,8 +30,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let selectedModelTitle: String
         let isLoadingModels: Bool
         let isRuntimeSelectionLoading: Bool
-        let featuredModelIdentifiers: Set<String>
-        let onRequestAllModelsSheet: () -> Void
     }
 
     static func makeMenu(_ input: Input) -> UIMenu {
@@ -73,26 +70,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 ]
             }
 
-            let featured = featuredOrderedModels(input)
-            var items: [UIMenuElement] = featured.map { model in
-                modelAction(model: model, input: input)
-            }
-
-            let hasOthers = input.orderedModelOptions.contains { model in
-                !featured.contains(where: { $0.id == model.id })
-            }
-            if hasOthers {
-                items.append(
-                    UIAction(
-                        title: "Other models…",
-                        image: RemodexIcon.menuUIImage(systemName: "ellipsis")
-                    ) { _ in
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        input.onRequestAllModelsSheet()
-                    }
-                )
-            }
-            return items
+            return providerMenus(input)
         }()
 
         // singleSelection paints the checkmark on the `.on` child for us.
@@ -100,7 +78,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             title: "Model",
             subtitle: subtitle,
             image: RemodexIcon.menuUIImage(systemName: "cube"),
-            options: [.singleSelection],
+            options: [],
             children: modelChildren
         )
     }
@@ -114,32 +92,50 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         return UIAction(
             title: title,
             image: image,
-            state: model.id == input.selectedModelID ? .on : .off
+            state: model.selectionKey == input.selectedModelID ? .on : .off
         ) { _ in
             HapticFeedback.shared.triggerImpactFeedback(style: .light)
-            input.runtimeActions.selectModel(model.id)
+            input.runtimeActions.selectModel(model.selectionKey)
         }
     }
 
-    private static func featuredOrderedModels(_ input: Input) -> [CodexModelOption] {
-        var seen = Set<String>()
-        var result: [CodexModelOption] = []
-
-        for model in input.orderedModelOptions {
-            let normalizedID = model.id.lowercased()
-            let normalizedModel = model.model.lowercased()
-            let isFeatured = input.featuredModelIdentifiers.contains(normalizedID)
-                || input.featuredModelIdentifiers.contains(normalizedModel)
-            guard isFeatured, seen.insert(model.id).inserted else { continue }
-            result.append(model)
+    private static func providerMenus(_ input: Input) -> [UIMenuElement] {
+        let grouped = Dictionary(grouping: input.orderedModelOptions, by: \.modelProvider)
+        let providers = grouped.keys.sorted { lhs, rhs in
+            let lhsRank = providerRank(lhs)
+            let rhsRank = providerRank(rhs)
+            if lhsRank == rhsRank {
+                return TurnComposerMetaMapper.providerTitle(for: lhs) < TurnComposerMetaMapper.providerTitle(for: rhs)
+            }
+            return lhsRank < rhsRank
         }
 
-        if let selectedID = input.selectedModelID,
-           seen.insert(selectedID).inserted,
-           let selected = input.orderedModelOptions.first(where: { $0.id == selectedID }) {
-            result.append(selected)
+        return providers.compactMap { provider in
+            guard let models = grouped[provider], !models.isEmpty else { return nil }
+            return UIMenu(
+                title: TurnComposerMetaMapper.providerTitle(for: provider),
+                image: RuntimeProviderIcon.menuUIImage(for: provider),
+                options: [.singleSelection],
+                children: models.map { model in
+                    modelAction(model: model, input: input)
+                }
+            )
         }
-        return result
+    }
+
+    private static func providerRank(_ provider: String) -> Int {
+        switch CodexModelOption.normalizedProvider(provider) {
+        case "codex":
+            return 0
+        case "cursor":
+            return 1
+        case "opencode":
+            return 2
+        case "claude":
+            return 3
+        default:
+            return 100
+        }
     }
 
     // MARK: - Intelligence (reasoning effort)

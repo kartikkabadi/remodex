@@ -690,16 +690,18 @@ struct NewChatDraftView: View {
 
     private var reasoningDisplayOptions: [TurnComposerReasoningDisplayOption] {
         TurnComposerMetaMapper.reasoningDisplayOptions(
-            from: codex.supportedReasoningEffortsForSelectedModel().map(\.reasoningEffort)
+            from: codex.supportedReasoningEffortsForSelectedModel(threadId: route.id).map(\.reasoningEffort)
         )
     }
 
     private var selectedModelTitle: String {
-        if let selectedModel = codex.selectedModelOption() {
+        if let selectedModel = codex.selectedModelOption(threadId: route.id) {
             return TurnComposerMetaMapper.modelTitle(for: selectedModel)
         }
 
-        return TurnComposerMetaMapper.modelTitle(forIdentifier: codex.selectedModelId)
+        return TurnComposerMetaMapper.modelTitle(
+            forIdentifier: codex.visibleSelectedModelIDForComposer(threadId: route.id) ?? codex.selectedModelId
+        )
     }
 
     // Mirrors the regular TurnView mic state so empty drafts can record before a runtime thread exists.

@@ -67,7 +67,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
 
         service.setSelectedModelId(nil)
 
-        XCTAssertEqual(service.selectedModelId, "gpt-5.5")
+        XCTAssertEqual(service.selectedModelId, "codex:gpt-5.5")
         XCTAssertEqual(service.selectedReasoningEffort, "medium")
         XCTAssertEqual(service.runtimeModelIdentifierForTurn(), "gpt-5.5")
         XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(), "medium")
@@ -150,14 +150,40 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         firstService.normalizeRuntimeSelectionsAfterModelsUpdate()
 
         XCTAssertTrue(firstService.hasPersistedSelectedModelId)
-        XCTAssertEqual(firstService.selectedModelId, "gpt-5.5")
-        XCTAssertEqual(defaults.string(forKey: CodexService.selectedModelIdDefaultsKey), "gpt-5.5")
+        XCTAssertEqual(firstService.selectedModelId, "codex:gpt-5.5")
+        XCTAssertEqual(defaults.string(forKey: CodexService.selectedModelIdDefaultsKey), "codex:gpt-5.5")
 
         let secondService = CodexService(defaults: defaults)
         Self.retainedServices.append(secondService)
 
         XCTAssertTrue(secondService.hasPersistedSelectedModelId)
-        XCTAssertEqual(secondService.selectedModelId, "gpt-5.5")
+        XCTAssertEqual(secondService.selectedModelId, "codex:gpt-5.5")
+    }
+
+    func testCursorModelOverrideRoutesTurnWithoutCodexReasoningDefaults() async throws {
+        let service = makeService()
+        service.isConnected = true
+        let cursorModel = makeCursorModel()
+        service.availableModels = [makeGPT55Model(), cursorModel]
+        service.setThreadModelOverride(cursorModel, for: "thread-cursor")
+
+        var capturedTurnStartParams: [JSONValue] = []
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "turn/start")
+            capturedTurnStartParams.append(params ?? .null)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["turnId": .string("turn-cursor")]),
+                includeJSONRPC: false
+            )
+        }
+
+        try await service.sendTurnStart("Use Cursor", to: "thread-cursor")
+
+        let payload = capturedTurnStartParams.first?.objectValue
+        XCTAssertEqual(payload?["model"]?.stringValue, "composer-2.5[fast=true]")
+        XCTAssertEqual(payload?["modelProvider"]?.stringValue, "cursor")
+        XCTAssertNil(payload?["effort"]?.stringValue)
     }
 
     func testContinuationInheritsThreadRuntimeOverrides() {
@@ -309,6 +335,19 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
                 CodexReasoningEffortOption(reasoningEffort: "low", description: "Low"),
             ],
             defaultReasoningEffort: "low"
+        )
+    }
+
+    private func makeCursorModel() -> CodexModelOption {
+        CodexModelOption(
+            id: "composer-2.5[fast=true]",
+            model: "composer-2.5[fast=true]",
+            modelProvider: "cursor",
+            displayName: "Composer 2.5",
+            description: "Cursor test model",
+            isDefault: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: nil
         )
     }
 }

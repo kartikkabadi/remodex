@@ -104,11 +104,12 @@ struct TurnComposerHostView: View {
         )
         let runtimeState = TurnComposerRuntimeState.resolve(
             codex: codex,
+            threadId: thread.id,
             reasoningDisplayOptions: reasoningDisplayOptions
         )
-        let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex)
-        let selectedModelID = codex.visibleSelectedModelIDForComposer()
-        let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer()
+        let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex, threadId: thread.id)
+        let selectedModelID = codex.visibleSelectedModelIDForComposer(threadId: thread.id)
+        let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer(threadId: thread.id)
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
             && !SidebarThreadGrouping.isRootlessChatThread(thread)
 

@@ -11,13 +11,29 @@ final class CodexThreadStartProjectBindingTests: XCTestCase {
     func testMakeThreadStartParamsIncludesModelAndCwd() {
         let params = CodexThreadStartProjectBinding.makeThreadStartParams(
             modelIdentifier: "gpt-5",
+            modelProvider: "codex",
             preferredProjectPath: "/Users/me/work/project",
             serviceTier: "fast"
         )
 
         XCTAssertEqual(params["model"]?.stringValue, "gpt-5")
+        XCTAssertEqual(params["modelProvider"]?.stringValue, "codex")
         XCTAssertEqual(params["cwd"]?.stringValue, "/Users/me/work/project")
         XCTAssertEqual(params["serviceTier"]?.stringValue, "fast")
+    }
+
+    func testMakeThreadStartParamsNormalizesCursorProviderAlias() {
+        let params = CodexThreadStartProjectBinding.makeThreadStartParams(
+            modelIdentifier: "composer-2.5[fast=true]",
+            modelProvider: "cursor-agent",
+            preferredProjectPath: "/Users/me/work/project",
+            serviceTier: nil
+        )
+
+        XCTAssertEqual(params["model"]?.stringValue, "composer-2.5[fast=true]")
+        XCTAssertEqual(params["modelProvider"]?.stringValue, "cursor")
+        XCTAssertEqual(params["cwd"]?.stringValue, "/Users/me/work/project")
+        XCTAssertNil(params["serviceTier"])
     }
 
     func testMakeThreadStartParamsSkipsEmptyCwd() {
