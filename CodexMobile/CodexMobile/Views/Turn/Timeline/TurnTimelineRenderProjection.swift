@@ -351,7 +351,7 @@ enum TurnTimelineRenderProjection {
             }
 
             fallbackFinalIndexByTurn[turnID] = index
-            if message.assistantPhase != nil {
+            if isKnownAssistantPhase(message.assistantPhase) {
                 turnsWithExplicitAssistantPhase.insert(turnID)
             }
             if isFinalAnswerAssistantPhase(message.assistantPhase) {
@@ -670,6 +670,10 @@ enum TurnTimelineRenderProjection {
         guard !text.isEmpty else { return false }
         guard text.utf8.count <= smallWhitespaceScanByteLimit else { return true }
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func isKnownAssistantPhase(_ phase: String?) -> Bool {
+        isCommentaryAssistantPhase(phase) || isFinalAnswerAssistantPhase(phase)
     }
 
     private static func isCommentaryAssistantPhase(_ phase: String?) -> Bool {

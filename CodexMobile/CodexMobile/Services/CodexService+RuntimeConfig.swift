@@ -890,8 +890,7 @@ extension CodexService {
         let validVariantIds = Set(resolvedModel.supportedVariants.map(\.id))
 
         if let selectedVariantId = selectedVariantId(),
-           !validVariantIds.isEmpty,
-           !validVariantIds.contains(selectedVariantId) {
+           validVariantIds.isEmpty || !validVariantIds.contains(selectedVariantId) {
             setSelectedVariantId(nil)
         }
 
@@ -901,13 +900,16 @@ extension CodexService {
             }
             var changed = false
 
-            if override.overridesVariant,
-               let variantId = normalizedRuntimeSelectionIdentifier(override.variantId),
-               !validVariantIds.isEmpty,
-               !validVariantIds.contains(variantId) {
-                override.variantId = nil
-                override.overridesVariant = false
-                changed = true
+            if override.overridesVariant {
+                let variantId = normalizedRuntimeSelectionIdentifier(override.variantId)
+                let variantIsStale = variantId == nil
+                    || validVariantIds.isEmpty
+                    || (variantId.map { !validVariantIds.contains($0) } ?? true)
+                if variantIsStale {
+                    override.variantId = nil
+                    override.overridesVariant = false
+                    changed = true
+                }
             }
 
             if override.overridesReasoning,

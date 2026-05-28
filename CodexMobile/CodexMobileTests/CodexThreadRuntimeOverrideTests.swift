@@ -376,6 +376,56 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         XCTAssertEqual(service.resolvedAgentId(for: "thread-plan"), "plan")
     }
 
+    func testThreadRuntimeOverrideDecodesLegacyAgentAndVariantWithoutOverrideFlags() throws {
+        let legacyJSON = """
+        {
+          "thread-legacy": {
+            "agentId": "build",
+            "variantId": "high",
+            "overridesReasoning": false,
+            "overridesServiceTier": false
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(
+            [String: CodexThreadRuntimeOverride].self,
+            from: legacyJSON
+        )
+
+        let override = try XCTUnwrap(decoded["thread-legacy"])
+        XCTAssertEqual(override.agentId, "build")
+        XCTAssertEqual(override.variantId, "high")
+        XCTAssertTrue(override.overridesAgent)
+        XCTAssertTrue(override.overridesVariant)
+        XCTAssertFalse(override.isEmpty)
+    }
+
+    func testPruneInvalidVariantSelectionsClearsStaleGlobalAndThreadOverrides() {
+        let service = makeService()
+        service.availableModels = [
+            CodexModelOption(
+                id: "gpt-5.4",
+                model: "gpt-5.4",
+                displayName: "GPT-5.4",
+                description: "Test model",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: nil,
+                supportedVariants: []
+            ),
+        ]
+        service.setSelectedModelId("gpt-5.4")
+        service.setSelectedVariantId("stale-global")
+        service.setThreadVariantIdOverride("stale-thread", for: "thread-variant")
+
+        service.normalizeRuntimeSelectionsAfterModelsUpdate()
+
+        XCTAssertNil(service.selectedVariantId())
+        XCTAssertNil(service.resolvedVariantId(for: "thread-variant"))
+        XCTAssertNil(service.threadRuntimeOverride(for: "thread-variant"))
+    }
+
     func testUnsupportedThreadReasoningOverrideIsNotReportedAsActive() {
         let service = makeService()
         service.availableModels = [makeLowOnlyModel()]

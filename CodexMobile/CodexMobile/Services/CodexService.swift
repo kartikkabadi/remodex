@@ -150,15 +150,35 @@ struct CodexBridgeUpdatePrompt: Identifiable, Equatable, Sendable {
     }
 }
 
-struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
+struct CodexThreadRuntimeOverride: Equatable, Sendable {
     var reasoningEffort: String?
     var serviceTierRawValue: String?
     var agentId: String?
     var variantId: String?
     var overridesReasoning: Bool
     var overridesServiceTier: Bool
-    var overridesAgent: Bool = false
-    var overridesVariant: Bool = false
+    var overridesAgent: Bool
+    var overridesVariant: Bool
+
+    init(
+        reasoningEffort: String? = nil,
+        serviceTierRawValue: String? = nil,
+        agentId: String? = nil,
+        variantId: String? = nil,
+        overridesReasoning: Bool = false,
+        overridesServiceTier: Bool = false,
+        overridesAgent: Bool = false,
+        overridesVariant: Bool = false
+    ) {
+        self.reasoningEffort = reasoningEffort
+        self.serviceTierRawValue = serviceTierRawValue
+        self.agentId = agentId
+        self.variantId = variantId
+        self.overridesReasoning = overridesReasoning
+        self.overridesServiceTier = overridesServiceTier
+        self.overridesAgent = overridesAgent
+        self.overridesVariant = overridesVariant
+    }
 
     var serviceTier: CodexServiceTier? {
         guard let serviceTierRawValue else {
@@ -169,6 +189,57 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
 
     var isEmpty: Bool {
         !overridesReasoning && !overridesServiceTier && !overridesAgent && !overridesVariant
+    }
+}
+
+extension CodexThreadRuntimeOverride: Codable {
+    enum CodingKeys: String, CodingKey {
+        case reasoningEffort
+        case serviceTierRawValue
+        case agentId
+        case variantId
+        case overridesReasoning
+        case overridesServiceTier
+        case overridesAgent
+        case overridesVariant
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+        serviceTierRawValue = try container.decodeIfPresent(String.self, forKey: .serviceTierRawValue)
+        agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
+        variantId = try container.decodeIfPresent(String.self, forKey: .variantId)
+        overridesReasoning = try container.decodeIfPresent(Bool.self, forKey: .overridesReasoning) ?? false
+        overridesServiceTier = try container.decodeIfPresent(Bool.self, forKey: .overridesServiceTier) ?? false
+        overridesAgent = try container.decodeIfPresent(Bool.self, forKey: .overridesAgent) ?? false
+        overridesVariant = try container.decodeIfPresent(Bool.self, forKey: .overridesVariant) ?? false
+
+        if !overridesAgent, Self.hasPersistedSelection(agentId) {
+            overridesAgent = true
+        }
+        if !overridesVariant, Self.hasPersistedSelection(variantId) {
+            overridesVariant = true
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
+        try container.encodeIfPresent(serviceTierRawValue, forKey: .serviceTierRawValue)
+        try container.encodeIfPresent(agentId, forKey: .agentId)
+        try container.encodeIfPresent(variantId, forKey: .variantId)
+        try container.encode(overridesReasoning, forKey: .overridesReasoning)
+        try container.encode(overridesServiceTier, forKey: .overridesServiceTier)
+        try container.encode(overridesAgent, forKey: .overridesAgent)
+        try container.encode(overridesVariant, forKey: .overridesVariant)
+    }
+
+    private static func hasPersistedSelection(_ value: String?) -> Bool {
+        guard let value else {
+            return false
+        }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

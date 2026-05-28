@@ -64,14 +64,28 @@ struct SettingsConnectionCard: View {
     }
 
     private var keepAwakeFooter: String? {
-        guard codex.supportsKeepAwakeWhileBridgeRuns else { return nil }
+        Self.keepAwakeFooterText(
+            supportsKeepAwake: codex.supportsKeepAwakeWhileBridgeRuns,
+            keepAwakeEnabled: codex.keepMacAwakeWhileBridgeRuns,
+            isConnected: codex.isConnected
+        )
+    }
 
-        if codex.keepMacAwakeWhileBridgeRuns {
-            return "Keeps your Mac reachable while the bridge is running. Best while charging."
+    static func keepAwakeFooterText(
+        supportsKeepAwake: Bool,
+        keepAwakeEnabled: Bool,
+        isConnected: Bool
+    ) -> String? {
+        guard supportsKeepAwake else {
+            return nil
         }
 
-        if !codex.isConnected {
+        if !isConnected {
             return "Preference is saved on this iPhone and syncs when the bridge reconnects."
+        }
+
+        if keepAwakeEnabled {
+            return "Keeps your Mac reachable while the bridge is running. Best while charging."
         }
 
         return nil

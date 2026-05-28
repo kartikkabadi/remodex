@@ -75,6 +75,8 @@ struct ConnectionRecoverySnapshot: Equatable {
 }
 
 struct ConnectionRecoveryCard: View {
+    static let dismissHitTargetSize: CGFloat = 44
+
     let snapshot: ConnectionRecoverySnapshot
     let onTap: () -> Void
     var onDismiss: (() -> Void)? = nil
@@ -175,12 +177,12 @@ struct ConnectionRecoveryCard: View {
             RemodexIcon.image(systemName: "xmark")
                 .font(AppFont.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
-                .contentShape(Circle())
+                .frame(width: Self.dismissHitTargetSize, height: Self.dismissHitTargetSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.top, 8)
-        .padding(.trailing, 10)
+        .padding(.top, 2)
+        .padding(.trailing, 2)
         .accessibilityLabel("Dismiss")
     }
 }

@@ -404,7 +404,7 @@ final class TurnViewModel {
     @ObservationIgnored var pendingGitWorktreeOpenHandler: ((GitCreateWorktreeResult) -> Void)?
     @ObservationIgnored var pendingManagedGitWorktreeOpenHandler: ((GitCreateManagedWorktreeResult) -> Void)?
     @ObservationIgnored private var cachedSkillSearchIndexByRoot: [String: [TurnSkillSearchIndexEntry]] = [:]
-    @ObservationIgnored private var forceRefreshedSkillMissKeys: Set<String> = []
+    @ObservationIgnored var forceRefreshedSkillMissKeys: Set<String> = []
     @ObservationIgnored private var cachedPluginSearchIndexByRoot: [String: [TurnPluginSearchIndexEntry]] = [:]
     @ObservationIgnored var unsupportedSkillsAutocompleteRoots: Set<String> = []
     @ObservationIgnored var unsupportedPluginsAutocompleteRoots: Set<String> = []
@@ -934,6 +934,7 @@ final class TurnViewModel {
                             .filter { $0.enabled }
                             .map(TurnSkillSearchIndexEntry.init(skill:))
                         self.cachedSkillSearchIndexByRoot[cacheKey] = indexedSkills
+                        self.clearSkillAutocompleteMissRefreshes(cacheKey: cacheKey)
                         self.rememberSkillAutocompleteMissRefresh(
                             query: expectedQuery,
                             cacheKey: cacheKey,
@@ -2829,6 +2830,7 @@ final class TurnViewModel {
         isSkillAutocompleteLoading = false
         skillAutocompleteQuery = ""
         skillAutocompleteTrigger = "$"
+        forceRefreshedSkillMissKeys.removeAll()
     }
 
     private func resetPluginAutocompleteState() {
