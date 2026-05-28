@@ -209,10 +209,15 @@ function createOpenCodeTransport(options = {}) {
   rebuildBindingIndexes(state);
 
   for (const failed of rebootFailedTurns) {
-    const line = emitTurnFailed(state, {
-      threadId: failed.threadId,
-      turnId: failed.turnId,
+    const binding = state.bindingsByThreadId.get(failed.threadId);
+    if (!binding) {
+      continue;
+    }
+    const line = finalizeActiveTurn(state, binding, {
+      status: "failed",
       message: "Bridge restarted during an active turn.",
+      releaseLock: false,
+      turnId: failed.turnId,
     });
     if (line) {
       state.pendingBootLines.push(line);
@@ -404,7 +409,7 @@ async function ensureOpenCodeServer(server, options = {}) {
         method: "GET",
         fetchImpl: options.fetchImpl,
       });
-      if (!doc.__opencodeError) {
+      if (!doc?.__opencodeError) {
         return server;
       }
     } catch (_err) {
@@ -436,7 +441,7 @@ async function ensureOpenCodeServer(server, options = {}) {
     method: "GET",
     fetchImpl: options.fetchImpl,
   });
-  if (doc.__opencodeError) {
+  if (doc?.__opencodeError) {
     server.phase = "degraded";
     throw new Error(`opencode serve health check failed: ${doc.message}`);
   }
@@ -1124,10 +1129,11 @@ async function handleThreadReadRequest(state, request, emit) {
   }
 
   if (binding.turnPhase === "failed" && binding.lastFailedTurnId) {
-    const line = emitTurnFailed(state, {
-      threadId: binding.remodexThreadId,
-      turnId: binding.lastFailedTurnId,
+    const line = finalizeActiveTurn(state, binding, {
+      status: "failed",
       message: "Bridge restarted during an active turn.",
+      releaseLock: false,
+      turnId: binding.lastFailedTurnId,
     });
     if (line) {
       emit(line);
@@ -1142,7 +1148,7 @@ async function handleThreadReadRequest(state, request, emit) {
     directory: binding.cwd,
     fetchImpl: state.options.fetchImpl,
   });
-  if (session.__opencodeError) {
+  if (session?.__opencodeError) {
     throw transportError("session_not_found", "OpenCode session is no longer available. Start a new thread.");
   }
 
@@ -1210,7 +1216,7 @@ async function handleThreadResumeRequest(state, request, emit) {
     directory: binding.cwd,
     fetchImpl: state.options.fetchImpl,
   });
-  if (session.__opencodeError) {
+  if (session?.__opencodeError) {
     throw transportError("session_not_found", "OpenCode session is no longer available. Start a new thread.");
   }
 
@@ -1329,6 +1335,11 @@ async function handleTurnStartRequest(state, request, emit) {
     );
   }
 
+  const parts = buildPromptPartsFromTurnInput(params.input);
+  if (parts.length === 0) {
+    throw transportError("missing_turn_input", "turn/start requires text or image input.");
+  }
+
   const lock = tryAcquireCwdLock(state, binding.cwd, threadId, turnId);
   if (!lock.ok) {
     emit(makeJsonRpcError(
@@ -1344,45 +1355,56 @@ async function handleTurnStartRequest(state, request, emit) {
     return;
   }
 
-  const parts = buildPromptPartsFromTurnInput(params.input);
-  if (parts.length === 0) {
-    releaseCwdLock(state, binding.cwd, turnId);
-    throw transportError("missing_turn_input", "turn/start requires text or image input.");
+  let lockCommitted = false;
+  try {
+    await ensureOpenCodeServer(state.server, state.options);
+    const body = {
+      parts,
+      variant: readString(params.variant) || undefined,
+    };
+    const formattedModel = formatOpenCodeModel(params.model || binding.model);
+    if (formattedModel) {
+      body.providerID = formattedModel.providerID;
+      body.modelID = formattedModel.modelID;
+    }
+    const agent = resolveTurnAgent(params);
+    if (agent) {
+      body.agent = agent;
+    }
+
+    const result = await openCodeFetch(state.server, `/session/${binding.opencodeSessionId}/prompt_async`, {
+      method: "POST",
+      directory: binding.cwd,
+      body,
+      fetchImpl: state.options.fetchImpl,
+    });
+    if (result?.__opencodeError) {
+      finalizeActiveTurn(state, binding, {
+        status: "failed",
+        message: result.message,
+        releaseLock: true,
+        turnId,
+      });
+      throw transportError("turn_start_failed", result.message);
+    }
+
+    applyBindingRuntimeFromTurnParams(binding, params, agent);
+    binding.activeRemodexTurnId = turnId;
+    binding.turnPhase = "running";
+    binding.updatedAt = Date.now();
+    resetTurnReducer(state, threadId);
+    persistBindings(state);
+    lockCommitted = true;
+
+    emit(makeJsonRpcResponse(request.id, {
+      turnId,
+      turn: { id: turnId, threadId, status: "running" },
+    }));
+  } finally {
+    if (!lockCommitted) {
+      releaseCwdLock(state, binding.cwd, turnId);
+    }
   }
-
-  await ensureOpenCodeServer(state.server, state.options);
-  const body = {
-    parts,
-    model: readModelReference(params.model || binding.model),
-    variant: readString(params.variant) || undefined,
-  };
-  const agent = resolveTurnAgent(params);
-  if (agent) {
-    body.agent = agent;
-  }
-
-  const result = await openCodeFetch(state.server, `/session/${binding.opencodeSessionId}/prompt_async`, {
-    method: "POST",
-    directory: binding.cwd,
-    body,
-    fetchImpl: state.options.fetchImpl,
-  });
-  if (result.__opencodeError) {
-    releaseCwdLock(state, binding.cwd, turnId);
-    throw transportError("turn_start_failed", result.message);
-  }
-
-  applyBindingRuntimeFromTurnParams(binding, params, agent);
-  binding.activeRemodexTurnId = turnId;
-  binding.turnPhase = "running";
-  binding.updatedAt = Date.now();
-  resetTurnReducer(state, threadId);
-  persistBindings(state);
-
-  emit(makeJsonRpcResponse(request.id, {
-    turnId,
-    turn: { id: turnId, threadId, status: "running" },
-  }));
 }
 
 /**
@@ -1418,22 +1440,13 @@ async function handleTurnInterruptRequest(state, request, emit) {
     throw transportError("turn_interrupt_failed", abortResult.message);
   }
 
-  const turnId = binding.activeRemodexTurnId;
-  if (turnId) {
-    releaseCwdLock(state, binding.cwd, turnId);
-    const line = emitTurnCompleted(state, {
-      threadId: binding.remodexThreadId,
-      turnId,
-      status: "interrupted",
-    });
-    if (line) {
-      emit(line);
-    }
+  const line = finalizeActiveTurn(state, binding, {
+    status: "interrupted",
+    releaseLock: true,
+  });
+  if (line) {
+    emit(line);
   }
-  binding.turnPhase = "interrupted";
-  binding.activeRemodexTurnId = null;
-  binding.updatedAt = Date.now();
-  persistBindings(state);
 
   emit(makeJsonRpcResponse(request.id, { success: true, interrupted: true }));
 }
@@ -1585,19 +1598,13 @@ function mapBusEventToCodexLines(state, busEvent) {
           lines.push(line);
         }
       } else if (statusType === "idle" && binding?.activeRemodexTurnId) {
-        const turnId = binding.activeRemodexTurnId;
-        const line = emitTurnCompleted(state, {
-          threadId: binding.remodexThreadId,
-          turnId,
+        const line = finalizeActiveTurn(state, binding, {
           status: "completed",
+          releaseLock: true,
         });
         if (line) {
           lines.push(line);
         }
-        releaseCwdLock(state, binding.cwd, turnId);
-        binding.turnPhase = "idle";
-        binding.activeRemodexTurnId = null;
-        resetTurnReducer(state, binding.remodexThreadId);
         bindingDirty = true;
       }
       break;
@@ -1608,19 +1615,14 @@ function mapBusEventToCodexLines(state, busEvent) {
       }
       const message = readSessionErrorMessage(busEvent.properties)
         || "OpenCode session error";
-      const turnId = binding.activeRemodexTurnId;
-      const line = emitTurnFailed(state, {
-        threadId: binding.remodexThreadId,
-        turnId,
+      const line = finalizeActiveTurn(state, binding, {
+        status: "failed",
         message,
+        releaseLock: true,
       });
       if (line) {
         lines.push(line);
       }
-      releaseCwdLock(state, binding.cwd, turnId);
-      binding.turnPhase = "failed";
-      binding.activeRemodexTurnId = null;
-      resetTurnReducer(state, binding.remodexThreadId);
       bindingDirty = true;
       break;
     }
@@ -1828,6 +1830,96 @@ function emitTurnFailed(state, { threadId, turnId, message }) {
   });
 }
 
+/**
+ * @param {OpenCodeTransportState} state
+ * @param {ThreadBinding} binding
+ * @param {{
+ *   status: "completed"|"failed"|"interrupted",
+ *   message?: string,
+ *   releaseLock?: boolean,
+ *   turnId?: string,
+ * }} options
+ * @returns {string|null}
+ */
+function finalizeActiveTurn(state, binding, {
+  status,
+  message,
+  releaseLock = true,
+  turnId: turnIdOverride,
+}) {
+  const threadId = binding.remodexThreadId;
+  const turnId = turnIdOverride || binding.activeRemodexTurnId;
+  if (!turnId) {
+    return null;
+  }
+
+  let line = null;
+  if (status === "completed") {
+    line = emitTurnCompleted(state, { threadId, turnId, status: "completed" });
+    binding.turnPhase = "idle";
+  } else if (status === "interrupted") {
+    line = emitTurnCompleted(state, { threadId, turnId, status: "interrupted" });
+    binding.turnPhase = "interrupted";
+  } else {
+    line = emitTurnFailed(state, {
+      threadId,
+      turnId,
+      message: message || "Turn failed",
+    });
+    binding.turnPhase = "failed";
+  }
+
+  if (releaseLock) {
+    releaseCwdLock(state, binding.cwd, turnId);
+  }
+  binding.activeRemodexTurnId = null;
+  resetTurnReducer(state, threadId);
+  binding.updatedAt = Date.now();
+  persistBindings(state);
+  return line;
+}
+
+/**
+ * @param {string|{ provider?: string, model?: string, providerID?: string, modelID?: string, id?: string }|null} value
+ * @returns {{ providerID: string, modelID: string }|undefined}
+ */
+function formatOpenCodeModel(value) {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = readString(value);
+    if (!trimmed) {
+      return undefined;
+    }
+    const slashIndex = trimmed.indexOf("/");
+    if (slashIndex > 0) {
+      return {
+        providerID: trimmed.slice(0, slashIndex),
+        modelID: trimmed.slice(slashIndex + 1),
+      };
+    }
+    return { providerID: "opencode", modelID: trimmed };
+  }
+  if (typeof value === "object") {
+    const providerID = readString(value.providerID || value.provider);
+    const modelID = readString(value.modelID || value.model || value.id);
+    if (!providerID && !modelID) {
+      return undefined;
+    }
+    return {
+      providerID: providerID || "opencode",
+      modelID: modelID || "",
+    };
+  }
+  return undefined;
+}
+
+/** @param {string|number} id @param {string} method @param {object} params */
+function makeJsonRpcRequest(id, method, params) {
+  return `${JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} })}\n`;
+}
+
 function emitApprovalRequest(state, binding, payload) {
   const permissionId = readString(payload?.id)
     || readString(payload?.permissionID)
@@ -1846,7 +1938,7 @@ function emitApprovalRequest(state, binding, payload) {
     requestedAt: Date.now(),
   });
 
-  return makeNotification(approvalMethod, {
+  return makeJsonRpcRequest(permissionId, approvalMethod, {
     threadId: binding.remodexThreadId,
     turnId: binding.activeRemodexTurnId,
     itemId: remodexItemId,
@@ -1857,19 +1949,19 @@ function emitApprovalRequest(state, binding, payload) {
 }
 
 function emitUserInputRequest(state, binding, payload) {
-  const requestId = readString(payload?.id) || readString(payload?.requestID);
+  const requestId = readString(payload?.id)
+    || readString(payload?.requestID)
+    || synthesizeItemId("question");
   const remodexItemId = synthesizeItemId("question");
-  if (requestId) {
-    state.pendingApprovalsById.set(requestId, {
-      permissionId: requestId,
-      remodexThreadId: binding.remodexThreadId,
-      remodexItemId,
-      approvalMethod: "item/tool/requestUserInput",
-      requestedAt: Date.now(),
-    });
-  }
+  state.pendingApprovalsById.set(requestId, {
+    permissionId: requestId,
+    remodexThreadId: binding.remodexThreadId,
+    remodexItemId,
+    approvalMethod: "item/tool/requestUserInput",
+    requestedAt: Date.now(),
+  });
 
-  return makeNotification("item/tool/requestUserInput", {
+  return makeJsonRpcRequest(requestId, "item/tool/requestUserInput", {
     threadId: binding.remodexThreadId,
     turnId: binding.activeRemodexTurnId,
     itemId: remodexItemId,
@@ -2934,10 +3026,10 @@ function scheduleOpenCodeSseReconnect(state, options) {
   if (state.sse.reconnectAttempt >= 20) {
     for (const binding of state.bindingsByThreadId.values()) {
       if (binding.turnPhase === "running" && binding.activeRemodexTurnId) {
-        const line = emitTurnFailed(state, {
-          threadId: binding.remodexThreadId,
-          turnId: binding.activeRemodexTurnId,
+        const line = finalizeActiveTurn(state, binding, {
+          status: "failed",
           message: "OpenCode SSE stream lost after 20 reconnect attempts",
+          releaseLock: true,
         });
         if (line) {
           state.listeners.emitMessage(line);
@@ -3038,13 +3130,20 @@ module.exports = {
   routeInboundJsonRpc,
   handleUnsupportedMethod,
   handleThreadListRequest,
+  handleTurnStartRequest,
   handleInboundClientResponse,
   handleCollaborationModeListRequest,
   // Pure helpers (the unit-test surface).
   mapBusEventToCodexLines,
   mapProvidersConfigToModelList,
   emitTurnFailed,
+  finalizeActiveTurn,
+  formatOpenCodeModel,
+  makeJsonRpcRequest,
   emitUserInputRequest,
+  handleThreadTurnsListRequest,
+  handleThreadResumeRequest,
+  handleThreadNameSetRequest,
   emitItemLifecycle,
   parseListenStdout,
   parseSseChunk,

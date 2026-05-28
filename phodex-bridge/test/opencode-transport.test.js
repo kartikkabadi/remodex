@@ -33,6 +33,14 @@ const {
   handleUnsupportedMethod,
   handleInboundClientResponse,
   handleCollaborationModeListRequest,
+  handleTurnStartRequest,
+  handleThreadListRequest,
+  handleThreadTurnsListRequest,
+  handleThreadResumeRequest,
+  handleThreadNameSetRequest,
+  formatOpenCodeModel,
+  makeJsonRpcRequest,
+  finalizeActiveTurn,
   scheduleOpenCodeSseReconnect,
   catchUpAfterSseReconnect,
   rebuildBindingIndexes,
@@ -496,6 +504,8 @@ test("mapBusEventToCodexLines maps permission.asked to command approval method",
 
   assert.equal(lines.length, 1);
   const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.jsonrpc, "2.0");
+  assert.equal(parsed.id, "perm-1");
   assert.equal(parsed.method, "item/commandExecution/requestApproval");
   assert.ok(state.pendingApprovalsById.has("perm-1"));
 });
@@ -1547,16 +1557,23 @@ test("scheduleOpenCodeSseReconnect single-flights overlapping reconnect timers",
 
 test("scheduleOpenCodeSseReconnect emits turn/failed after 20 reconnect attempts", () => {
   const emitted = [];
+  const binding = {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/ws",
+    model: null,
+    activeRemodexTurnId: "turn-1",
+    turnPhase: "running",
+    updatedAt: Date.now(),
+  };
   const state = {
     server: { phase: "ready" },
-    bindingsByThreadId: new Map([["thread-1", {
-      remodexThreadId: "thread-1",
-      opencodeSessionId: "sess-1",
+    bindingsByThreadId: new Map([["thread-1", binding]]),
+    locksByCwd: new Map([["/tmp/ws", {
       cwd: "/tmp/ws",
-      model: null,
-      activeRemodexTurnId: "turn-1",
-      turnPhase: "running",
-      updatedAt: Date.now(),
+      ownerThreadId: "thread-1",
+      ownerTurnId: "turn-1",
+      acquiredAt: Date.now(),
     }]]),
     sse: {
       reconnectAttempt: 20,
@@ -1569,15 +1586,11 @@ test("scheduleOpenCodeSseReconnect emits turn/failed after 20 reconnect attempts
       emitMessage(line) { emitted.push(line); },
     },
     turnReducerByThreadId: new Map(),
+    options: {},
   };
-
-  const originalSetTimeout = global.setTimeout;
-  let timerScheduled = false;
-  global.setTimeout = () => { timerScheduled = true; return 123; };
 
   try {
     scheduleOpenCodeSseReconnect(state, {});
-    assert.equal(timerScheduled, false);
     assert.equal(state.sse.reconnectScheduled, false);
     assert.equal(state.sse.reconnectAttempt, 0);
     assert.equal(emitted.length, 1);
@@ -1587,10 +1600,15 @@ test("scheduleOpenCodeSseReconnect emits turn/failed after 20 reconnect attempts
     assert.equal(parsed.params.threadId, "thread-1");
     assert.equal(parsed.params.turnId, "turn-1");
     assert.ok(parsed.params.error.message.includes("20 reconnect attempts"));
+    assert.equal(binding.turnPhase, "failed");
+    assert.equal(binding.activeRemodexTurnId, null);
+    assert.equal(state.locksByCwd.size, 0);
   } finally {
-    global.setTimeout = originalSetTimeout;
     if (state.sse.reconnectTimer) {
       clearTimeout(state.sse.reconnectTimer);
+    }
+    if (state._persistBindingsTimer) {
+      clearTimeout(state._persistBindingsTimer);
     }
   }
 });
@@ -2263,7 +2281,7 @@ test("T2-2 turn/start with agent and variant passes through to prompt_async body
   };
 
   const lines = [];
-  routeInboundJsonRpc(
+  await dispatchInbound(
     state,
     JSON.stringify({
       id: "t2-2-a",
@@ -2277,10 +2295,6 @@ test("T2-2 turn/start with agent and variant passes through to prompt_async body
     }),
     (line) => lines.push(line),
   );
-
-  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
 
   const promptCall = fetchCalls.find((entry) => entry.url.includes("/prompt_async"));
   assert.ok(promptCall, `expected prompt_async fetch, saw: ${fetchCalls.map((entry) => entry.url).join(", ")}`);
@@ -2307,7 +2321,7 @@ test("T2-2 turn/start omits agent from prompt_async body when param absent", asy
   };
 
   const lines = [];
-  routeInboundJsonRpc(
+  await dispatchInbound(
     state,
     JSON.stringify({
       id: "t2-2-b",
@@ -2319,10 +2333,6 @@ test("T2-2 turn/start omits agent from prompt_async body when param absent", asy
     }),
     (line) => lines.push(line),
   );
-
-  for (let attempt = 0; attempt < 20 && lines.length === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
 
   const promptCall = fetchCalls.find((entry) => entry.url.includes("/prompt_async"));
   assert.ok(promptCall);
@@ -2520,6 +2530,261 @@ test("T2-3 thread/read emits null agentRuntime fields when binding model and age
   assert.equal(thread.providerId, null);
   assert.equal(thread.variant, null);
   assert.equal(thread.agent, null);
+});
+
+async function dispatchInbound(state, rawLine, emit) {
+  routeInboundJsonRpc(state, rawLine, emit);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+test("formatOpenCodeModel maps provider and model to OpenCode wire shape", () => {
+  assert.deepEqual(
+    formatOpenCodeModel({ provider: "anthropic", model: "claude-sonnet-4-20250514" }),
+    { providerID: "anthropic", modelID: "claude-sonnet-4-20250514" },
+  );
+  assert.deepEqual(
+    formatOpenCodeModel("openai/gpt-4.1"),
+    { providerID: "openai", modelID: "gpt-4.1" },
+  );
+});
+
+test("makeJsonRpcRequest emits request envelope with top-level id", () => {
+  const line = makeJsonRpcRequest("perm-abc", "item/tool/requestApproval", {
+    threadId: "thread-1",
+    permissionId: "perm-abc",
+  });
+  const parsed = JSON.parse(line);
+  assert.equal(parsed.jsonrpc, "2.0");
+  assert.equal(parsed.id, "perm-abc");
+  assert.equal(parsed.method, "item/tool/requestApproval");
+  assert.equal(parsed.params.threadId, "thread-1");
+});
+
+test("turn/start treats prompt_async 204 empty body as success", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async (url, init) => {
+    if (String(url).includes("/prompt_async")) {
+      return { ok: true, status: 204, text: async () => "" };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ info: { title: "opencode" } }) };
+  };
+
+  const lines = [];
+  await handleTurnStartRequest(state, {
+    id: "turn-204",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-204",
+      input: [{ type: "text", text: "hello" }],
+    },
+  }, (line) => lines.push(line));
+
+  const response = lines.find((line) => JSON.parse(line).id === "turn-204");
+  assert.ok(response, `expected turn/start response, saw: ${lines.join(" | ")}`);
+  assert.equal(JSON.parse(response).result.turn.status, "running");
+  assert.equal(state.bindingsByThreadId.get("thread-1").turnPhase, "running");
+});
+
+test("turn/start posts providerID and modelID on prompt_async body", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  const fetchCalls = [];
+  state.options.fetchImpl = async (url, init) => {
+    const urlString = String(url);
+    if (urlString.includes("/prompt_async")) {
+      fetchCalls.push({ url: urlString, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true, status: 204, text: async () => "" };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ info: { title: "opencode" } }) };
+  };
+
+  const lines = [];
+  await handleTurnStartRequest(state, {
+    id: "turn-model",
+    params: {
+      threadId: "thread-1",
+      input: [{ type: "text", text: "model wire" }],
+    },
+  }, (line) => lines.push(line));
+
+  const promptCall = fetchCalls.find((entry) => entry.url.includes("/prompt_async"));
+  assert.ok(promptCall);
+  assert.equal(promptCall.body.providerID, "anthropic");
+  assert.equal(promptCall.body.modelID, "claude-sonnet-4-20250514");
+  assert.equal("model" in promptCall.body, false);
+});
+
+test("handleThreadListRequest returns persisted bindings", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-a", {
+    remodexThreadId: "thread-a",
+    opencodeSessionId: "sess-a",
+    cwd: "/tmp/a",
+    model: null,
+    title: "Alpha",
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: 2,
+  });
+  state.bindingsByThreadId.set("thread-b", {
+    remodexThreadId: "thread-b",
+    opencodeSessionId: "sess-b",
+    cwd: "/tmp/b",
+    model: null,
+    title: "Beta",
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: 1,
+  });
+
+  const lines = [];
+  await handleThreadListRequest(state, { id: "list-1", params: { limit: 10 } }, (line) => lines.push(line));
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.id, "list-1");
+  assert.equal(parsed.result.data.length, 2);
+  assert.equal(parsed.result.data[0].id, "thread-a");
+});
+
+test("handleThreadResumeRequest returns binding when session exists", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  const lines = [];
+  await handleThreadResumeRequest(state, { id: "resume-1", params: { threadId: "thread-1" } }, (line) => lines.push(line));
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.result.thread.id, "thread-1");
+});
+
+test("handleThreadTurnsListRequest returns turn data slice", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/message")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify([
+          { info: { id: "msg-1", role: "user" }, parts: [{ type: "text", text: "hi" }] },
+        ]),
+      };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  await handleThreadTurnsListRequest(state, { id: "turns-1", params: { threadId: "thread-1", limit: 5 } }, (line) => lines.push(line));
+  const parsed = JSON.parse(lines[0]);
+  assert.equal(parsed.id, "turns-1");
+  assert.ok(Array.isArray(parsed.result.data));
+});
+
+test("handleThreadNameSetRequest patches session title", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    title: "Old",
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  const patchBodies = [];
+  state.options.fetchImpl = async (url, init) => {
+    if (init?.method === "PATCH") {
+      patchBodies.push(JSON.parse(init.body));
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+
+  const lines = [];
+  await handleThreadNameSetRequest(state, {
+    id: "name-1",
+    params: { threadId: "thread-1", name: "Renamed" },
+  }, (line) => lines.push(line));
+
+  assert.deepEqual(patchBodies[0], { title: "Renamed" });
+  const response = lines.find((line) => JSON.parse(line).id === "name-1");
+  assert.ok(response);
+  assert.equal(JSON.parse(response).result.thread.name, "Renamed");
+  const updated = lines.find((line) => JSON.parse(line).method === "thread/name/updated");
+  assert.ok(updated);
+});
+
+test("finalizeActiveTurn clears running turn state on session.error path", () => {
+  const binding = {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/ws",
+    model: null,
+    activeRemodexTurnId: "turn-1",
+    turnPhase: "running",
+    updatedAt: Date.now(),
+  };
+  const state = {
+    bindingsByThreadId: new Map([["thread-1", binding]]),
+    locksByCwd: new Map([["/tmp/ws", {
+      cwd: "/tmp/ws",
+      ownerThreadId: "thread-1",
+      ownerTurnId: "turn-1",
+      acquiredAt: Date.now(),
+    }]]),
+    turnReducerByThreadId: new Map(),
+    options: {},
+  };
+
+  const line = finalizeActiveTurn(state, binding, {
+    status: "failed",
+    message: "boom",
+    releaseLock: true,
+  });
+  assert.ok(line);
+  assert.equal(binding.turnPhase, "failed");
+  assert.equal(binding.activeRemodexTurnId, null);
+  assert.equal(state.locksByCwd.size, 0);
 });
 
 function createRouteTestState() {
