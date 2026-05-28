@@ -1,7 +1,7 @@
 # OpenCode runtime — status (honest)
 
-**Updated:** 2026-05-28 (Wave 2 sim QA)  
-**Branch:** `multi-agents/opencode` · **PR:** [#54](https://github.com/kartikkabadi/remodex/pull/54)
+**Updated:** 2026-05-28 (fresh-onboarding sim QA findings)  
+**Branch:** `opencode/integration` → `multi-agents/opencode` · **PR:** [#54](https://github.com/kartikkabadi/remodex/pull/54)
 
 ## Success tiers
 
@@ -9,7 +9,7 @@
 |------|--------|-------|
 | **P0_CODE** | Done | `agent/list`, loopback bind, `--opencode` on fork |
 | **P0_DOCS** | Done | ADR + plans + runbook + AGENTS/CLAUDE launcher runbook |
-| **SIM_EVIDENCE** | Partial | Infra + unit gates pass; UI matrix blocked at sim pairing (paste-code not automated) |
+| **SIM_EVIDENCE** | Partial | Kartik paired after fresh onboarding; **P0 messaging** (no assistant on "Hey") traced to missing SSE completion — transport fix on `opencode/integration` (restart launcher to verify) |
 | **DEVICE_SIGNOFF** | Pending | Kartik physical iPhone — **not agent-substitutable** |
 | **SHIP_WORDING** | Blocked | Requires SIM_EVIDENCE (UI rows) + DEVICE_SIGNOFF |
 

@@ -946,13 +946,15 @@ async function fetchOpenCodeAgentListRaw(state) {
     method: "GET",
     fetchImpl: state.options.fetchImpl,
   });
-  if (!result.__opencodeError && Array.isArray(result)) {
+  if (result?.__opencodeError) {
+    throw new Error(result.message || "Failed to fetch agents from OpenCode.");
+  }
+  if (Array.isArray(result)) {
     state.agentsCache = { agents: result, fetchedAt: Date.now() };
     return result;
   }
 
-  state.agentsCache = { agents: [], fetchedAt: Date.now() };
-  return [];
+  throw new Error("OpenCode agent list response was not an array.");
 }
 
 /**
@@ -1395,6 +1397,12 @@ async function handleTurnStartRequest(state, request, emit) {
     resetTurnReducer(state, threadId);
     persistBindings(state);
     lockCommitted = true;
+
+    const startedLine = emitTurnStarted(state, { threadId, turnId });
+    if (startedLine) {
+      emit(startedLine);
+    }
+    scheduleRunningTurnCompletionProbe(state, binding, emit);
 
     emit(makeJsonRpcResponse(request.id, {
       turnId,
@@ -2907,6 +2915,212 @@ function findPendingApproval(state, responseId) {
     }
   }
   return null;
+}
+
+const POST_TURN_COMPLETION_PROBE_DELAYS_MS = [750, 2000, 5000];
+
+/**
+ * When OpenCode finishes a turn without delivering `session.status` over SSE (fast
+ * completions, stream gaps), poll session messages and finalize the binding so iOS
+ * does not stay stuck in `running`.
+ *
+ * @param {OpenCodeTransportState} state
+ * @param {ThreadBinding} binding
+ * @param {(line: string) => void} emit
+ */
+function scheduleRunningTurnCompletionProbe(state, binding, emit) {
+  const threadId = binding.remodexThreadId;
+  const turnId = binding.activeRemodexTurnId;
+  if (!threadId || !turnId) {
+    return;
+  }
+
+  for (const delayMs of POST_TURN_COMPLETION_PROBE_DELAYS_MS) {
+    const timer = setTimeout(() => {
+      void probeRunningTurnCompletion(state, threadId, turnId, emit, { isFinalProbe: delayMs === POST_TURN_COMPLETION_PROBE_DELAYS_MS.at(-1) });
+    }, delayMs);
+    timer.unref?.();
+  }
+}
+
+/**
+ * @param {OpenCodeTransportState} state
+ * @param {string} threadId
+ * @param {string} turnId
+ * @param {(line: string) => void} emit
+ * @param {{ isFinalProbe?: boolean }} [options]
+ */
+async function probeRunningTurnCompletion(state, threadId, turnId, emit, options = {}) {
+  const binding = state.bindingsByThreadId.get(threadId);
+  if (!binding || binding.turnPhase !== "running" || binding.activeRemodexTurnId !== turnId) {
+    return;
+  }
+
+  try {
+    await ensureOpenCodeServer(state.server, state.options);
+    const sessionStatus = await readOpenCodeSessionStatusType(state, binding);
+    const messages = await openCodeFetch(
+      state.server,
+      `/session/${binding.opencodeSessionId}/message`,
+      {
+        method: "GET",
+        directory: binding.cwd,
+        fetchImpl: state.options.fetchImpl,
+      },
+    );
+
+    if (messages?.__opencodeError) {
+      if (options.isFinalProbe && sessionStatus === "idle") {
+        emitProbeTurnCompletion(state, binding, emit, turnId, null);
+      }
+      return;
+    }
+
+    const entries = normalizeOpenCodeMessageEntries(messages);
+    const latestAssistant = findLatestAssistantMessage(entries);
+    if (latestAssistant) {
+      emitProbeAssistantMessage(state, binding, emit, turnId, latestAssistant);
+      emitProbeTurnCompletion(state, binding, emit, turnId, latestAssistant);
+      return;
+    }
+
+    if (sessionStatus === "idle" || options.isFinalProbe) {
+      emitProbeTurnCompletion(state, binding, emit, turnId, null);
+    }
+  } catch (error) {
+    const logPrefix = state.options.logPrefix || "[remodex]";
+    console.warn(
+      `${logPrefix} OpenCode turn completion probe failed for ${threadId}:`,
+      error instanceof Error ? error.message : error,
+    );
+    if (options.isFinalProbe) {
+      const line = finalizeActiveTurn(state, binding, {
+        status: "failed",
+        message: "OpenCode turn completion probe failed.",
+        releaseLock: true,
+        turnId,
+      });
+      if (line) {
+        emit(line);
+      }
+    }
+  }
+}
+
+/**
+ * @param {unknown} messages
+ * @returns {object[]}
+ */
+function normalizeOpenCodeMessageEntries(messages) {
+  if (Array.isArray(messages?.data)) {
+    return messages.data;
+  }
+  if (Array.isArray(messages)) {
+    return messages;
+  }
+  if (Array.isArray(messages?.messages)) {
+    return messages.messages;
+  }
+  return [];
+}
+
+/**
+ * @param {object[]} entries
+ * @returns {object|null}
+ */
+function findLatestAssistantMessage(entries) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const message = entries[index];
+    const role = readString(message?.info?.role || message?.role).toLowerCase();
+    if (role !== "assistant") {
+      continue;
+    }
+    return message;
+  }
+  return null;
+}
+
+/**
+ * @param {OpenCodeTransportState} state
+ * @param {ThreadBinding} binding
+ * @returns {Promise<string>}
+ */
+async function readOpenCodeSessionStatusType(state, binding) {
+  const session = await openCodeFetch(state.server, `/session/${binding.opencodeSessionId}`, {
+    method: "GET",
+    directory: binding.cwd,
+    fetchImpl: state.options.fetchImpl,
+  });
+  if (session?.__opencodeError) {
+    return "";
+  }
+  return readSessionStatusType({
+    status: session?.status ?? session?.info?.status ?? session?.info,
+    sessionStatus: session?.sessionStatus,
+  });
+}
+
+/**
+ * @param {OpenCodeTransportState} state
+ * @param {ThreadBinding} binding
+ * @param {(line: string) => void} emit
+ * @param {string} turnId
+ * @param {object|null} assistantMessage
+ */
+function emitProbeAssistantMessage(state, binding, emit, turnId, assistantMessage) {
+  const text = textFromOpenCodeMessage(assistantMessage);
+  if (!text) {
+    return;
+  }
+  ensureSseState(state);
+  const itemId = readString(assistantMessage?.info?.id)
+    || readString(assistantMessage?.id)
+    || synthesizeItemId("item");
+  const line = makeNotification("item/updated", {
+    threadId: binding.remodexThreadId,
+    turnId,
+    itemId,
+    item: {
+      id: itemId,
+      type: "agentMessage",
+      content: text,
+      status: "completed",
+    },
+  });
+  emit(line);
+  state.sse.lastEmittedItemIdByThread?.set(binding.remodexThreadId, itemId);
+}
+
+/**
+ * @param {OpenCodeTransportState} state
+ * @param {ThreadBinding} binding
+ * @param {(line: string) => void} emit
+ * @param {string} turnId
+ * @param {object|null} assistantMessage
+ */
+function emitProbeTurnCompletion(state, binding, emit, turnId, assistantMessage) {
+  if (binding.turnPhase !== "running" || binding.activeRemodexTurnId !== turnId) {
+    return;
+  }
+  const statusLine = emitThreadStatusChanged(state, {
+    threadId: binding.remodexThreadId,
+    status: "idle",
+  });
+  if (statusLine) {
+    emit(statusLine);
+  }
+  const line = finalizeActiveTurn(state, binding, {
+    status: "completed",
+    releaseLock: true,
+    turnId,
+  });
+  if (line) {
+    emit(line);
+  }
+  if (assistantMessage) {
+    binding.updatedAt = Date.now();
+    persistBindings(state);
+  }
 }
 
 function attachOpenCodeSse(state, options) {

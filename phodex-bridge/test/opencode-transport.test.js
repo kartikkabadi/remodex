@@ -2561,6 +2561,41 @@ test("makeJsonRpcRequest emits request envelope with top-level id", () => {
   assert.equal(parsed.params.threadId, "thread-1");
 });
 
+test("turn/start emits turn/started after prompt_async success", async () => {
+  const state = createRouteTestState();
+  state.bindingsByThreadId.set("thread-1", {
+    remodexThreadId: "thread-1",
+    opencodeSessionId: "sess-1",
+    cwd: "/tmp/workspace",
+    model: null,
+    activeRemodexTurnId: null,
+    turnPhase: "idle",
+    updatedAt: Date.now(),
+  });
+  rebuildBindingIndexes(state);
+
+  state.options.fetchImpl = async (url) => {
+    if (String(url).includes("/prompt_async")) {
+      return { ok: true, status: 204, text: async () => "" };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ info: { title: "opencode" } }) };
+  };
+
+  const lines = [];
+  await handleTurnStartRequest(state, {
+    id: "turn-started",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-started",
+      input: [{ type: "text", text: "hello" }],
+    },
+  }, (line) => lines.push(line));
+
+  const started = lines.find((line) => JSON.parse(line).method === "turn/started");
+  assert.ok(started, `expected turn/started notification, saw: ${lines.join(" | ")}`);
+  assert.equal(JSON.parse(started).params.turnId, "turn-started");
+});
+
 test("turn/start treats prompt_async 204 empty body as success", async () => {
   const state = createRouteTestState();
   state.bindingsByThreadId.set("thread-1", {

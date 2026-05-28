@@ -10,3 +10,5 @@ timestamp_utc	phase	actor	action	status	detail
 2026-05-28T05:04:24Z	phase2	integrator	merge-wt-ios-fixes	done	merge=f9737d9463eef5d94a8089fd37b83e6a998407a4 bridge=507/0/2 relay=41/0 ios=45/0 opencode_e2e=508/0/1 sim_retry=1
 2026-05-28T05:06:46Z	phase2	integrator	merge-wt-sim-infra	done	merge=911bf63fe0789be9c706057c307373601bb78214 bridge=507/0/2 relay=41/0 ios=45/0 opencode_e2e=508/0/1 preflight=check-only-ok
 2026-05-28T05:12:25Z	phase1	wt-ios-runtime	merge-ready	done	AgentRuntime enum; isOpenCodeBridgeConnected; supportsVariants gate; 48 filtered xcode tests pass
+2026-05-28T05:14:41Z	phase2	integrator	wt-ios-runtime-merged	done	integration@57815cb6 bridge507 relay41 e2e508 xcode48 preflight-check-only
+2026-05-28T05:17:48Z	phase2	thermo-verify	thermo-gate	PASS-with-waiver	integration@57815cb6 vs 293926c; bridge+24 transport branch-24to19 finalizeActiveTurn; CodexService+73 waiver P1 Decodable; #58 tranche0 architect-wt1+issue58; bridge507/0/2
