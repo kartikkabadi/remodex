@@ -5,3 +5,4 @@ timestamp_utc	phase	actor	action	status	detail
 2026-05-28T04:37:31Z	phase1	wt-bridge-p1	wt-2-bridge-routing	done	method git gate + Codex account forward; 498 pass 0 fail
 2026-05-28T04:54:03Z	phase2	integrator	merge-wt-transport-p1	done	merge=3edce1ce7d9185cb3a0deafdf68ada3481f14a8c bridge=499/0/2 relay=41/0 ios=43/0 opencode_e2e=499/0/2
 2026-05-28T04:56:56Z	phase2	integrator	merge-wt-bridge-p1	done	merge=779320c778d421e3a8cfd1d398f5a117745b1d45 bridge=507/0/2 relay=41/0 ios=43/0 opencode_e2e=508/0/1
+2026-05-28T05:04:24Z	phase2	integrator	merge-wt-ios-fixes	done	merge=f9737d9463eef5d94a8089fd37b83e6a998407a4 bridge=507/0/2 relay=41/0 ios=45/0 opencode_e2e=508/0/1 sim_retry=1
