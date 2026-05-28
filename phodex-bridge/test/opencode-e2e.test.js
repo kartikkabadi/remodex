@@ -174,10 +174,20 @@ function createStartedWaiter(timeoutMs) {
   };
 }
 
+function isJsonRpcResponse(parsed) {
+  return parsed
+    && parsed.id != null
+    && !parsed.method
+    && (parsed.result !== undefined || parsed.error !== undefined);
+}
+
 async function waitForRpcResponse(outbound, id, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const match = outbound.find((line) => parseJsonRpcLine(line)?.id === id);
+    const match = outbound.find((line) => {
+      const parsed = parseJsonRpcLine(line);
+      return parsed?.id === id && isJsonRpcResponse(parsed);
+    });
     if (match) {
       return match;
     }
