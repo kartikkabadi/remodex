@@ -50,3 +50,6 @@ $TMP_PLACEHOLDER
 .scratch/
 .build/
 .qa-screenshots/
+
+# Parallel OpenCode ship-prep worktrees (local only)
+.worktrees/
