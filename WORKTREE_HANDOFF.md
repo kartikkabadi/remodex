@@ -4,9 +4,13 @@
 |-------|-------|
 | Branch | `opencode/wt-sim-infra` |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | Base | `opencode/integration` (post WT-3) |
 =======
 | HEAD | _(set after final commit)_ |
+=======
+| HEAD | `c08542e0` (`7900d288` — matrix path + codex-smoke) |
+>>>>>>> 2dee6d9b (Point WT-6 handoff at final branch HEAD.)
 | Base | `opencode/integration` @ `6b976000` |
 >>>>>>> 7900d288 (Fix sim matrix path and codex-smoke row 9 recording.)
 | Scope | WT-6 simulator infra only |
