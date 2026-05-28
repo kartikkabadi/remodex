@@ -1035,6 +1035,15 @@ final class TurnViewModelQueueTests: XCTestCase {
         )
     }
 
+    func testClearSkillAutocompleteClearsMissRefreshMarkers() {
+        let viewModel = makeViewModel()
+        viewModel.forceRefreshedSkillMissKeys = ["root\u{0}missing"]
+
+        viewModel.clearSkillAutocomplete()
+
+        XCTAssertTrue(viewModel.forceRefreshedSkillMissKeys.isEmpty)
+    }
+
     private func waitForSendCompletion(_ viewModel: TurnViewModel, maxPollCount: Int = 160) async {
         for _ in 0..<maxPollCount where viewModel.isSending {
             try? await Task.sleep(nanoseconds: 10_000_000)

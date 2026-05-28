@@ -370,6 +370,8 @@ private struct TurnComposerAutocompletePanels: View {
 private struct TurnComposerQueuedDraftsSection: View {
     private static let cornerRadius: CGFloat = 22
 
+    @ScaledMetric(relativeTo: .caption) private var queuedDraftRowHeight = QueuedDraftsPanel.defaultRowHeight
+
     let drafts: [QueuedTurnDraft]
     let canSteerDrafts: Bool
     let canRestoreDrafts: Bool
@@ -388,7 +390,8 @@ private struct TurnComposerQueuedDraftsSection: View {
                     steeringDraftID: steeringDraftID,
                     onRestore: onRestoreQueuedDraft,
                     onSteer: onSteerQueuedDraft,
-                    onRemove: onRemoveQueuedDraft
+                    onRemove: onRemoveQueuedDraft,
+                    rowHeight: queuedDraftRowHeight
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .adaptiveGlass(
@@ -402,7 +405,7 @@ private struct TurnComposerQueuedDraftsSection: View {
         .frame(
             height: drafts.isEmpty
                 ? 0
-                : CGFloat(drafts.count) * 34 + CGFloat(max(drafts.count - 1, 0))
+                : CGFloat(drafts.count) * queuedDraftRowHeight + CGFloat(max(drafts.count - 1, 0))
         )
     }
 }

@@ -1326,6 +1326,64 @@ final class TurnTimelineReducerTests: XCTestCase {
         XCTAssertEqual(messageIDs, ["status", "final"])
     }
 
+    func testTimelineRenderProjectionIgnoresUnknownAssistantPhaseForCollapseFallback() {
+        let now = Date()
+        let messages = [
+            makeMessage(
+                id: "user",
+                threadID: "thread",
+                role: .user,
+                text: "Summarize",
+                createdAt: now,
+                turnID: "turn-1",
+                orderIndex: 1
+            ),
+            makeMessage(
+                id: "status",
+                threadID: "thread",
+                role: .system,
+                kind: .toolActivity,
+                text: "Running tests",
+                createdAt: now.addingTimeInterval(1),
+                turnID: "turn-1",
+                orderIndex: 2
+            ),
+            makeMessage(
+                id: "progress",
+                threadID: "thread",
+                role: .assistant,
+                assistantPhase: "reasoning",
+                text: "Working through the failure list.",
+                createdAt: now.addingTimeInterval(2),
+                turnID: "turn-1",
+                orderIndex: 3
+            ),
+            makeMessage(
+                id: "final",
+                threadID: "thread",
+                role: .assistant,
+                text: "TLDR: The regression is in transport reconnect handling.",
+                createdAt: now.addingTimeInterval(3),
+                turnID: "turn-1",
+                orderIndex: 4
+            ),
+        ]
+
+        let items = TurnTimelineRenderProjection.project(
+            messages: messages,
+            completedTurnIDs: ["turn-1"]
+        )
+
+        XCTAssertEqual(items.count, 3)
+        guard case .previousMessages(let previousGroup) = items[1],
+              case .message(let final) = items[2] else {
+            return XCTFail("Expected unknown assistant phases to allow collapse fallback")
+        }
+
+        XCTAssertEqual(previousGroup.messages.map(\.id), ["status", "progress"])
+        XCTAssertEqual(final.id, "final")
+    }
+
     func testTimelineRenderProjectionDoesNotCollapseCommentaryOnlyTurn() {
         let now = Date()
         let messages = [
