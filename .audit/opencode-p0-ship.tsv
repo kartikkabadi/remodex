@@ -2,3 +2,4 @@ timestamp_utc	phase	actor	action	status	detail
 2026-05-28T04:29:35Z	phase0	architect	contracts-complete	done	architect-wt1-transport.md architect-wt2-bridge-routing.md architect-wt4-ios-runtime.md
 2026-05-28T04:31:28Z	phase0	wt-0	merge-origin-main	done	clean merge; bridge 490/0/2 skip; relay 41/0; merged to opencode/integration dc33776e
 2026-05-28T04:45:20Z	phase1	wt-transport-p1	transport-p1-tests	done	finalizeActiveTurn formatOpenCodeModel makeJsonRpcRequest; 499 pass 0 fail
+2026-05-28T04:54:03Z	phase2	integrator	merge-wt-transport-p1	done	merge=3edce1ce7d9185cb3a0deafdf68ada3481f14a8c bridge=499/0/2 relay=41/0 ios=43/0 opencode_e2e=499/0/2
