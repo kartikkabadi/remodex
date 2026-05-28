@@ -114,6 +114,15 @@ struct ContentView: View {
         rootContent
             // Only resume saved-pairing recovery after onboarding is done and the manual scanner is not in control.
             .task {
+                #if DEBUG
+                if await viewModel.attemptDebugPairingOnLaunchIfNeeded(codex: codex) {
+                    debugSidebarLog(
+                        "launch task debugPairing connected=\(codex.isConnected) threadCount=\(codex.threads.count)"
+                    )
+                    scheduleSidebarPrewarmIfNeeded()
+                    return
+                }
+                #endif
                 guard hasSeenOnboarding, !isShowingManualScanner else {
                     debugSidebarLog("launch task skipped onboardingSeen=\(hasSeenOnboarding) manualScanner=\(isShowingManualScanner)")
                     return

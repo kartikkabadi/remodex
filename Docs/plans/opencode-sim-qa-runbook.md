@@ -4,13 +4,71 @@
 **Status doc:** [opencode-runtime-status.md](./opencode-runtime-status.md)  
 **Subagent model:** `composer-2.5` only (never `composer-2.5-fast`)
 
+## Wave 0 — integration lane bootstrap
+
+Wave 0 lands on `opencode/integration` before parallel workers fan out:
+
+| Step | Command / artifact |
+|------|-------------------|
+| Integration branch | `opencode/integration` from `multi-agents/opencode` |
+| Upstream merge | `git merge origin/main` (no `fork/main` wholesale merge) |
+| Worktrees | `scripts/worktree-bootstrap.sh <slug>` → `.worktrees/<slug>` |
+| Audit trail | `scripts/audit-log.sh` → `.audit/opencode-p0-ship.tsv` |
+| Bridge + relay gates | `cd phodex-bridge && sfw npm test`; `cd relay && sfw npm test` |
+
+**Exit:** `opencode/integration` contains `origin/main` with bridge ≥490 pass and relay 41 pass.
+
+## Wave 1a — sim infra on fork branch
+
+Wave 1a pushes simulator automation to `multi-agents/opencode` (fork) before Wave 2 orchestration:
+
+| Deliverable | Path |
+|-------------|------|
+| DEBUG pairing hook | `RemodexDebugPairing.swift`, `ContentViewModel.attemptDebugPairingOnLaunchIfNeeded` |
+| RMX1 emitter | `scripts/opencode-emit-pairing-rmx1.sh` |
+| Preflight + row 9 smoke | `scripts/opencode-sim-preflight.sh` (`codex-smoke` subcommand) |
+| Screenshot validator | `scripts/validate-qa-screenshot.sh` |
+| Matrix recorder | `scripts/opencode-sim-record-row.sh` → `opencode-sim-matrix.json` |
+| XcodeBuildMCP defaults | `.xcodebuildmcp/config.yaml` |
+| Evidence dir (gitignored) | `.qa-screenshots/opencode-sim/` |
+
+**Exit:** `./scripts/opencode-sim-preflight.sh --check-only` passes on a machine with relay health + committed MCP config.
+
 ## Prerequisites (Wave 1 exit gate)
 
-- [ ] Wave 0 + 1a pushed to `multi-agents/opencode` on fork `kartikkabadi/remodex`
+- [ ] Wave 0 + 1a on `multi-agents/opencode` (fork `kartikkabadi/remodex`)
 - [ ] `127.0.0.1` in `run-local-remodex.sh`, embedded relay snippet, `relay/server.js`
 - [ ] `Docs/adr/001-opencode-runtime-shape.md` on branch
 - [ ] `PrivateOverrides.xcconfig` with `ws://127.0.0.1:9000/relay`
-- [ ] One successful XcodeBuildMCP preflight (`build_run_sim` via MCP or CLI)
+- [ ] One successful `./scripts/opencode-sim-preflight.sh` (or `--check-only` after manual launcher)
+
+## DEBUG simulator pairing (Wave 2A)
+
+**DEBUG builds only** (`#if DEBUG`). Supply the full paste token from the Mac bridge:
+
+| Source | Example |
+|--------|---------|
+| Environment | `REMODOX_DEBUG_PAIRING_RMX1='RMX1:…'` |
+| Launch argument | `-RemodexDebugPairingRMX1` `RMX1:…` (two argv entries) |
+| Launch argument (combined) | `-RemodexDebugPairingRMX1=RMX1:…` |
+
+Emit a fresh token while the OpenCode launcher is healthy:
+
+```sh
+./run-local-remodex.sh --opencode --hostname 127.0.0.1
+# separate terminal:
+./scripts/opencode-emit-pairing-rmx1.sh
+```
+
+Preflight wires launcher + emit + `build_run_sim` with launch args:
+
+```sh
+./scripts/opencode-sim-preflight.sh
+# health + config only:
+./scripts/opencode-sim-preflight.sh --check-only
+```
+
+`attemptDebugPairingOnLaunchIfNeeded` runs **before** onboarding auto-connect so a fresh Simulator can pair without manual paste (fallback: paste code ≤2 attempts per retry caps).
 
 ## Orchestration (collapsed Wave 2)
 
@@ -37,8 +95,8 @@ flowchart TB
 ## Infra profile (loopback)
 
 ```sh
-export STOP_LAUNCHER=1   # conceptual: kill prior launcher before mode switch
-./run-local-remodex.sh --opencode
+export STOP_LAUNCHER=1   # stop background launcher started by preflight
+./run-local-remodex.sh --opencode --hostname 127.0.0.1
 ```
 
 Health: `curl -sf http://127.0.0.1:9000/health`
@@ -55,55 +113,60 @@ Health: `curl -sf http://127.0.0.1:9000/health`
 **CLI fallback** (from repo root):
 
 ```sh
-sfw npx --yes xcodebuildmcp@2.5.2 simulator build-and-run
-sfw npx --yes xcodebuildmcp@2.5.2 simulator screenshot --output-path .qa-screenshots/opencode-sim/
+./scripts/opencode-sim-preflight.sh
+sfw npx --yes xcodebuildmcp@2.5.2 simulator screenshot --output-path .qa-screenshots/opencode-sim/row-00-connected.png
+./scripts/validate-qa-screenshot.sh .qa-screenshots/opencode-sim/row-00-connected.png
 ```
 
 **Do not** run full `CodexMobileUITests` unless Kartik asks.
 
 ## 2A sequence
 
-1. Start `./run-local-remodex.sh --opencode`; capture pairing code
-2. `build_run_sim` (or MCP equivalent)
-3. Pair via paste code; screenshot connected state
-4. `cd phodex-bridge && npm test`
+1. `./scripts/opencode-sim-preflight.sh` (launcher + RMX1 + `build_run_sim`)
+2. Confirm connected UI; screenshot `row-00-connected.png`
+3. `./scripts/validate-qa-screenshot.sh` on connected screenshot (exit 0)
+4. `cd phodex-bridge && sfw npm test`
 5. Filtered `test_sim` e.g. `CodexThreadRuntimeOverrideTests`, `TurnComposerReviewModeTests`
 
-Exit: `{ paired, logPaths, bundleId, unitTestsPass }` or stop Wave 2.
+Exit: `{ paired: true, logPaths, bundleId, unitTestsPass }` or stop Wave 2.
 
 ## 2B matrix (sequential, one Simulator)
 
-Run rows 1–11 from PR #54. Save screenshots:
+Run rows 1–11 from PR #54. Record each row:
 
-`.qa-screenshots/opencode-sim/row-NN-<slug>.png`
+```sh
+./scripts/opencode-sim-record-row.sh 1 agent-runtime pass .qa-screenshots/opencode-sim/row-01-agent-runtime.png
+```
+
+Save screenshots under `.qa-screenshots/opencode-sim/row-NN-<slug>.png`.
 
 **Row 9 — Codex regression (mandatory):**
 
-1. Stop OpenCode launcher
-2. `./run-local-remodex.sh` **without** `--opencode`
-3. Re-pair if needed; smoke test
-4. Stop launcher
-5. Restore `./run-local-remodex.sh --opencode`
+```sh
+./scripts/opencode-sim-preflight.sh codex-smoke
+# then restore OpenCode:
+./scripts/opencode-sim-preflight.sh
+```
 
 | Row | Automation | Notes |
 |-----|------------|-------|
 | 1–4, 10 | Partial | Menus fragile; unit tests backstop |
 | 5–8 | Low | Live turn + Stop; logs + screenshots |
-| 9 | Partial | Launcher mode switch above |
+| 9 | Partial | `codex-smoke` subcommand above |
 | 11 | Partial | Needs real RPC failure for toast copy |
 
 Mark **blocked** when honesty is low—never check PR boxes without evidence.
 
 ## 2C deliverables
 
-- Update [opencode-runtime-status.md](./opencode-runtime-status.md) per row (pass/fail/blocked + screenshot paths)
+- Update [opencode-runtime-status.md](./opencode-runtime-status.md) from `opencode-sim-matrix.json` only
 - PR #54 checklist comment or body section with links
 - Parent runs **thermo on evidence** before “T2 complete” language
 
 ## Failure escalation
 
 1. `snapshot_ui` + screenshot
-2. Bridge/relay logs from launcher terminal
+2. Bridge/relay logs from launcher terminal (`OPENCODE_LAUNCHER_LOG`, default `/tmp/remodex-opencode-launcher.log`)
 3. `debug_attach_sim` only if repro unclear
 4. File `blocked` with reason—no silent pass
 
@@ -111,9 +174,11 @@ Mark **blocked** when honesty is low—never check PR boxes without evidence.
 
 ```
 .qa-screenshots/opencode-sim/
+  row-00-connected.png
   row-01-agent-runtime.png
   ...
   row-09-codex-regression.png
+opencode-sim-matrix.json
 ```
 
-Directory is gitignored.
+`.qa-screenshots/opencode-sim/` is gitignored; commit the matrix JSON when publishing sim evidence.

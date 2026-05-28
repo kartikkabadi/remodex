@@ -1,25 +1,23 @@
-# WORKTREE_HANDOFF — opencode/wt-ios-fixes (WT-3)
+# WORKTREE_HANDOFF — wt-sim-infra (WT-6)
 
 | Field | Value |
-|-------|--------|
-| Branch | `opencode/wt-ios-fixes` |
-| Base | `opencode/integration` (post WT-2) |
-| Scope | WT-3 Swift-only P1/P2 fixes |
+|-------|-------|
+| Branch | `opencode/wt-sim-infra` |
+| Base | `opencode/integration` (post WT-3) |
+| Scope | WT-6 simulator infra only |
 
-## Changes
+## Deliverables
 
-| Fix | File |
-|-----|------|
-| `CodexThreadRuntimeOverride` custom `Decodable` + legacy migration | `CodexService.swift` |
-| Stale variant prune | `CodexService+RuntimeConfig.swift` |
-| Skill autocomplete miss markers | `TurnViewModel.swift` |
-| Timeline collapse phases | `TurnTimelineRenderProjection.swift` |
-| Keep-awake footer disconnected hint | `SettingsConnectionCard.swift` |
-| Queued drafts Dynamic Type | `QueuedDraftsPanel.swift`, `TurnComposerView.swift` |
-| Connection recovery dismiss hit target | `ConnectionRecoveryCard.swift` |
-
-No bridge / relay files touched.
+| Item | Path |
+|------|------|
+| DEBUG RMX1 hook | `RemodexDebugPairing.swift`, `ContentViewModel`, `ContentView` |
+| Emit RMX1 | `scripts/opencode-emit-pairing-rmx1.sh` |
+| Preflight + row 9 | `scripts/opencode-sim-preflight.sh` |
+| Screenshot validator | `scripts/validate-qa-screenshot.sh` |
+| Matrix recorder | `scripts/opencode-sim-record-row.sh` |
+| XcodeBuildMCP | `.xcodebuildmcp/config.yaml` |
+| Runbook | `Docs/plans/opencode-sim-qa-runbook.md` |
 
 ## Integrator
 
-Merge **before** WT-4. Parent integrator rebases + runs gate. Do not merge from this worktree.
+Rebase onto latest `opencode/integration`, merge, gate with `./scripts/opencode-sim-preflight.sh --check-only`.
