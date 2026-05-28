@@ -14,8 +14,6 @@ enum TurnComposerMetaMapper {
         switch CodexModelOption.normalizedProvider(provider) {
         case "codex":
             return "Codex"
-        case "cursor":
-            return "Cursor"
         case "opencode":
             return "OpenCode"
         case "claude":
@@ -25,6 +23,19 @@ enum TurnComposerMetaMapper {
                 .split(separator: "-")
                 .map { $0.capitalized }
                 .joined(separator: " ")
+        }
+    }
+
+    static func providerIconName(for provider: String) -> String {
+        switch CodexModelOption.normalizedProvider(provider) {
+        case "codex":
+            return "sparkles"
+        case "opencode":
+            return "terminal"
+        case "claude":
+            return "textformat"
+        default:
+            return "cube"
         }
     }
 
@@ -40,13 +51,6 @@ enum TurnComposerMetaMapper {
             "codex:gpt-5.3-codex-spark",
             "codex:gpt-5.2",
             "codex:gpt-5.2-codex",
-            "cursor:composer-2.5",
-            "cursor:composer-2.5[fast=true]",
-            "cursor:default",
-            "cursor:composer-2.5[]",
-            "cursor:default[]",
-            "cursor:gpt-5.5[context=272k,reasoning=medium,fast=false]",
-            "cursor:gpt-5.4[context=272k,reasoning=medium,fast=false]",
             "opencode:opencode/gpt-5.5",
             "opencode:opencode/gpt-5.4",
             "opencode:openai/gpt-5.5",
@@ -82,7 +86,6 @@ enum TurnComposerMetaMapper {
         let rawIdentifier = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let splitSelection = CodexModelOption.splitSelectionKey(rawIdentifier)
         let normalizedIdentifier = (splitSelection.modelId ?? rawIdentifier).trimmingCharacters(in: .whitespacesAndNewlines)
-        let cursorBaseIdentifier = normalizedIdentifier.components(separatedBy: "[").first ?? normalizedIdentifier
         switch normalizedIdentifier.lowercased() {
         case "gpt-5.5":
             return "GPT-5.5"
@@ -109,17 +112,8 @@ enum TurnComposerMetaMapper {
                 let modelName = normalizedIdentifier.components(separatedBy: "/").last ?? normalizedIdentifier
                 return modelTitle(forIdentifier: modelName)
             }
-            if normalizedIdentifier.contains("[") {
-                return modelTitle(forIdentifier: cursorBaseIdentifier)
-            }
             if normalizedIdentifier.lowercased().hasPrefix("gpt-") {
                 return "GPT-" + String(normalizedIdentifier.dropFirst("gpt-".count))
-            }
-            if normalizedIdentifier.lowercased().hasPrefix("composer-") {
-                return normalizedIdentifier
-                    .split(separator: "-")
-                    .map { $0.capitalized }
-                    .joined(separator: " ")
             }
             return normalizedIdentifier.isEmpty ? "GPT-5.5" : normalizedIdentifier
         }

@@ -39,7 +39,6 @@ private struct RuntimeModelIdentity {
 
 private enum RuntimeProviderPolicy {
     static let strictThreadProviders: Set<String> = [
-        "cursor",
         "opencode",
     ]
 }

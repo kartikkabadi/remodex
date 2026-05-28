@@ -15,8 +15,8 @@
 // * Submenus use `UIMenu.Options.singleSelection` so UIKit draws/clears the
 //   checkmarks for us. We pass `.on` for the active item as a hint; UIKit
 //   reconciles state when singleSelection is set.
-// * Model options are grouped by runtime provider so Codex/Cursor/OpenCode/etc.
-//   can share one picker without colliding on ids or display labels.
+// * Model options are grouped by runtime provider so Codex/OpenCode/etc. can
+//   share one picker without colliding on ids or display labels.
 
 import UIKit
 
@@ -53,7 +53,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     private static func modelMenu(_ input: Input) -> UIMenu {
         let subtitle: String
         if input.selectedModelID == nil {
-            subtitle = input.isRuntimeSelectionLoading ? "Loading…" : "Select model"
+            subtitle = input.isRuntimeSelectionLoading ? "Loading..." : "Select model"
         } else {
             subtitle = input.selectedModelTitle
         }
@@ -61,7 +61,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let modelChildren: [UIMenuElement] = {
             if input.isLoadingModels {
                 return [
-                    disabledInfoAction(title: "Loading models…"),
+                    disabledInfoAction(title: "Loading models..."),
                 ]
             }
             if input.orderedModelOptions.isEmpty {
@@ -114,7 +114,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             guard let models = grouped[provider], !models.isEmpty else { return nil }
             return UIMenu(
                 title: TurnComposerMetaMapper.providerTitle(for: provider),
-                image: RuntimeProviderIcon.menuUIImage(for: provider),
+                image: RuntimeProviderLogo.menuUIImage(provider: provider),
                 options: [.singleSelection],
                 children: models.map { model in
                     modelAction(model: model, input: input)
@@ -127,12 +127,10 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         switch CodexModelOption.normalizedProvider(provider) {
         case "codex":
             return 0
-        case "cursor":
-            return 1
         case "opencode":
-            return 2
+            return 1
         case "claude":
-            return 3
+            return 2
         default:
             return 100
         }

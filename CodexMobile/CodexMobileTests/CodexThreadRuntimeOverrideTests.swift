@@ -160,30 +160,48 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         XCTAssertEqual(secondService.selectedModelId, "codex:gpt-5.5")
     }
 
-    func testCursorModelOverrideRoutesTurnWithoutCodexReasoningDefaults() async throws {
+    func testProviderThreadKeepsUnresolvedRuntimeIdentity() {
         let service = makeService()
-        service.isConnected = true
-        let cursorModel = makeCursorModel()
-        service.availableModels = [makeGPT55Model(), cursorModel]
-        service.setThreadModelOverride(cursorModel, for: "thread-cursor")
+        service.availableModels = [makeGPT55Model()]
+        service.setSelectedModelId("codex:gpt-5.5")
+        service.upsertThread(CodexThread(
+            id: "thread-opencode",
+            cwd: "/tmp/project",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        ))
 
-        var capturedTurnStartParams: [JSONValue] = []
-        service.requestTransportOverride = { method, params in
-            XCTAssertEqual(method, "turn/start")
-            capturedTurnStartParams.append(params ?? .null)
-            return RPCMessage(
-                id: .string(UUID().uuidString),
-                result: .object(["turnId": .string("turn-cursor")]),
-                includeJSONRPC: false
-            )
-        }
+        XCTAssertNil(service.selectedModelOption(threadId: "thread-opencode"))
+        XCTAssertEqual(
+            service.visibleSelectedModelIDForComposer(threadId: "thread-opencode"),
+            "opencode:opencode/gpt-5.5"
+        )
+        XCTAssertEqual(
+            service.runtimeModelIdentifierForTurn(threadId: "thread-opencode"),
+            "opencode/gpt-5.5"
+        )
+        XCTAssertEqual(service.runtimeModelProviderForTurn(threadId: "thread-opencode"), "opencode")
+        XCTAssertNil(service.selectedReasoningEffortForSelectedModel(threadId: "thread-opencode"))
+    }
 
-        try await service.sendTurnStart("Use Cursor", to: "thread-cursor")
+    func testLegacyCodexModelProviderMetadataStillFallsBackToCodexModel() {
+        let service = makeService()
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("codex:gpt-5.4")
+        service.upsertThread(CodexThread(
+            id: "thread-legacy-provider",
+            cwd: "/tmp/project",
+            model: "gpt-5.4",
+            modelProvider: "openai"
+        ))
 
-        let payload = capturedTurnStartParams.first?.objectValue
-        XCTAssertEqual(payload?["model"]?.stringValue, "composer-2.5[fast=true]")
-        XCTAssertEqual(payload?["modelProvider"]?.stringValue, "cursor")
-        XCTAssertNil(payload?["effort"]?.stringValue)
+        XCTAssertEqual(
+            service.selectedModelOption(threadId: "thread-legacy-provider")?.selectionKey,
+            "codex:gpt-5.4"
+        )
+        XCTAssertEqual(service.runtimeModelIdentifierForTurn(threadId: "thread-legacy-provider"), "gpt-5.4")
+        XCTAssertEqual(service.runtimeModelProviderForTurn(threadId: "thread-legacy-provider"), "codex")
+        XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(threadId: "thread-legacy-provider"), "medium")
     }
 
     func testContinuationInheritsThreadRuntimeOverrides() {
@@ -335,19 +353,6 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
                 CodexReasoningEffortOption(reasoningEffort: "low", description: "Low"),
             ],
             defaultReasoningEffort: "low"
-        )
-    }
-
-    private func makeCursorModel() -> CodexModelOption {
-        CodexModelOption(
-            id: "composer-2.5[fast=true]",
-            model: "composer-2.5[fast=true]",
-            modelProvider: "cursor",
-            displayName: "Composer 2.5",
-            description: "Cursor test model",
-            isDefault: false,
-            supportedReasoningEfforts: [],
-            defaultReasoningEffort: nil
         )
     }
 }

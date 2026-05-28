@@ -16,10 +16,13 @@ const {
   projectCreateRootlessChatRoot,
   projectListDirectory,
   projectProjectlessRoots,
+  projectKnownProjects,
+  projectRememberKnownProject,
   projectSearchDirectories,
   projectValidatePath,
   rootlessChatSlugFromPromptHint,
 } = require("../src/project-handler");
+const { createProjectRegistry } = require("../src/project-registry");
 
 function makeTempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "remodex-project-handler-"));
@@ -49,6 +52,41 @@ test("project/projectlessRoots returns host-side Codex chat roots", async () => 
     path.join(codexHome, "threads"),
     path.join(homeDir, "Documents", "Codex"),
   ]);
+});
+
+test("project/rememberKnownProject stores a validated folder for picker reuse", async () => {
+  const homeDir = makeTempHome();
+  const projectPath = path.join(homeDir, "Developer", "App");
+  fs.mkdirSync(projectPath, { recursive: true });
+  const projectRegistry = createProjectRegistry({
+    homeDir,
+    codexHome: path.join(homeDir, ".codex"),
+    storagePath: path.join(homeDir, ".codex", "remodex", "known-projects.json"),
+  });
+
+  const remembered = await projectRememberKnownProject(
+    { path: projectPath, provider: "opencode" },
+    { homeDir, projectRegistry }
+  );
+  const listed = await projectKnownProjects({}, { projectRegistry });
+
+  assert.equal(remembered.project.path, fs.realpathSync(projectPath));
+  assert.deepEqual(listed.projects.map((project) => project.path), [fs.realpathSync(projectPath)]);
+  assert.deepEqual(listed.projects[0].providerHints, ["opencode"]);
+});
+
+test("project/rememberKnownProject rejects folders outside allowed local roots", async () => {
+  const homeDir = makeTempHome();
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-known-outside-"));
+  const projectRegistry = createProjectRegistry({
+    homeDir,
+    storagePath: path.join(homeDir, ".codex", "remodex", "known-projects.json"),
+  });
+
+  await assert.rejects(
+    () => projectRememberKnownProject({ path: outsideDir }, { homeDir, projectRegistry }),
+    /outside the allowed local project locations/
+  );
 });
 
 test("project/listDirectory returns sorted child folders and skips files or hidden folders by default", async () => {

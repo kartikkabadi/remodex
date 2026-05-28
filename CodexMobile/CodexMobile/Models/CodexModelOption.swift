@@ -216,8 +216,6 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
             return "codex"
         case "open-code", "open_code":
             return "opencode"
-        case "cursor-agent", "cursor_cli", "cursor-cli":
-            return "cursor"
         case "claude-code", "claudecode":
             return "claude"
         default:

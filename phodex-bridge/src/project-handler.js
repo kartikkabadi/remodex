@@ -2,12 +2,13 @@
 // Purpose: Serves safe Mac-local project folder discovery and creation requests from the iOS app.
 // Layer: Bridge handler
 // Exports: handleProjectRequest plus testable project filesystem helpers
-// Depends on: fs, os, path, ./codex-home
+// Depends on: fs, os, path, ./codex-home, ./project-registry
 
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { resolveCodexHome } = require("./codex-home");
+const { createProjectRegistry, getDefaultProjectRegistry } = require("./project-registry");
 
 const DEFAULT_DIRECTORY_LIMIT = 200;
 const DEFAULT_DIRECTORY_SEARCH_LIMIT = 80;
@@ -23,9 +24,9 @@ const ROOTLESS_CHAT_SLUG_MAX_LENGTH = 60;
 const ROOTLESS_CHAT_SLUG_FALLBACK = "new-chat";
 const ROOTLESS_CHAT_DEDUP_LIMIT = 50;
 
-// ─── ENTRY POINT ─────────────────────────────────────────────
+// Entry point
 
-function handleProjectRequest(rawMessage, sendResponse) {
+function handleProjectRequest(rawMessage, sendResponse, options = {}) {
   let parsed;
   try {
     parsed = JSON.parse(rawMessage);
@@ -41,7 +42,7 @@ function handleProjectRequest(rawMessage, sendResponse) {
   const id = parsed.id;
   const params = parsed.params || {};
 
-  handleProjectMethod(method, params)
+  handleProjectMethod(method, params, options)
     .then((result) => {
       sendResponse(JSON.stringify({ id, result }));
     })
@@ -69,6 +70,10 @@ async function handleProjectMethod(method, params, options = {}) {
       return projectQuickLocations(options);
     case "project/projectlessRoots":
       return projectProjectlessRoots(options);
+    case "project/knownProjects":
+      return projectKnownProjects(params, options);
+    case "project/rememberKnownProject":
+      return projectRememberKnownProject(params, options);
     case "project/listDirectory":
       return projectListDirectory(params, options);
     case "project/searchDirectories":
@@ -84,7 +89,7 @@ async function handleProjectMethod(method, params, options = {}) {
   }
 }
 
-// ─── Project Methods ─────────────────────────────────────────
+// Project methods
 
 async function projectQuickLocations(options = {}) {
   const homeDir = resolveHomeDir(options);
@@ -128,6 +133,32 @@ async function projectProjectlessRoots(options = {}) {
     documentedThreadsRoot,
     desktopDocumentsRoot,
   };
+}
+
+async function projectKnownProjects(params = {}, options = {}) {
+  const registry = resolveProjectRegistry(options);
+  return {
+    projects: registry.listProjects(params),
+  };
+}
+
+async function projectRememberKnownProject(params = {}, options = {}) {
+  const requestedPath = readString(params.path || params.projectPath || params.cwd);
+  if (!requestedPath) {
+    throw projectError("missing_path", "A folder path is required.");
+  }
+
+  const directory = await requireUsableDirectory(requestedPath, options);
+  const registry = resolveProjectRegistry(options);
+  const project = registry.rememberProjectPath(directory.path, {
+    source: readString(params.source) || "manual",
+    provider: readString(params.provider || params.modelProvider || params.model_provider),
+  });
+  if (!project) {
+    throw projectError("not_project_folder", "That folder is reserved for projectless chats.");
+  }
+
+  return { project };
 }
 
 async function projectListDirectory(params, options = {}) {
@@ -287,7 +318,7 @@ function rootlessChatSlugFromPromptHint(rawPromptHint) {
   return slug || ROOTLESS_CHAT_SLUG_FALLBACK;
 }
 
-// Appends "-2", "-3", … so two rapid-fire chats with the same first words
+// Appends "-2", "-3", etc. so two rapid-fire chats with the same first words
 // keep distinct folders instead of fighting over the same path.
 async function reserveUniqueRootlessChatPath(parentDirectory, slugBase) {
   for (let attempt = 0; attempt < ROOTLESS_CHAT_DEDUP_LIMIT; attempt += 1) {
@@ -325,7 +356,7 @@ async function safeRealpath(candidatePath) {
   }
 }
 
-// ─── Filesystem Helpers ──────────────────────────────────────
+// Filesystem helpers
 
 async function readDirectoryEntries(directoryPath, options = {}) {
   let dirents;
@@ -603,6 +634,16 @@ function resolveHomeDir(options = {}) {
   return options.homeDir || os.homedir();
 }
 
+function resolveProjectRegistry(options = {}) {
+  if (options.projectRegistry) {
+    return options.projectRegistry;
+  }
+  if (options.storagePath || options.homeDir || options.codexHome) {
+    return createProjectRegistry(options);
+  }
+  return getDefaultProjectRegistry();
+}
+
 function uniqueExistingOrCandidatePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -644,6 +685,8 @@ module.exports = {
   handleProjectMethod,
   projectQuickLocations,
   projectProjectlessRoots,
+  projectKnownProjects,
+  projectRememberKnownProject,
   projectListDirectory,
   projectSearchDirectories,
   projectValidatePath,

@@ -22,24 +22,23 @@ final class CodexThreadStartProjectBindingTests: XCTestCase {
         XCTAssertEqual(params["serviceTier"]?.stringValue, "fast")
     }
 
-    func testMakeThreadStartParamsNormalizesCursorProviderAlias() {
+    func testMakeThreadStartParamsIncludesProviderSelection() {
         let params = CodexThreadStartProjectBinding.makeThreadStartParams(
-            modelIdentifier: "composer-2.5[fast=true]",
-            modelProvider: "cursor-agent",
-            preferredProjectPath: "/Users/me/work/project",
+            modelIdentifier: "opencode/gpt-5.5",
+            modelProvider: "open-code",
+            preferredProjectPath: nil,
             serviceTier: nil
         )
 
-        XCTAssertEqual(params["model"]?.stringValue, "composer-2.5[fast=true]")
-        XCTAssertEqual(params["modelProvider"]?.stringValue, "cursor")
-        XCTAssertEqual(params["cwd"]?.stringValue, "/Users/me/work/project")
-        XCTAssertNil(params["serviceTier"])
+        XCTAssertEqual(params["model"]?.stringValue, "opencode/gpt-5.5")
+        XCTAssertEqual(params["modelProvider"]?.stringValue, "opencode")
     }
 
     func testMakeThreadStartParamsSkipsEmptyCwd() {
         let normalized = CodexThreadStartProjectBinding.normalizedProjectPath("   ")
         let params = CodexThreadStartProjectBinding.makeThreadStartParams(
             modelIdentifier: nil,
+            modelProvider: nil,
             preferredProjectPath: normalized,
             serviceTier: nil
         )
@@ -52,6 +51,7 @@ final class CodexThreadStartProjectBindingTests: XCTestCase {
         let normalized = CodexThreadStartProjectBinding.normalizedProjectPath("server")
         let params = CodexThreadStartProjectBinding.makeThreadStartParams(
             modelIdentifier: nil,
+            modelProvider: nil,
             preferredProjectPath: normalized,
             serviceTier: nil
         )
@@ -80,14 +80,14 @@ final class CodexThreadStartProjectBindingTests: XCTestCase {
         XCTAssertEqual(patched.cwd, "/Users/me/work/project")
     }
 
-    func testApplyFallbackOverridesMismatchedCwd() {
+    func testApplyFallbackDoesNotOverrideExistingCwd() {
         let responseThread = CodexThread(id: "thread-1", cwd: "/server/path")
         let patched = CodexThreadStartProjectBinding.applyPreferredProjectFallback(
             to: responseThread,
             preferredProjectPath: "/Users/me/work/project"
         )
 
-        XCTAssertEqual(patched.cwd, "/Users/me/work/project")
+        XCTAssertEqual(patched.cwd, "/server/path")
     }
 
     func testApplyFallbackOverridesPseudoProjectBucketCwd() {
