@@ -62,7 +62,8 @@ struct TurnComposerHostView: View {
                     hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
                     isPlanModeArmed: viewModel.isPlanModeArmed
                 )
-                    && !availableForkDestinations.isEmpty
+                    && !availableForkDestinations.isEmpty,
+                hidesStatusCommand: codex.isOpenCodeBridgeConnected
             ),
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
             isFileAutocompleteVisible: viewModel.isFileAutocompleteVisible,
@@ -102,14 +103,16 @@ struct TurnComposerHostView: View {
             voiceAudioLevels: voiceAudioLevels,
             voiceRecordingDuration: voiceRecordingDuration
         )
+        let planCollaborationMode: CodexCollaborationModeKind? = viewModel.isPlanModeArmed ? .plan : nil
         let runtimeState = TurnComposerRuntimeState.resolve(
             codex: codex,
+            reasoningDisplayOptions: reasoningDisplayOptions,
             threadId: thread.id,
-            reasoningDisplayOptions: reasoningDisplayOptions
+            collaborationMode: planCollaborationMode
         )
         let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex, threadId: thread.id)
-        let selectedModelID = codex.visibleSelectedModelIDForComposer(threadId: thread.id)
-        let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer(threadId: thread.id)
+        let selectedModelID = codex.visibleSelectedModelIDForComposer()
+        let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer()
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
             && !SidebarThreadGrouping.isRootlessChatThread(thread)
 

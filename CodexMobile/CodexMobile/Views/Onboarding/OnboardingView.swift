@@ -32,7 +32,7 @@ struct OnboardingView: View {
                         stepNumber: 1,
                         icon: "terminal",
                         title: "Install Codex CLI",
-                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPad.",
+                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
                         command: codexInstallCommand
                     )
                     .tag(2)
@@ -41,9 +41,9 @@ struct OnboardingView: View {
                         stepNumber: 2,
                         icon: "link",
                         title: "Install the Bridge",
-                        description: "A lightweight relay that securely connects your Mac to your iPad.",
+                        description: "A lightweight relay that securely connects your device to your iPhone.",
                         command: "npm install -g remodex@latest",
-                        commandCaption: "Remodex can keep your Mac awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
+                        commandCaption: "Remodex can keep your device awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
                     )
                     .tag(3)
 
@@ -51,7 +51,7 @@ struct OnboardingView: View {
                         stepNumber: 3,
                         icon: "qrcode.viewfinder",
                         title: "Start Pairing",
-                        description: "Run this on your computer. A QR code will appear in your terminal — scan it next.",
+                        description: "Run this on your device. A QR code will appear in your terminal — scan it next.",
                         command: "remodex up"
                     )
                     .tag(4)
@@ -64,11 +64,11 @@ struct OnboardingView: View {
         .preferredColorScheme(.dark)
         .alert("Install Codex CLI First", isPresented: $isShowingCodexInstallReminder) {
             Button("Stay Here", role: .cancel) {}
-            Button("Continue Anyway") {
+            Button("Understood") {
                 advanceToNextPage()
             }
         } message: {
-            Text("Copy and paste \"\(codexInstallCommand)\" on your computer before moving on. Remodex will not work until Codex CLI is installed and available in your PATH.")
+            Text("Copy and paste \"\(codexInstallCommand)\" on your device before moving on. Remodex will not work until Codex CLI is installed and available in your PATH.")
         }
     }
 
@@ -134,7 +134,7 @@ struct OnboardingView: View {
     private func secondaryCapsuleButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
+                RemodexIcon.image(systemName: systemImage)
                     .font(.system(size: 15, weight: .semibold))
 
                 Text(title)

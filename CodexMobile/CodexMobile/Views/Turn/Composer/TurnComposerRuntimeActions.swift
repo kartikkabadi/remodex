@@ -11,17 +11,15 @@ struct TurnComposerRuntimeActions {
     let selectAutomaticReasoning: () -> Void
     let selectReasoning: (String) -> Void
     let selectServiceTier: (CodexServiceTier?) -> Void
+    let selectAgent: (String?) -> Void
+    let selectVariant: (String?) -> Void
 
-    static func resolve(codex: CodexService, threadId: String? = nil) -> TurnComposerRuntimeActions {
+    static func resolve(
+        codex: CodexService,
+        threadId: String? = nil
+    ) -> TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
-            selectModel: { selectionKey in
-                if let threadId,
-                   let model = codex.modelOption(forSelectionKey: selectionKey) {
-                    codex.setThreadModelOverride(model, for: threadId)
-                } else {
-                    codex.setSelectedModelId(selectionKey)
-                }
-            },
+            selectModel: codex.setSelectedModelId,
             selectAutomaticReasoning: {
                 if let threadId {
                     codex.clearThreadReasoningEffortOverride(for: threadId)
@@ -36,11 +34,25 @@ struct TurnComposerRuntimeActions {
                     codex.setSelectedReasoningEffort(effort)
                 }
             },
-            selectServiceTier: { tier in
+            selectServiceTier: { serviceTier in
                 if let threadId {
-                    codex.setThreadServiceTierOverride(tier, for: threadId)
+                    codex.setThreadServiceTierOverride(serviceTier, for: threadId)
                 } else {
-                    codex.setSelectedServiceTier(tier)
+                    codex.setSelectedServiceTier(serviceTier)
+                }
+            },
+            selectAgent: { agentId in
+                if let threadId {
+                    codex.setThreadAgentIdOverride(agentId, for: threadId)
+                } else {
+                    codex.setSelectedAgentId(agentId)
+                }
+            },
+            selectVariant: { variantId in
+                if let threadId {
+                    codex.setThreadVariantIdOverride(variantId, for: threadId)
+                } else {
+                    codex.setSelectedVariantId(variantId)
                 }
             }
         )

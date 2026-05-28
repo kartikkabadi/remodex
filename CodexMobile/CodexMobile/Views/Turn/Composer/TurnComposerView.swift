@@ -111,6 +111,7 @@ struct TurnComposerView: View {
     var showsSecondaryBar: Bool = true
 
     @State private var composerInputHeight: CGFloat = 32
+    @State private var inputChangeTask: Task<Void, Never>?
 
     private var showsSendButton: Bool {
         !isThreadRunning || accessoryState.hasSendableContent(input: input)
@@ -156,17 +157,17 @@ struct TurnComposerView: View {
                     )
                 }
 
-                VStack(spacing: 0) {
-                    TurnComposerQueuedDraftsSection(
-                        drafts: accessoryState.queuedDrafts,
-                        canSteerDrafts: accessoryState.canSteerQueuedDrafts,
-                        canRestoreDrafts: accessoryState.canRestoreQueuedDrafts,
-                        steeringDraftID: accessoryState.steeringDraftID,
-                        onRestoreQueuedDraft: onRestoreQueuedDraft,
-                        onSteerQueuedDraft: onSteerQueuedDraft,
-                        onRemoveQueuedDraft: onRemoveQueuedDraft
-                    )
+                TurnComposerQueuedDraftsSection(
+                    drafts: accessoryState.queuedDrafts,
+                    canSteerDrafts: accessoryState.canSteerQueuedDrafts,
+                    canRestoreDrafts: accessoryState.canRestoreQueuedDrafts,
+                    steeringDraftID: accessoryState.steeringDraftID,
+                    onRestoreQueuedDraft: onRestoreQueuedDraft,
+                    onSteerQueuedDraft: onSteerQueuedDraft,
+                    onRemoveQueuedDraft: onRemoveQueuedDraft
+                )
 
+                VStack(spacing: 0) {
                     TurnComposerAccessorySection(
                         state: accessoryState,
                         onRemoveAttachment: onRemoveAttachment,
@@ -203,16 +204,18 @@ struct TurnComposerView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.top, accessoryState.topInputPadding + 4)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 4)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         guard !isComposerInteractionLocked else { return }
                         isInputFocused.wrappedValue = true
                     }
                     .onChange(of: input) { _, newValue in
-                        // Defer the observable-model mutation out of the .onChange action
-                        // to avoid AttributeGraph cycles when the parent re-renders.
-                        DispatchQueue.main.async {
+                        inputChangeTask?.cancel()
+                        // Coalesce fast typing into one autocomplete refresh per main-actor turn.
+                        inputChangeTask = Task { @MainActor in
+                            await Task.yield()
+                            guard !Task.isCancelled else { return }
                             onInputChanged(newValue)
                         }
                     }
@@ -365,6 +368,10 @@ private struct TurnComposerAutocompletePanels: View {
 }
 
 private struct TurnComposerQueuedDraftsSection: View {
+    private static let cornerRadius: CGFloat = 22
+
+    @ScaledMetric(relativeTo: .caption) private var queuedDraftRowHeight = QueuedDraftsPanel.defaultRowHeight
+
     let drafts: [QueuedTurnDraft]
     let canSteerDrafts: Bool
     let canRestoreDrafts: Bool
@@ -383,14 +390,23 @@ private struct TurnComposerQueuedDraftsSection: View {
                     steeringDraftID: steeringDraftID,
                     onRestore: onRestoreQueuedDraft,
                     onSteer: onSteerQueuedDraft,
-                    onRemove: onRemoveQueuedDraft
+                    onRemove: onRemoveQueuedDraft,
+                    rowHeight: queuedDraftRowHeight
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 6)
-                .padding(.top, 7)
-                .padding(.bottom, 3)
+                .adaptiveGlass(
+                    .regular,
+                    in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
             }
         }
+        // Keep queued follow-ups visually separate from the composer input.
+        .frame(
+            height: drafts.isEmpty
+                ? 0
+                : CGFloat(drafts.count) * queuedDraftRowHeight + CGFloat(max(drafts.count - 1, 0))
+        )
     }
 }
 
@@ -668,13 +684,25 @@ private struct ComposerPreviewContent: View {
                 selectedReasoningEffort: "high",
                 reasoningMenuDisabled: false,
                 selectedServiceTier: .fast,
-                supportsFastMode: true
+                supportsFastMode: true,
+                orderedAgentOptions: [],
+                selectedAgentID: nil,
+                agentMenuDisabled: true,
+                isAgentListLoading: false,
+                agentsErrorMessage: nil,
+                isOpenCodeBridgeConnected: false,
+                supportsVariants: false,
+                orderedVariantOptions: [],
+                selectedVariantID: nil,
+                variantMenuDisabled: true
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },
                 selectAutomaticReasoning: {},
                 selectReasoning: { _ in },
-                selectServiceTier: { _ in }
+                selectServiceTier: { _ in },
+                selectAgent: { _ in },
+                selectVariant: { _ in }
             ),
             voiceButtonPresentation: TurnComposerVoiceButtonPresentation(
                 systemImageName: "mic",

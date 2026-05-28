@@ -7,6 +7,8 @@
 import SwiftUI
 
 struct QueuedDraftsPanel: View {
+    static let defaultRowHeight: CGFloat = 34
+
     let drafts: [QueuedTurnDraft]
     let canSteerDrafts: Bool
     let canRestoreDrafts: Bool
@@ -14,18 +16,18 @@ struct QueuedDraftsPanel: View {
     let onRestore: (String) -> Void
     let onSteer: (String) -> Void
     let onRemove: (String) -> Void
-    var rowHeight: CGFloat = 34
+    var rowHeight: CGFloat = Self.defaultRowHeight
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(drafts) { draft in
                 HStack(spacing: 8) {
                     RemodexIcon.image(systemName: "return.right")
-                        .font(AppFont.system(size: 10, weight: .regular))
+                        .font(AppFont.caption2())
                         .foregroundStyle(.tertiary)
 
                     Text(draft.text)
-                        .font(AppFont.system(size: 12, weight: .medium))
+                        .font(AppFont.caption(weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -38,7 +40,7 @@ struct QueuedDraftsPanel: View {
                         onRestore(draft.id)
                     } label: {
                         RemodexIcon.image(systemName: "arrow.down")
-                            .font(AppFont.system(size: 12, weight: .medium))
+                            .font(AppFont.caption(weight: .medium))
                             .foregroundStyle(canRestoreDrafts ? .primary : .tertiary)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
@@ -57,7 +59,7 @@ struct QueuedDraftsPanel: View {
                             onSteer(draft.id)
                         } label: {
                             Text("Steer")
-                                .font(AppFont.system(size: 12, weight: .medium))
+                                .font(AppFont.caption(weight: .medium))
                                 .foregroundStyle(.primary)
                                 .padding(.horizontal, 10)
                                 .frame(height: 24)

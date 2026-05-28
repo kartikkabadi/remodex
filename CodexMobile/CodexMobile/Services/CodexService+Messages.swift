@@ -20,9 +20,9 @@ private enum StreamingDeltaCoalescingPolicy {
     // them readable without invalidating the timeline on every transport chunk.
     static let flushDelayNanoseconds: UInt64 = 50_000_000
     // Assistant prose gets one quick first paint, then a calmer cadence once text is visible.
-    static let assistantInitialFlushDelayNanoseconds: UInt64 = 16_000_000
-    static let assistantStreamingFlushDelayNanoseconds: UInt64 = 40_000_000
-    static let assistantLargeStreamingFlushDelayNanoseconds: UInt64 = 60_000_000
+    static let assistantInitialFlushDelayNanoseconds: UInt64 = 50_000_000
+    static let assistantStreamingFlushDelayNanoseconds: UInt64 = 80_000_000
+    static let assistantLargeStreamingFlushDelayNanoseconds: UInt64 = 100_000_000
     static let assistantLargePendingDeltaByteCount = 12_000
     static let assistantLargeVisibleTextByteCount = 32_000
 }
@@ -235,10 +235,6 @@ extension CodexService {
     // Refreshes the derived output cache and bumps the thread timeline revision.
     func updateCurrentOutput(for threadId: String) {
         noteMessagesChanged(for: threadId)
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            rolloutBootstrapReplayDeferredTimelineThreadIDs.insert(threadId)
-            return
-        }
 
         let latestAssistantText = syncLatestAssistantOutputCache(for: threadId)
         refreshThreadTimelineState(for: threadId)
@@ -254,10 +250,6 @@ extension CodexService {
     // Falls back to the full projection path whenever the visible snapshot shape changed underneath us.
     func updateStreamingAssistantOutput(for threadId: String, messageId: String, rawMessageIndex: Int? = nil) {
         noteMessagesChanged(for: threadId)
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            rolloutBootstrapReplayDeferredTimelineThreadIDs.insert(threadId)
-            return
-        }
 
         // Keep the visible output anchored to the latest assistant bubble, even if a late
         // delta updates an older item inside the same turn.
@@ -467,7 +459,7 @@ extension CodexService {
     }
 
     // Clears running/fallback flags together when a thread finishes or disappears.
-    func clearRunningState(for threadId: String, scheduleHistoryReconcile: Bool = true) {
+    func clearRunningState(for threadId: String) {
         runningThreadIDs.remove(threadId)
         protectedRunningFallbackThreadIDs.remove(threadId)
         desktopMirroredRunningThreadIDs.remove(threadId)
@@ -476,9 +468,7 @@ extension CodexService {
         clearMirroredRunningCatchupNeeded(for: threadId)
         refreshBusyRepoRootsAndDependentTimelineStates()
         refreshThreadTimelineState(for: threadId)
-        if scheduleHistoryReconcile {
-            scheduleCanonicalHistoryReconcileIfNeeded(for: threadId)
-        }
+        scheduleCanonicalHistoryReconcileIfNeeded(for: threadId)
     }
 
     // Clears every running marker during disconnect/cleanup so stale repo-busy state cannot leak.
@@ -602,16 +592,6 @@ extension CodexService {
         threadsWithSatisfiedDeferredHistoryHydration.insert(threadId)
     }
 
-    // Desktop IPC completion is only a local mirror signal, not proof that a
-    // follow-up thread/read is authoritative enough to replace local chronology.
-    func suppressCanonicalHistoryReconcileAfterDesktopIpcCompletion(for threadId: String) {
-        threadsNeedingCanonicalHistoryReconcile.remove(threadId)
-        canonicalHistoryReconcileTaskByThreadID[threadId]?.cancel()
-        canonicalHistoryReconcileTaskByThreadID.removeValue(forKey: threadId)
-        canonicalHistoryReconcileRetryTaskByThreadID[threadId]?.cancel()
-        canonicalHistoryReconcileRetryTaskByThreadID.removeValue(forKey: threadId)
-    }
-
     // With turn pagination, the cursor-backed store replaces one-shot full-history reconciliation.
     func markThreadPaginatedHistorySatisfied(_ threadId: String) {
         threadsNeedingCanonicalHistoryReconcile.remove(threadId)
@@ -631,40 +611,6 @@ extension CodexService {
     // Returns turn ids that ended via interruption so copy actions can stay hidden.
     func stoppedTurnIDs(for threadId: String) -> Set<String> {
         stoppedTurnIDsByThread[threadId] ?? []
-    }
-
-    // Desktop IPC idle completion can arrive while tool rows are still the only active signal.
-    // Keep those rows streaming/running until their own item completion lands.
-    func hasActiveStreamingSystemActivity(threadId: String, turnId: String?) -> Bool {
-        let normalizedTurnId = normalizedIdentifier(turnId)
-        let belongsToTurn: (String?) -> Bool = { candidateTurnId in
-            guard let normalizedTurnId else { return true }
-            return self.normalizedIdentifier(candidateTurnId) == normalizedTurnId
-        }
-
-        if pendingSystemDeltasByKey.values.contains(where: { pending in
-            pending.threadId == threadId
-                && belongsToTurn(pending.turnId)
-                && Self.isActiveSystemActivityKind(pending.kind)
-        }) {
-            return true
-        }
-
-        return messagesByThread[threadId]?.contains(where: { message in
-            message.role == .system
-                && message.isStreaming
-                && belongsToTurn(message.turnId)
-                && Self.isActiveSystemActivityKind(message.kind)
-        }) ?? false
-    }
-
-    private static func isActiveSystemActivityKind(_ kind: CodexMessageKind) -> Bool {
-        switch kind {
-        case .toolActivity, .commandExecution, .fileChange, .subagentAction:
-            return true
-        case .thinking, .chat, .plan, .userInputPrompt:
-            return false
-        }
     }
 
     // Returns sidebar-only chat badge state. This intentionally stays separate from
@@ -1584,6 +1530,7 @@ extension CodexService {
                 if threadMessages[targetIndex].itemId == nil {
                     threadMessages[targetIndex].itemId = itemId
                 }
+                let keepID = threadMessages[targetIndex].id
                 pruneDuplicateSystemRows(
                     in: &threadMessages,
                     keepIndex: targetIndex,
@@ -3129,16 +3076,6 @@ extension CodexService {
             return
         }
 
-        if adoptDuplicateAssistantDeltaIfNeeded(
-            threadId: threadId,
-            turnId: turnId,
-            itemId: itemId,
-            assistantPhase: assistantPhase,
-            delta: delta
-        ) {
-            return
-        }
-
         let messageID = ensureStreamingAssistantMessage(
             threadId: threadId,
             turnId: turnId,
@@ -3177,69 +3114,6 @@ extension CodexService {
 
         persistMessages()
         updateStreamingAssistantOutput(for: threadId, messageId: messageID, rawMessageIndex: messageIndex)
-    }
-
-    // Desktop live state and rollout history can both publish the same commentary with different item IDs.
-    private func adoptDuplicateAssistantDeltaIfNeeded(
-        threadId: String,
-        turnId: String,
-        itemId: String?,
-        assistantPhase: String?,
-        delta: String
-    ) -> Bool {
-        guard normalizedAssistantPhase(assistantPhase) == "commentary",
-              delta.utf8.count <= MessageTextProcessingPolicy.largeTextByteLimit,
-              let threadMessages = messagesByThread[threadId] else {
-            return false
-        }
-
-        let normalizedDelta = Self.normalizedMessageText(delta)
-        guard Self.hasMeaningfulHistoryText(normalizedDelta) else {
-            return false
-        }
-
-        guard let duplicateIndex = threadMessages.indices.reversed().first(where: { index in
-            let candidate = threadMessages[index]
-            guard candidate.role == .assistant,
-                  candidate.turnId == turnId,
-                  candidate.text.utf8.count <= MessageTextProcessingPolicy.largeTextByteLimit,
-                  Self.normalizedMessageText(candidate.text) == normalizedDelta else {
-                return false
-            }
-
-            let candidatePhase = normalizedAssistantPhase(candidate.assistantPhase)
-            return candidatePhase == "commentary" || candidatePhase == nil
-        }) else {
-            return false
-        }
-
-        let messageID = threadMessages[duplicateIndex].id
-        var didMutate = false
-        if let normalizedItemId = normalizedStreamingItemID(itemId) {
-            let itemKey = assistantStreamingMessageKey(
-                threadId: threadId,
-                turnId: turnId,
-                itemId: normalizedItemId
-            )
-            streamingAssistantMessageByItemKey[itemKey] = messageID
-            if messagesByThread[threadId]?[duplicateIndex].itemId == nil {
-                messagesByThread[threadId]?[duplicateIndex].itemId = normalizedItemId
-                didMutate = true
-            }
-        }
-        if applyAssistantPhaseIfNeeded(
-            threadId: threadId,
-            messageIndex: duplicateIndex,
-            assistantPhase: assistantPhase
-        ) {
-            didMutate = true
-        }
-
-        if didMutate {
-            persistMessages()
-            updateStreamingAssistantOutput(for: threadId, messageId: messageID, rawMessageIndex: duplicateIndex)
-        }
-        return true
     }
 
     // Late replay deltas for a closed turn should patch the closed assistant row, not reopen streaming.
@@ -4235,18 +4109,13 @@ extension CodexService {
         return true
     }
 
-    // Flushes streaming rows and clears running flags for terminal or synthetic completion signals.
-    // Callers decide whether the signal is authoritative enough to trigger canonical history reconcile.
-    func markTurnCompleted(
-        threadId: String,
-        turnId: String?,
-        scheduleHistoryReconcile: Bool = true
-    ) {
+    // Marks streaming assistant state complete once turn/completed arrives.
+    func markTurnCompleted(threadId: String, turnId: String?) {
         let resolvedTurnId = turnId ?? activeTurnIdByThread[threadId]
         flushPendingAssistantDeltas(for: threadId, turnId: resolvedTurnId)
         flushPendingSystemDeltasForTurn(threadId: threadId, turnId: resolvedTurnId)
 
-        clearRunningState(for: threadId, scheduleHistoryReconcile: scheduleHistoryReconcile)
+        clearRunningState(for: threadId)
         clearRunningThreadWatch(threadId)
         let shouldFinalizePlanSteps: Bool = {
             if let resolvedTurnId {
@@ -4444,11 +4313,6 @@ extension CodexService {
 
 extension CodexService {
     func persistMessages() {
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            rolloutBootstrapReplayNeedsMessagePersist = true
-            return
-        }
-
         messagePersistenceDebounceTask?.cancel()
         messagePersistenceDebounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -4745,11 +4609,6 @@ extension CodexService {
 
     // Rebuilds one thread's render snapshot from service-owned caches after any timeline mutation.
     func refreshThreadTimelineState(for threadId: String) {
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            rolloutBootstrapReplayDeferredTimelineThreadIDs.insert(threadId)
-            return
-        }
-
         let state = timelineState(for: threadId)
         let messages = messagesByThread[threadId] ?? []
         let revision = messageRevisionByThread[threadId] ?? 0

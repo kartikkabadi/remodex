@@ -6,37 +6,127 @@
 
 import Foundation
 
+struct AgentOption: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+    let mode: String?
+    let isCustom: Bool
+    let description: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case displayNameSnake = "display_name"
+        case mode
+        case isCustom
+        case isCustomSnake = "is_custom"
+        case description
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        mode: String? = nil,
+        isCustom: Bool = false,
+        description: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.mode = mode
+        self.isCustom = isCustom
+        self.description = description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? id
+        mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isCustomSnake)
+            ?? false
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encode(isCustom, forKey: .isCustom)
+        try container.encodeIfPresent(description, forKey: .description)
+    }
+}
+
+struct VariantOption: Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+
+    init(id: String, displayName: String) {
+        self.id = id
+        self.displayName = displayName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case displayNameSnake = "display_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? id
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+    }
+}
+
 struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let model: String
-    let modelProvider: String
     let displayName: String
     let description: String
     let isDefault: Bool
     let supportsFastMode: Bool
     let supportedReasoningEfforts: [CodexReasoningEffortOption]
     let defaultReasoningEffort: String?
+    let providerId: String?
+    let supportedVariants: [VariantOption]
+    let defaultVariant: String?
 
     init(
         id: String,
         model: String,
-        modelProvider: String = "codex",
         displayName: String,
         description: String,
         isDefault: Bool,
         supportsFastMode: Bool = false,
         supportedReasoningEfforts: [CodexReasoningEffortOption],
-        defaultReasoningEffort: String?
+        defaultReasoningEffort: String?,
+        providerId: String? = nil,
+        supportedVariants: [VariantOption] = [],
+        defaultVariant: String? = nil
     ) {
         self.id = id
         self.model = model
-        self.modelProvider = Self.normalizedProvider(modelProvider)
         self.displayName = displayName
         self.description = description
         self.isDefault = isDefault
         self.supportsFastMode = supportsFastMode
         self.supportedReasoningEfforts = supportedReasoningEfforts
         self.defaultReasoningEffort = defaultReasoningEffort
+        self.providerId = providerId
+        self.supportedVariants = supportedVariants
+        self.defaultVariant = defaultVariant
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -44,12 +134,6 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         case model
         case slug
         case name
-        case provider
-        case modelProvider
-        case modelProviderSnake = "model_provider"
-        case runtimeProvider
-        case runtimeProviderSnake = "runtime_provider"
-        case harness
         case displayName
         case displayNameSnake = "display_name"
         case description
@@ -67,6 +151,12 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         case supportedReasoningEffortsSnake = "supported_reasoning_efforts"
         case defaultReasoningEffort
         case defaultReasoningEffortSnake = "default_reasoning_effort"
+        case providerId
+        case providerIdSnake = "provider_id"
+        case supportedVariants
+        case supportedVariantsSnake = "supported_variants"
+        case defaultVariant
+        case defaultVariantSnake = "default_variant"
     }
 
     init(from decoder: Decoder) throws {
@@ -77,7 +167,6 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         let idValue = try container.decodeIfPresent(String.self, forKey: .id)
         let rawModel = modelValue ?? slugValue ?? idValue ?? ""
         let normalizedModel = rawModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawProvider = try Self.decodeProvider(from: container)
 
         let rawID = idValue ?? slugValue ?? normalizedModel
 
@@ -115,7 +204,6 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
 
         id = normalizedID.isEmpty ? normalizedModel : normalizedID
         model = normalizedModel
-        modelProvider = Self.normalizedProvider(rawProvider)
         displayName = normalizedDisplayName.isEmpty ? normalizedModel : normalizedDisplayName
         description = rawDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         isDefault = camelDefaultFlag ?? snakeDefaultFlag ?? false
@@ -129,6 +217,26 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
 
         let normalizedDefault = defaultEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
         defaultReasoningEffort = (normalizedDefault?.isEmpty == true) ? nil : normalizedDefault
+
+        let camelProviderId = try container.decodeIfPresent(String.self, forKey: .providerId)
+        let snakeProviderId = try container.decodeIfPresent(String.self, forKey: .providerIdSnake)
+        providerId = camelProviderId ?? snakeProviderId
+
+        let camelVariants = try container.decodeIfPresent(
+            [VariantOption].self,
+            forKey: .supportedVariants
+        )
+        let snakeVariants = try container.decodeIfPresent(
+            [VariantOption].self,
+            forKey: .supportedVariantsSnake
+        )
+        supportedVariants = camelVariants ?? snakeVariants ?? []
+
+        let camelDefaultVariant = try container.decodeIfPresent(String.self, forKey: .defaultVariant)
+        let snakeDefaultVariant = try container.decodeIfPresent(String.self, forKey: .defaultVariantSnake)
+        let normalizedDefaultVariant = (camelDefaultVariant ?? snakeDefaultVariant)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        defaultVariant = (normalizedDefaultVariant?.isEmpty == true) ? nil : normalizedDefaultVariant
     }
 
     // Codex model/list has shipped several field spellings; keep this parser
@@ -161,24 +269,6 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         return camelTiers + snakeTiers
     }
 
-    private static func decodeProvider(from container: KeyedDecodingContainer<CodingKeys>) throws -> String {
-        let keys: [CodingKeys] = [
-            .modelProvider,
-            .modelProviderSnake,
-            .provider,
-            .runtimeProvider,
-            .runtimeProviderSnake,
-            .harness,
-        ]
-
-        for key in keys {
-            if let value = try container.decodeIfPresent(String.self, forKey: key) {
-                return value
-            }
-        }
-        return "codex"
-    }
-
     func supportsServiceTier(_ serviceTier: CodexServiceTier) -> Bool {
         switch serviceTier {
         case .fast:
@@ -190,49 +280,12 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(model, forKey: .model)
-        try container.encode(modelProvider, forKey: .modelProvider)
         try container.encode(displayName, forKey: .displayName)
         try container.encode(description, forKey: .description)
         try container.encode(isDefault, forKey: .isDefault)
         try container.encode(supportsFastMode, forKey: .supportsFastMode)
         try container.encode(supportedReasoningEfforts, forKey: .supportedReasoningEfforts)
         try container.encodeIfPresent(defaultReasoningEffort, forKey: .defaultReasoningEffort)
-    }
-
-    var selectionKey: String {
-        Self.selectionKey(provider: modelProvider, modelId: id)
-    }
-
-    static func selectionKey(provider: String?, modelId: String?) -> String {
-        let normalizedProvider = normalizedProvider(provider)
-        let normalizedModelID = modelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return "\(normalizedProvider):\(normalizedModelID)"
-    }
-
-    static func normalizedProvider(_ value: String?) -> String {
-        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        switch normalized {
-        case "":
-            return "codex"
-        case "open-code", "open_code":
-            return "opencode"
-        case "claude-code", "claudecode":
-            return "claude"
-        default:
-            return normalized
-        }
-    }
-
-    static func splitSelectionKey(_ value: String?) -> (provider: String, modelId: String?) {
-        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let separatorIndex = normalized.firstIndex(of: ":") else {
-            return (normalizedProvider(nil), normalized.isEmpty ? nil : normalized)
-        }
-
-        let provider = String(normalized[..<separatorIndex])
-        let modelStart = normalized.index(after: separatorIndex)
-        let modelId = String(normalized[modelStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (normalizedProvider(provider), modelId.isEmpty ? nil : modelId)
     }
 }
 

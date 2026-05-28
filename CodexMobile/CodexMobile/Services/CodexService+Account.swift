@@ -30,8 +30,8 @@ struct CodexGPTAccountSnapshot: Codable, Equatable, Sendable {
     var email: String?
     var displayName: String?
     var planType: String?
-    var hostPlatform: CodexBridgeHostPlatform?
-    var hostCapabilities: CodexBridgeHostCapabilities?
+    var hostPlatform: CodexBridgeHostPlatform? = nil
+    var hostCapabilities: CodexBridgeHostCapabilities? = nil
     var loginInFlight: Bool
     var needsReauth: Bool
     var expiresAt: Date?
@@ -108,13 +108,13 @@ enum CodexBridgeHostPlatform: String, Codable, Sendable {
     var displayName: String {
         switch self {
         case .macOS:
-            return "Mac"
+            return "Device"
         case .linux:
-            return "Linux computer"
+            return "Linux device"
         case .windows:
-            return "Windows computer"
+            return "Windows device"
         case .unknown:
-            return "computer"
+            return "device"
         }
     }
 }
@@ -126,6 +126,7 @@ struct CodexBridgeHostCapabilities: Codable, Equatable, Sendable {
         case keepAwake
         case hostBrowserLogin
         case terminal
+        case bridgeUpdate
     }
 
     var desktopHandoff: Bool = false
@@ -133,19 +134,22 @@ struct CodexBridgeHostCapabilities: Codable, Equatable, Sendable {
     var keepAwake: Bool = false
     var hostBrowserLogin: Bool = false
     var terminal: Bool = false
+    var bridgeUpdate: Bool = false
 
     init(
         desktopHandoff: Bool = false,
         displayWake: Bool = false,
         keepAwake: Bool = false,
         hostBrowserLogin: Bool = false,
-        terminal: Bool = false
+        terminal: Bool = false,
+        bridgeUpdate: Bool = false
     ) {
         self.desktopHandoff = desktopHandoff
         self.displayWake = displayWake
         self.keepAwake = keepAwake
         self.hostBrowserLogin = hostBrowserLogin
         self.terminal = terminal
+        self.bridgeUpdate = bridgeUpdate
     }
 
     init(from decoder: Decoder) throws {
@@ -155,6 +159,7 @@ struct CodexBridgeHostCapabilities: Codable, Equatable, Sendable {
         keepAwake = try container.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? false
         hostBrowserLogin = try container.decodeIfPresent(Bool.self, forKey: .hostBrowserLogin) ?? false
         terminal = try container.decodeIfPresent(Bool.self, forKey: .terminal) ?? false
+        bridgeUpdate = try container.decodeIfPresent(Bool.self, forKey: .bridgeUpdate) ?? false
     }
 
     static let legacyMacOS = CodexBridgeHostCapabilities(
@@ -166,7 +171,7 @@ struct CodexBridgeHostCapabilities: Codable, Equatable, Sendable {
     )
 }
 
-func codexGPTAccountInitialSnapshot() -> CodexGPTAccountSnapshot {
+nonisolated func codexGPTAccountInitialSnapshot() -> CodexGPTAccountSnapshot {
     CodexGPTAccountSnapshot(
         status: .unknown,
         authMethod: nil,
@@ -355,11 +360,14 @@ extension CodexService {
         clearGPTLoginState()
         clearGPTLoginCallbackState()
         stopGPTLoginSync()
-        applyGPTAccountSnapshot(loggedOutGPTAccountSnapshot(status: .notLoggedIn))
+        applyGPTAccountSnapshot(loggedOutGPTAccountSnapshot(
+            status: .notLoggedIn,
+            retaining: codexGPTAccountInitialSnapshot()
+        ))
         gptAccountErrorMessage = nil
     }
 
-    // Keeps the account card honest when voice auth proves the bridge token is no longer usable.
+    // Keeps the account card honest when voice auth proves the bridge auth is no longer usable.
     func markGPTVoiceReauthenticationRequired() {
         stopGPTLoginSync()
         clearGPTLoginState()
@@ -371,7 +379,7 @@ extension CodexService {
                 retaining: gptAccountSnapshot
             )
         )
-        gptAccountErrorMessage = "ChatGPT voice needs a fresh sign-in on your paired computer."
+        gptAccountErrorMessage = "Voice mode needs fresh OpenAI auth on your paired device."
     }
 
     // Stores an incoming deep-link callback and completes the pending login when the bridge is reachable.
@@ -540,44 +548,52 @@ extension CodexService {
     static let gptPendingLoginCallbackDefaultsKey = "codex.gpt.pendingLoginCallbackState"
 
     var gptPendingLoginState: CodexGPTLoginState? {
-        get {
-            guard let data = defaults.data(forKey: Self.gptPendingLoginStateDefaultsKey),
-                  let state = try? decoder.decode(CodexGPTLoginState.self, from: data) else {
-                return nil
-            }
+        get { gptPendingLoginState(macDeviceId: normalizedCurrentTrustedMacDeviceId) }
+        set { setGPTPendingLoginState(newValue, macDeviceId: normalizedCurrentTrustedMacDeviceId) }
+    }
 
-            return state.isExpired ? nil : state
+    func gptPendingLoginState(macDeviceId: String?) -> CodexGPTLoginState? {
+        guard let data = defaults.data(forKey: macScopedDefaultsKey(Self.gptPendingLoginStateDefaultsKey, macDeviceId: macDeviceId)),
+              let state = try? decoder.decode(CodexGPTLoginState.self, from: data) else {
+            return nil
         }
-        set {
-            if let newValue {
-                guard let data = try? encoder.encode(newValue) else {
-                    return
-                }
-                defaults.set(data, forKey: Self.gptPendingLoginStateDefaultsKey)
-            } else {
-                defaults.removeObject(forKey: Self.gptPendingLoginStateDefaultsKey)
+
+        return state.isExpired ? nil : state
+    }
+
+    func setGPTPendingLoginState(_ newValue: CodexGPTLoginState?, macDeviceId: String?) {
+        if let newValue {
+            guard let data = try? encoder.encode(newValue) else {
+                return
             }
+            defaults.set(data, forKey: macScopedDefaultsKey(Self.gptPendingLoginStateDefaultsKey, macDeviceId: macDeviceId))
+        } else {
+            defaults.removeObject(forKey: macScopedDefaultsKey(Self.gptPendingLoginStateDefaultsKey, macDeviceId: macDeviceId))
         }
     }
 
     var gptPendingLoginCallbackState: CodexGPTLoginCallbackState? {
-        get {
-            guard let data = defaults.data(forKey: Self.gptPendingLoginCallbackDefaultsKey),
-                  let state = try? decoder.decode(CodexGPTLoginCallbackState.self, from: data) else {
-                return nil
-            }
+        get { gptPendingLoginCallbackState(macDeviceId: normalizedCurrentTrustedMacDeviceId) }
+        set { setGPTPendingLoginCallbackState(newValue, macDeviceId: normalizedCurrentTrustedMacDeviceId) }
+    }
 
-            return state.isExpired ? nil : state
+    func gptPendingLoginCallbackState(macDeviceId: String?) -> CodexGPTLoginCallbackState? {
+        guard let data = defaults.data(forKey: macScopedDefaultsKey(Self.gptPendingLoginCallbackDefaultsKey, macDeviceId: macDeviceId)),
+              let state = try? decoder.decode(CodexGPTLoginCallbackState.self, from: data) else {
+            return nil
         }
-        set {
-            if let newValue {
-                guard let data = try? encoder.encode(newValue) else {
-                    return
-                }
-                defaults.set(data, forKey: Self.gptPendingLoginCallbackDefaultsKey)
-            } else {
-                defaults.removeObject(forKey: Self.gptPendingLoginCallbackDefaultsKey)
+
+        return state.isExpired ? nil : state
+    }
+
+    func setGPTPendingLoginCallbackState(_ newValue: CodexGPTLoginCallbackState?, macDeviceId: String?) {
+        if let newValue {
+            guard let data = try? encoder.encode(newValue) else {
+                return
             }
+            defaults.set(data, forKey: macScopedDefaultsKey(Self.gptPendingLoginCallbackDefaultsKey, macDeviceId: macDeviceId))
+        } else {
+            defaults.removeObject(forKey: macScopedDefaultsKey(Self.gptPendingLoginCallbackDefaultsKey, macDeviceId: macDeviceId))
         }
     }
 
@@ -607,19 +623,23 @@ extension CodexService {
         return callbackState
     }
 
-    func loadPersistedGPTAccountSnapshot() -> CodexGPTAccountSnapshot? {
-        guard let data = defaults.data(forKey: Self.gptAccountSnapshotDefaultsKey),
+    func loadPersistedGPTAccountSnapshot(macDeviceId: String? = nil) -> CodexGPTAccountSnapshot? {
+        guard let data = defaults.data(forKey: macScopedDefaultsKey(Self.gptAccountSnapshotDefaultsKey, macDeviceId: macDeviceId)),
               let snapshot = try? decoder.decode(CodexGPTAccountSnapshot.self, from: data) else {
             return nil
         }
         return snapshot
     }
 
-    func persistGPTAccountSnapshot(_ snapshot: CodexGPTAccountSnapshot) {
+    func persistGPTAccountSnapshot(_ snapshot: CodexGPTAccountSnapshot, macDeviceId: String? = nil) {
+        guard !suspendAutomaticMacScopedPersistence, !isApplyingMacScopedState else {
+            return
+        }
+
         guard let data = try? encoder.encode(snapshot) else {
             return
         }
-        defaults.set(data, forKey: Self.gptAccountSnapshotDefaultsKey)
+        defaults.set(data, forKey: macScopedDefaultsKey(Self.gptAccountSnapshotDefaultsKey, macDeviceId: macDeviceId))
     }
 
     func clearGPTLoginState() {
@@ -833,14 +853,14 @@ extension CodexService {
         if let currentVersion = currentVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
            !currentVersion.isEmpty {
             message =
-                "This computer bridge is running Remodex \(currentVersion), but this iPhone app requires Remodex \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your computer, then reconnect."
+                "This device bridge is running Remodex \(currentVersion), but this iPhone app requires Remodex \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your device, then reconnect."
         } else {
             message =
-                "This computer bridge is too old for this version of Remodex iPhone. Update the Remodex npm package on your computer to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
+                "This device bridge is too old for this version of Remodex iPhone. Update the Remodex npm package on your device to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
         }
 
         return CodexBridgeUpdatePrompt(
-            title: "Update Remodex on your computer to reconnect",
+            title: "Update Remodex on your device to reconnect",
             message: message,
             command: minimumBridgePackageUpdateCommand
         )
@@ -901,16 +921,16 @@ extension CodexService {
         latestVersion: String
     ) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "A newer Remodex update is available on your computer",
-            message: "This computer bridge is running Remodex \(currentVersion), and npm now has Remodex \(latestVersion). Update the package on your computer when you're ready, then reconnect to start using the newer build.",
+            title: "A newer Remodex update is available on your device",
+            message: "This device bridge is running Remodex \(currentVersion), and npm now has Remodex \(latestVersion). Update the package on your device when you're ready, then reconnect to start using the newer build.",
             command: minimumBridgePackageUpdateCommand
         )
     }
 
     private func forcedBridgePackageUpdatePrompt(currentVersion: String) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update Remodex on your computer to reconnect",
-            message: "This computer bridge is running Remodex \(currentVersion). Update the Remodex CLI on your computer to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
+            title: "Update Remodex on your device to reconnect",
+            message: "This device bridge is running Remodex \(currentVersion). Update the Remodex CLI on your device to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
             command: forcedBridgeUpgradeCommand
         )
     }
@@ -1074,7 +1094,7 @@ extension CodexService {
     func loggedOutGPTAccountSnapshot(
         status: CodexGPTAccountStatus,
         needsReauth: Bool = false,
-        retaining snapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot()
+        retaining snapshot: CodexGPTAccountSnapshot
     ) -> CodexGPTAccountSnapshot {
         CodexGPTAccountSnapshot(
             status: status,
@@ -1204,7 +1224,8 @@ extension CodexService {
             displayWake: firstBoolValue(in: capabilitiesObject, keys: ["displayWake", "display_wake"]) ?? false,
             keepAwake: firstBoolValue(in: capabilitiesObject, keys: ["keepAwake", "keep_awake"]) ?? false,
             hostBrowserLogin: firstBoolValue(in: capabilitiesObject, keys: ["hostBrowserLogin", "host_browser_login"]) ?? false,
-            terminal: firstBoolValue(in: capabilitiesObject, keys: ["terminal", "sshTerminal", "ssh_terminal"]) ?? false
+            terminal: firstBoolValue(in: capabilitiesObject, keys: ["terminal", "sshTerminal", "ssh_terminal"]) ?? false,
+            bridgeUpdate: firstBoolValue(in: capabilitiesObject, keys: ["bridgeUpdate", "bridge_update"]) ?? false
         )
     }
 

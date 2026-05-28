@@ -27,6 +27,13 @@ enum ContentNavigationRoute: Hashable {
     case thread(id: String)
     case settings
     case terminal(preferredWorkingDirectory: String?)
+
+    var isTerminalRoute: Bool {
+        if case .terminal = self {
+            return true
+        }
+        return false
+    }
 }
 
 private struct MacContextTransitionSnapshot {
@@ -60,7 +67,6 @@ struct ContentView: View {
     @State private var isRetryingBridgeUpdate = false
     @State private var isPreparingManualScanner = false
     @State private var macSwitchTask: Task<Void, Never>?
-    @State private var threadSelectionSyncTask: Task<Void, Never>?
     @State private var isWakingSavedMacDisplay = false
     @State private var hasAttemptedAutomaticWakeSavedMacDisplay = false
     @State private var threadCompletionBannerDismissTask: Task<Void, Never>?
@@ -108,6 +114,15 @@ struct ContentView: View {
         rootContent
             // Only resume saved-pairing recovery after onboarding is done and the manual scanner is not in control.
             .task {
+                #if DEBUG
+                if await viewModel.attemptDebugPairingOnLaunchIfNeeded(codex: codex) {
+                    debugSidebarLog(
+                        "launch task debugPairing connected=\(codex.isConnected) threadCount=\(codex.threads.count)"
+                    )
+                    scheduleSidebarPrewarmIfNeeded()
+                    return
+                }
+                #endif
                 guard hasSeenOnboarding, !isShowingManualScanner else {
                     debugSidebarLog("launch task skipped onboardingSeen=\(hasSeenOnboarding) manualScanner=\(isShowingManualScanner)")
                     return
@@ -160,7 +175,7 @@ struct ContentView: View {
             }
             .onChange(of: codex.threads) { _, threads in
                 debugSidebarLog("threads changed count=\(threads.count) sidebarOpen=\(isSidebarOpen) prewarmed=\(isSidebarPrewarmed)")
-                scheduleSelectedThreadSync()
+                syncSelectedThread(with: threads)
                 scheduleSidebarPrewarmIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
@@ -1093,6 +1108,17 @@ struct ContentView: View {
         navigationPath.append(route)
     }
 
+    // Terminal can be opened from several surfaces with different cwd payloads;
+    // replace the active terminal route instead of stacking near-identical pages.
+    private func appendTerminalNavigationRoute(preferredWorkingDirectory: String?) {
+        let route = ContentNavigationRoute.terminal(preferredWorkingDirectory: preferredWorkingDirectory)
+        if navigationPath.last?.isTerminalRoute == true {
+            navigationPath[navigationPath.count - 1] = route
+        } else {
+            appendNavigationRoute(route)
+        }
+    }
+
     // Keeps the native route and drawer presentations on the same fresh-thread sync path.
     private func requestSidebarFreshSyncIfNeeded() {
         if !isSidebarPrewarmed,
@@ -1190,16 +1216,15 @@ struct ContentView: View {
     }
 
     private func openTerminal(preferredWorkingDirectory: String?) {
-        appendNavigationRoute(.terminal(preferredWorkingDirectory: preferredWorkingDirectory))
+        appendTerminalNavigationRoute(preferredWorkingDirectory: preferredWorkingDirectory)
     }
 
     private func openTerminalFromSidebar(preferredWorkingDirectory: String?) {
-        let route = ContentNavigationRoute.terminal(preferredWorkingDirectory: preferredWorkingDirectory)
         if shouldPresentSidebarAsNavigation {
-            appendNavigationRoute(route)
+            appendTerminalNavigationRoute(preferredWorkingDirectory: preferredWorkingDirectory)
         } else {
             closeSidebar()
-            appendNavigationRoute(route)
+            appendTerminalNavigationRoute(preferredWorkingDirectory: preferredWorkingDirectory)
         }
     }
 
@@ -1892,15 +1917,6 @@ struct ContentView: View {
     }
 
     // Keeps selected thread coherent with server list updates.
-    private func scheduleSelectedThreadSync() {
-        threadSelectionSyncTask?.cancel()
-        threadSelectionSyncTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            syncSelectedThread(with: codex.threads)
-        }
-    }
-
     private func syncSelectedThread(with threads: [CodexThread]) {
         guard !isOpeningNewChatFromSidebar else { return }
 

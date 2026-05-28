@@ -86,10 +86,8 @@ enum TurnTimelineRenderProjection {
             in: messages,
             completedTurnIDs: completedTurnIDs
         )
-        let duplicateAssistantHiddenIndices = duplicateCommentaryAssistantIndices(in: messages)
         let hiddenIndices = Set(finalCollapsePlan.values.flatMap(\.indices))
             .union(fileChangePlan.hiddenIndices)
-            .union(duplicateAssistantHiddenIndices)
         let groupByInsertionIndex = finalCollapsePlan.values.reduce(into: [Int: PreviousMessagesCollapse]()) { result, collapse in
             result[collapse.insertionIndex] = collapse
         }
@@ -179,37 +177,6 @@ enum TurnTimelineRenderProjection {
     private struct FileChangeCollapsePlan {
         let hiddenIndices: Set<Int>
         let replacementByIndex: [Int: CodexMessage]
-    }
-
-    // Hides already-persisted duplicate commentary emitted by both desktop live state and rollout replay.
-    private static func duplicateCommentaryAssistantIndices(in messages: [CodexMessage]) -> Set<Int> {
-        var seenKeys: Set<String> = []
-        var hiddenIndices = Set<Int>()
-
-        for index in messages.indices {
-            let message = messages[index]
-            guard message.role == .assistant,
-                  isCommentaryAssistantPhase(message.assistantPhase),
-                  let turnID = normalizedIdentifier(message.turnId),
-                  message.text.utf8.count <= largeArtifactTextByteLimit else {
-                continue
-            }
-
-            let text = normalizedVisibleAssistantText(message.text)
-            guard text.count >= 24 else {
-                continue
-            }
-
-            let key = [
-                turnID,
-                text,
-            ].joined(separator: "\u{1F}")
-            if !seenKeys.insert(key).inserted {
-                hiddenIndices.insert(index)
-            }
-        }
-
-        return hiddenIndices
     }
 
     // Shows one end-of-turn file table even when the bridge streams multiple file-change snapshots.
@@ -384,7 +351,7 @@ enum TurnTimelineRenderProjection {
             }
 
             fallbackFinalIndexByTurn[turnID] = index
-            if message.assistantPhase != nil {
+            if isKnownAssistantPhase(message.assistantPhase) {
                 turnsWithExplicitAssistantPhase.insert(turnID)
             }
             if isFinalAnswerAssistantPhase(message.assistantPhase) {
@@ -703,6 +670,10 @@ enum TurnTimelineRenderProjection {
         guard !text.isEmpty else { return false }
         guard text.utf8.count <= smallWhitespaceScanByteLimit else { return true }
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func isKnownAssistantPhase(_ phase: String?) -> Bool {
+        isCommentaryAssistantPhase(phase) || isFinalAnswerAssistantPhase(phase)
     }
 
     private static func isCommentaryAssistantPhase(_ phase: String?) -> Bool {

@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>$(APP_DISPLAY_NAME)</string>
+	<string>Remodex</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -28,10 +28,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>$(PHODEX_CALLBACK_URL_NAME)</string>
+			<string>com.emanueledipietro.CodexMobile.auth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>$(PHODEX_CHATGPT_CALLBACK_SCHEME)</string>
+				<string>phodex</string>
 			</array>
 		</dict>
 	</array>
@@ -49,7 +49,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Remodex needs local network access to connect to your Mac over SSH and the local relay.</string>
+	<string>CodexMobile needs local network access to connect to your Codex app-server running on your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Remodex needs microphone access to record voice notes for ChatGPT transcription.</string>
 	<key>NSBonjourServices</key>

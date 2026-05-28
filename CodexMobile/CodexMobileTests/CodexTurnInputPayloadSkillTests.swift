@@ -185,24 +185,6 @@ final class CodexTurnInputPayloadSkillTests: XCTestCase {
         XCTAssertTrue(service.shouldRetryTurnStartWithoutSkillItems(error))
     }
 
-    func testImageURLFallbackAcceptsExplicitImageURLError() {
-        let service = makeService()
-        let error = CodexServiceError.rpcError(
-            RPCError(code: -32602, message: "missing field image_url")
-        )
-
-        XCTAssertTrue(service.shouldRetryTurnStartWithImageURLField(error))
-    }
-
-    func testImageURLFallbackAcceptsRejectedURLFieldError() {
-        let service = makeService()
-        let error = CodexServiceError.rpcError(
-            RPCError(code: -32602, message: "unexpected field url")
-        )
-
-        XCTAssertTrue(service.shouldRetryTurnStartWithImageURLField(error))
-    }
-
     func testStartTurnRejectsEmptyStructuredMentions() async {
         let service = makeService()
         service.isConnected = true

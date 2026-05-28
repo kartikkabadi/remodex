@@ -161,6 +161,17 @@ final class TurnComposerReviewModeTests: XCTestCase {
         )
     }
 
+    func testStatusSlashHiddenForOpenCodeConnectedRuntime() {
+        XCTAssertEqual(
+            TurnComposerSlashCommand.availableCommands(
+                supportsThreadFork: true,
+                allowsForkCommand: true,
+                hidesStatusCommand: true
+            ).map(\.commandToken),
+            ["/review", "/compact", "/feedback", "/fork", "/subagents"]
+        )
+    }
+
     func testSelectingForkShowsDestinationList() {
         let viewModel = makeViewModel()
 

@@ -83,6 +83,8 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
     var agentRole: String?
     var model: String?
     var modelProvider: String?
+    /// Which agent runtime created this thread. Display-only for sidebar branding.
+    var agentRuntime: AgentRuntime
     var syncState: CodexThreadSyncState
 
     // --- Public initializer ---------------------------------------------------
@@ -103,6 +105,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         agentRole: String? = nil,
         model: String? = nil,
         modelProvider: String? = nil,
+        agentRuntime: AgentRuntime = .codex,
         syncState: CodexThreadSyncState = .live
     ) {
         self.id = id
@@ -120,6 +123,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         self.agentRole = Self.normalizeIdentifier(agentRole)
         self.model = Self.normalizeIdentifier(model)
         self.modelProvider = Self.normalizeIdentifier(modelProvider)
+        self.agentRuntime = agentRuntime
         self.syncState = syncState
     }
 
@@ -153,6 +157,8 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         case model
         case modelProvider
         case modelProviderSnake = "model_provider"
+        case agentRuntime
+        case agentRuntimeSnake = "agent_runtime"
         case syncState
     }
 
@@ -212,6 +218,10 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
             keys: [.modelProvider, .modelProviderSnake],
             metadataKeys: ["modelProvider", "model_provider", "modelProviderId", "model_provider_id"]
         )
+        agentRuntime = Self.decodeAgentRuntime(
+            from: container,
+            metadata: metadata
+        )
         syncState = try container.decodeIfPresent(CodexThreadSyncState.self, forKey: .syncState) ?? .live
     }
 
@@ -235,7 +245,12 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(Self.normalizeIdentifier(agentRole), forKey: .agentRole)
         try container.encodeIfPresent(Self.normalizeIdentifier(model), forKey: .model)
         try container.encodeIfPresent(Self.normalizeIdentifier(modelProvider), forKey: .modelProvider)
+        try container.encode(agentRuntime, forKey: .agentRuntime)
         try container.encode(syncState, forKey: .syncState)
+    }
+
+    var isOpenCodeAgentRuntime: Bool {
+        agentRuntime.isOpenCode
     }
 }
 
@@ -546,6 +561,25 @@ extension CodexThread {
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func decodeAgentRuntime(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        metadata: [String: JSONValue]?
+    ) -> AgentRuntime {
+        for key in [CodingKeys.agentRuntime, .agentRuntimeSnake] {
+            if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+                return AgentRuntime.normalize(value)
+            }
+        }
+
+        for metadataKey in ["agentRuntime", "agent_runtime"] {
+            if let value = metadata?[metadataKey]?.stringValue {
+                return AgentRuntime.normalize(value)
+            }
+        }
+
+        return .codex
     }
 
     private static func normalizeProjectPath(_ value: String?) -> String? {

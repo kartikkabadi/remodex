@@ -63,7 +63,6 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
     @State private var lastGroupedThreadsFingerprint: Int = 0
     @State private var lastBadgeFingerprint: Int = 0
     @State private var projectlessChatRootPaths: [String] = []
-    @State private var knownProjects: [CodexKnownProject] = []
     @AppStorage(SidebarProjectExpansionState.collapsedProjectGroupIDsStorageKey)
     private var collapsedProjectGroupIDsStorage = ""
 
@@ -91,7 +90,6 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
                 rebuildGroupedThreads()
                 rebuildCachedSidebarState()
                 await refreshProjectlessChatRoots()
-                await refreshKnownProjects()
                 if codex.isConnected, codex.threads.isEmpty {
                     await refreshThreads()
                 }
@@ -118,10 +116,7 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
             }
             .onChange(of: codex.isConnected) { _, isConnected in
                 guard isConnected else { return }
-                Task { @MainActor in
-                    await refreshProjectlessChatRoots()
-                    await refreshKnownProjects()
-                }
+                Task { @MainActor in await refreshProjectlessChatRoots() }
             }
             // Deferred to the next runloop tick so rebuilding the cache `@State`
             // does not trigger another body re-evaluation inside the same frame
@@ -242,26 +237,6 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
         } catch {
             // Path-pattern fallbacks still classify current Desktop defaults if the bridge is older.
             debugSidebarLog("projectless roots unavailable error=\(error.localizedDescription)")
-        }
-    }
-
-    private func refreshKnownProjects() async {
-        guard codex.isConnected else { return }
-
-        do {
-            let projects = try await codex.fetchKnownProjects()
-            guard projects != knownProjects else { return }
-            knownProjects = projects
-        } catch {
-            // Older bridges keep the new-chat chooser backed by thread groups only.
-            debugSidebarLog("known projects unavailable error=\(error.localizedDescription)")
-        }
-    }
-
-    private func rememberKnownProjectSelection(_ projectPath: String) {
-        Task { @MainActor in
-            _ = try? await codex.rememberKnownProject(path: projectPath)
-            await refreshKnownProjects()
         }
     }
 
@@ -516,7 +491,6 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
     private var newChatProjectChoices: [SidebarProjectChoice] {
         SidebarThreadGrouping.makeProjectChoices(
             from: codex.threads,
-            knownProjects: knownProjects,
             projectlessRootPaths: projectlessChatRootPaths
         )
     }
@@ -819,7 +793,6 @@ private extension SidebarView {
         case .localFolderBrowser:
             SidebarLocalFolderBrowserSheet { projectPath in
                 activeSidebarSheet = nil
-                rememberKnownProjectSelection(projectPath)
                 handleNewChatTap(preferredProjectPath: projectPath)
             }
         }

@@ -9,6 +9,7 @@ import SwiftUI
 struct ComposerBottomBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(UserBubbleColor.storageKey) private var userBubbleColorRawValue = UserBubbleColor.defaultStoredRawValue
+    @State private var showsAllModelsSheet = false
 
     // Data
     let orderedModelOptions: [CodexModelOption]
@@ -50,6 +51,8 @@ struct ComposerBottomBar: View {
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.subheadline() }
     private let composerIconSide: CGFloat = 22
+    private let composerCircleDiameter: CGFloat = 30
+    private let composerActionIconSize: CGFloat = 14
     private let inlineAccessControlSize: CGFloat = 32
     private let inlineAccessControlIconSize: CGFloat = 20
 
@@ -74,10 +77,14 @@ struct ComposerBottomBar: View {
         return sendButtonPaletteColor.bubbleBackground(for: colorScheme)
     }
 
+    private var showsStopButton: Bool {
+        isThreadRunning && !showsSendButton
+    }
+
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             attachmentMenu
                 .padding(.leading, 8)
             inlineAccessMenuLabel
@@ -101,7 +108,6 @@ struct ComposerBottomBar: View {
                 .accessibilityLabel("Resume queued messages")
             }
 
-            // Voice -> Stop/loading -> Send. New sends can look running before the turn id is interruptible.
             Button {
                 HapticFeedback.shared.triggerImpactFeedback()
                 onTapVoice()
@@ -111,12 +117,12 @@ struct ComposerBottomBar: View {
             .disabled(voiceButtonPresentation.isDisabled)
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
 
-            if isThreadRunning && isSending && activeTurnID == nil {
+            if showsStopButton && isSending && activeTurnID == nil {
                 ProgressView()
                     .tint(Color(.label))
-                    .frame(width: 32, height: 32)
+                    .frame(width: composerCircleDiameter, height: composerCircleDiameter)
                     .accessibilityLabel("Starting run")
-            } else if isThreadRunning {
+            } else if showsStopButton {
                 Button {
                     HapticFeedback.shared.triggerImpactFeedback()
                     onStopTurn(activeTurnID)
@@ -124,7 +130,9 @@ struct ComposerBottomBar: View {
                     RemodexCircleBadge(
                         systemName: "stop.fill",
                         foreground: sendButtonPaletteColor.bubbleForeground(for: colorScheme),
-                        background: sendButtonPaletteColor.bubbleBackground(for: colorScheme)
+                        background: sendButtonPaletteColor.bubbleBackground(for: colorScheme),
+                        diameter: composerCircleDiameter,
+                        iconSize: composerActionIconSize
                     )
                 }
                 .accessibilityLabel("Stop current run")
@@ -138,7 +146,9 @@ struct ComposerBottomBar: View {
                     RemodexCircleBadge(
                         systemName: "arrow.up",
                         foreground: sendButtonIconColor,
-                        background: sendButtonBackgroundColor
+                        background: sendButtonBackgroundColor,
+                        diameter: composerCircleDiameter,
+                        iconSize: composerActionIconSize
                     )
                 }
                 .overlay(alignment: .topTrailing) {
@@ -151,8 +161,23 @@ struct ComposerBottomBar: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.bottom, 8)
-        .padding(.top, 2)
+        .padding(.bottom, 4)
+        .padding(.top, 0)
+        .sheet(isPresented: $showsAllModelsSheet) {
+            AllModelsSheet(
+                models: orderedModelOptions,
+                selectedModelID: selectedModelID,
+                isLoadingModels: isLoadingModels,
+                modelSupportsFastMode: modelSupportsFastMode,
+                onSelect: { modelID in
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    runtimeActions.selectModel(modelID)
+                    showsAllModelsSheet = false
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var voiceButtonLabel: some View {
@@ -160,7 +185,8 @@ struct ComposerBottomBar: View {
             if voiceButtonPresentation.showsProgress {
                 CircularIconBadge(
                     foreground: voiceButtonPresentation.foregroundColor,
-                    background: voiceButtonPresentation.backgroundColor
+                    background: voiceButtonPresentation.backgroundColor,
+                    diameter: composerCircleDiameter
                 ) {
                     ProgressView()
                 }
@@ -170,7 +196,8 @@ struct ComposerBottomBar: View {
                 RemodexCircleBadge(
                     systemName: voiceButtonPresentation.systemImageName,
                     foreground: voiceButtonPresentation.foregroundColor,
-                    background: voiceButtonPresentation.backgroundColor
+                    background: voiceButtonPresentation.backgroundColor,
+                    diameter: composerCircleDiameter
                 )
             } else {
                 // Use explicit size so the Central mic artwork compensates for
@@ -227,7 +254,8 @@ struct ComposerBottomBar: View {
             isLoadingModels: isLoadingModels,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             runtimeState: runtimeState,
-            runtimeActions: runtimeActions
+            runtimeActions: runtimeActions,
+            showsAllModelsSheet: $showsAllModelsSheet
         )
         .equatable()
     }
@@ -309,6 +337,11 @@ struct ComposerBottomBar: View {
         runtimeState.isSelectedServiceTier(.fast) ? "bolt.fill" : "bolt"
     }
 
+    // Mirrors the bridge-provided runtime capability instead of guessing from the model name.
+    private func modelSupportsFastMode(_ model: CodexModelOption) -> Bool {
+        return model.supportsServiceTier(.fast)
+    }
+
     private var queueBadge: some View {
         HStack(spacing: 3) {
             if isQueuePaused {
@@ -336,11 +369,13 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     let isRuntimeSelectionLoading: Bool
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
+    @Binding var showsAllModelsSheet: Bool
 
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
-    private let maxInlineRuntimeLabelWidth: CGFloat = 108
+    private let maxInlineRuntimeControlWidth: CGFloat = 128
+    private let maxInlineRuntimeTextWidth: CGFloat = 104
 
     static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
         lhs.orderedModelOptions == rhs.orderedModelOptions
@@ -370,10 +405,19 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     selectedModelID: selectedModelID,
                     selectedModelTitle: selectedModelTitle,
                     isLoadingModels: isLoadingModels,
-                    isRuntimeSelectionLoading: isRuntimeSelectionLoading
+                    isRuntimeSelectionLoading: isRuntimeSelectionLoading,
+                    featuredModelIdentifiers: Self.featuredModelIdentifiers,
+                    onRequestAllModelsSheet: {
+                        // Defer to the next runloop so the menu dismissal
+                        // animation isn't fighting the sheet presentation.
+                        DispatchQueue.main.async {
+                            showsAllModelsSheet = true
+                        }
+                    }
                 )
             )
         }
+        .frame(minWidth: 0, maxWidth: maxInlineRuntimeControlWidth, alignment: .trailing)
         .layoutPriority(-1)
         .tint(metaLabelColor)
         .accessibilityLabel(runtimeAccessibilityLabel)
@@ -382,17 +426,18 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     // Split label parts so the model name and effort can carry different foreground styles.
     private var modelLabelPart: String {
         if selectedModelID == nil {
-            return isRuntimeSelectionLoading ? "Loading..." : "Select model"
+            return isRuntimeSelectionLoading ? "Loading…" : "Select model"
         }
         return compactModelTitle
     }
 
     private var effortLabelPart: String? {
         guard selectedModelID != nil else { return nil }
-        return compactReasoningTitle(runtimeState.selectedReasoningTitle)
+        let trimmed = runtimeState.selectedReasoningTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "Select reasoning" else { return nil }
+        return trimmed
     }
 
-    // Keeps inline runtime metadata short so stop + send controls do not move the composer.
     private var compactModelTitle: String {
         let normalized = selectedModelTitle
             .replacingOccurrences(of: "-", with: " ")
@@ -419,21 +464,12 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         return selectedModelTitle
     }
 
-    private func compactReasoningTitle(_ title: String) -> String? {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != "Select reasoning" else {
-            return nil
-        }
-
-        switch trimmed.lowercased() {
-        case "extra high":
-            return "XH"
-        case "medium":
-            return "Med"
-        default:
-            return trimmed
-        }
-    }
+    // Identifiers pinned to the top of the model submenu; the rest are reachable
+    // via "Other models…" so the menu stays glanceable as the list grows.
+    private static let featuredModelIdentifiers: Set<String> = [
+        "gpt-5.5",
+        "gpt-5.4",
+    ]
 
     private func composerMenuLabel(
         modelPart: String,
@@ -450,26 +486,119 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     .foregroundStyle(Color.primary)
             }
 
-            titleText(modelPart: modelPart, effortPart: effortPart)
-                .font(metaTextFont)
-                .fontWeight(.regular)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            HStack(spacing: 4) {
+                Text(modelPart)
+                    .font(metaTextFont)
+                    .fontWeight(.regular)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+
+                if let effortPart, !effortPart.isEmpty {
+                    Text(effortPart)
+                        .font(metaTextFont)
+                        .fontWeight(.regular)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(0)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            // Grow left from the mic; truncate effort first when space is tight.
+            .frame(maxWidth: maxInlineRuntimeTextWidth, alignment: .trailing)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 4)
-        .frame(maxWidth: maxInlineRuntimeLabelWidth, alignment: .leading)
-        .clipped()
+        .frame(minWidth: 0, maxWidth: maxInlineRuntimeControlWidth, alignment: .trailing)
         .contentShape(Rectangle())
     }
+}
 
-    // Concatenated Text lets each segment carry its own foreground style.
-    private func titleText(modelPart: String, effortPart: String?) -> Text {
-        let model = Text(modelPart).foregroundStyle(Color.primary)
-        guard let effortPart, !effortPart.isEmpty else { return model }
-        return model
-            + Text(" ")
-            + Text(effortPart).foregroundStyle(.tertiary)
+// Full-list model picker shown when the user taps "See all models…" inside the
+// runtime menu. Lives in a sheet so it sidesteps the SwiftUI nested-Menu bug
+// while still keeping the runtime pill compact.
+private struct AllModelsSheet: View {
+    let models: [CodexModelOption]
+    let selectedModelID: String?
+    let isLoadingModels: Bool
+    let modelSupportsFastMode: (CodexModelOption) -> Bool
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    private let fastModeIconSide: CGFloat = 16
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoadingModels {
+                    ProgressView("Loading models…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if models.isEmpty {
+                    ContentUnavailableView {
+                        RemodexIcon.label("No models available", systemName: "square.stack.3d.up.slash")
+                    } description: {
+                        Text("Reconnect to your local Codex bridge to refresh the model list.")
+                    }
+                } else {
+                    List {
+                        Section {
+                            ForEach(models, id: \.id) { model in
+                                Button {
+                                    onSelect(model.id)
+                                } label: {
+                                    modelRow(for: model)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Choose model")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelRow(for model: CodexModelOption) -> some View {
+        let title = TurnComposerMetaMapper.modelTitle(for: model)
+        HStack(alignment: .top, spacing: 12) {
+            RemodexIcon.image(systemName: model.id == selectedModelID ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18))
+                .foregroundStyle(model.id == selectedModelID ? Color.accentColor : Color(.tertiaryLabel))
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(AppFont.body(weight: .medium))
+                        .foregroundStyle(Color(.label))
+                    if modelSupportsFastMode(model) {
+                        Image(systemName: CodexServiceTier.fast.iconName)
+                            .font(.system(size: fastModeIconSide, weight: .regular))
+                            .frame(width: fastModeIconSide, height: fastModeIconSide)
+                            .foregroundStyle(Color(.secondaryLabel))
+                    }
+                }
+                if !model.description.isEmpty {
+                    Text(model.description)
+                        .font(AppFont.subheadline())
+                        .foregroundStyle(Color(.secondaryLabel))
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 

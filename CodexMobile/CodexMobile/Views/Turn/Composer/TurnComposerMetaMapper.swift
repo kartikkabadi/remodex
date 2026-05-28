@@ -8,66 +8,26 @@ import Foundation
 
 // Keeps TurnView lightweight by isolating menu formatting/sorting rules.
 enum TurnComposerMetaMapper {
-    // MARK: - Provider Mapping
-
-    static func providerTitle(for provider: String) -> String {
-        switch CodexModelOption.normalizedProvider(provider) {
-        case "codex":
-            return "Codex"
-        case "opencode":
-            return "OpenCode"
-        case "claude":
-            return "Claude"
-        default:
-            return provider
-                .split(separator: "-")
-                .map { $0.capitalized }
-                .joined(separator: " ")
-        }
-    }
-
-    static func providerIconName(for provider: String) -> String {
-        switch CodexModelOption.normalizedProvider(provider) {
-        case "codex":
-            return "sparkles"
-        case "opencode":
-            return "terminal"
-        case "claude":
-            return "textformat"
-        default:
-            return "cube"
-        }
-    }
-
-    // MARK: - Model Mapping
+    // ─── Model Mapping ────────────────────────────────────────────────
 
     // Returns models sorted using the explicit product order expected by the UI.
     static func orderedModels(from models: [CodexModelOption]) -> [CodexModelOption] {
         let preferredOrder: [String] = [
-            "codex:gpt-5.5",
-            "codex:gpt-5.4",
-            "codex:gpt-5.4-mini",
-            "codex:gpt-5.3-codex",
-            "codex:gpt-5.3-codex-spark",
-            "codex:gpt-5.2",
-            "codex:gpt-5.2-codex",
-            "opencode:opencode/gpt-5.5",
-            "opencode:opencode/gpt-5.4",
-            "opencode:openai/gpt-5.5",
-            "opencode:openai/gpt-5.4",
-            "opencode:ollama/llama3.1",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.3-codex",
+            "gpt-5.2-codex",
+            "gpt-5.1-codex-max",
+            "gpt-5.2",
+            "gpt-5.1-codex-mini",
         ]
         let rankByModel = Dictionary(uniqueKeysWithValues: preferredOrder.enumerated().map { index, value in
             (value, index)
         })
 
         return models.sorted { lhs, rhs in
-            let lhsRank = rankByModel[lhs.selectionKey.lowercased()]
-                ?? rankByModel[CodexModelOption.selectionKey(provider: lhs.modelProvider, modelId: lhs.model).lowercased()]
-                ?? Int.max
-            let rhsRank = rankByModel[rhs.selectionKey.lowercased()]
-                ?? rankByModel[CodexModelOption.selectionKey(provider: rhs.modelProvider, modelId: rhs.model).lowercased()]
-                ?? Int.max
+            let lhsRank = rankByModel[lhs.model.lowercased()] ?? Int.max
+            let rhsRank = rankByModel[rhs.model.lowercased()] ?? Int.max
             if lhsRank == rhsRank {
                 return modelTitle(for: lhs) > modelTitle(for: rhs)
             }
@@ -83,9 +43,7 @@ enum TurnComposerMetaMapper {
 
     // Formats persisted model ids before the full model list has refreshed.
     static func modelTitle(forIdentifier identifier: String?, fallback: String? = nil) -> String {
-        let rawIdentifier = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let splitSelection = CodexModelOption.splitSelectionKey(rawIdentifier)
-        let normalizedIdentifier = (splitSelection.modelId ?? rawIdentifier).trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedIdentifier = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         switch normalizedIdentifier.lowercased() {
         case "gpt-5.5":
             return "GPT-5.5"
@@ -108,10 +66,6 @@ enum TurnComposerMetaMapper {
             if !fallback.isEmpty {
                 return fallback
             }
-            if normalizedIdentifier.contains("/") {
-                let modelName = normalizedIdentifier.components(separatedBy: "/").last ?? normalizedIdentifier
-                return modelTitle(forIdentifier: modelName)
-            }
             if normalizedIdentifier.lowercased().hasPrefix("gpt-") {
                 return "GPT-" + String(normalizedIdentifier.dropFirst("gpt-".count))
             }
@@ -119,7 +73,7 @@ enum TurnComposerMetaMapper {
         }
     }
 
-    // MARK: - Reasoning Mapping
+    // ─── Reasoning Mapping ───────────────────────────────────────────
 
     // Converts server effort values to user-facing labels and sorts them by level.
     static func reasoningDisplayOptions(from efforts: [String]) -> [TurnComposerReasoningDisplayOption] {

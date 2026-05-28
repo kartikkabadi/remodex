@@ -114,13 +114,16 @@ enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendabl
     // Hides slash commands that the connected runtime cannot fulfill for this session.
     static func availableCommands(
         supportsThreadFork: Bool,
-        allowsForkCommand: Bool
+        allowsForkCommand: Bool,
+        hidesStatusCommand: Bool = false
     ) -> [TurnComposerSlashCommand] {
         allCommands.filter { command in
             switch command {
             case .fork:
                 return supportsThreadFork && allowsForkCommand
-            case .codeReview, .compact, .feedback, .status, .subagents:
+            case .status:
+                return !hidesStatusCommand
+            case .codeReview, .compact, .feedback, .subagents:
                 return true
             }
         }

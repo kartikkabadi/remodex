@@ -130,12 +130,6 @@ extension CodexService {
         guard canRunRealtimeSyncLoop else {
             return
         }
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            if let threadId = threadId ?? activeThreadId {
-                rolloutBootstrapReplayDeferredSyncThreadIDs.insert(threadId)
-            }
-            return
-        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -167,10 +161,6 @@ extension CodexService {
     // Re-reads canonical history after terminal/open events so missed bridge-live rows can be repaired.
     func requestThreadHistoryReconcile(threadId: String, delayNanoseconds: UInt64 = 250_000_000) {
         guard canRunRealtimeSyncLoop else {
-            return
-        }
-        guard rolloutBootstrapReplayCoalescingDepth == 0 else {
-            rolloutBootstrapReplayDeferredHistoryReconcileThreadIDs.insert(threadId)
             return
         }
 
@@ -637,7 +627,6 @@ extension CodexService {
         turnStateRefreshTaskByThreadID.removeValue(forKey: threadId)
         runningThreadCatchupTaskByThreadID[threadId]?.cancel()
         runningThreadCatchupTaskByThreadID.removeValue(forKey: threadId)
-        cancelRolloutBootstrapReplayWork(for: threadId)
         forcedRunningCatchupEscalationThreadIDs.remove(threadId)
         lastForcedRunningResumeAtByThread.removeValue(forKey: threadId)
         canonicalHistoryReconcileRetryTaskByThreadID[threadId]?.cancel()
@@ -671,7 +660,6 @@ extension CodexService {
         turnStateRefreshTaskByThreadID.removeAll()
         runningThreadCatchupTaskByThreadID.values.forEach { $0.cancel() }
         runningThreadCatchupTaskByThreadID.removeAll()
-        cancelAllRolloutBootstrapReplayWork()
         forcedRunningCatchupEscalationThreadIDs.removeAll()
         lastForcedRunningResumeAtByThread.removeAll()
         workspaceCheckpointCopyTaskByTurnID.values.forEach { $0.cancel() }

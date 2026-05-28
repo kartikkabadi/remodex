@@ -1,28 +1,54 @@
 // FILE: SidebarFloatingSettingsButton.swift
-// Purpose: Floating shortcuts used to open sidebar settings and terminal tools.
+// Purpose: Floating shortcuts used to open top-level sidebar destinations.
 // Layer: View Component
-// Exports: SidebarFloatingSettingsButton, SidebarFloatingTerminalButton, SidebarComputerConnectionStatusView
+// Exports: SidebarFloatingSettingsButton, SidebarFloatingMacsButton, SidebarFloatingTerminalButton, SidebarComputerConnectionStatusView
 
 import SwiftUI
 
-struct SidebarFloatingSettingsButton: View {
+private struct SidebarFloatingCircleButton: View {
     let colorScheme: ColorScheme
+    let systemImage: String
+    let accessibilityLabel: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: {
-            HapticFeedback.shared.triggerImpactFeedback()
-            action()
-        }) {
-            Image(systemName: "gearshape.fill")
-                .font(AppFont.system(size: 17, weight: .semibold))
+        HapticButton(hapticStyle: .medium, action: action) {
+            RemodexIcon.image(systemName: systemImage, size: 17, weight: .semibold)
                 .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
                 .frame(width: 44, height: 44)
                 .adaptiveGlass(.regular, in: Circle())
         }
         .buttonStyle(.plain)
         .contentShape(Circle())
-        .accessibilityLabel("Settings")
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct SidebarFloatingSettingsButton: View {
+    let colorScheme: ColorScheme
+    let action: () -> Void
+
+    var body: some View {
+        SidebarFloatingCircleButton(
+            colorScheme: colorScheme,
+            systemImage: "gearshape",
+            accessibilityLabel: "Settings",
+            action: action
+        )
+    }
+}
+
+struct SidebarFloatingMacsButton: View {
+    let colorScheme: ColorScheme
+    let action: () -> Void
+
+    var body: some View {
+        SidebarFloatingCircleButton(
+            colorScheme: colorScheme,
+            systemImage: "laptopcomputer",
+            accessibilityLabel: "My Devices",
+            action: action
+        )
     }
 }
 
@@ -31,12 +57,8 @@ struct SidebarFloatingTerminalButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: {
-            HapticFeedback.shared.triggerImpactFeedback()
-            action()
-        }) {
-            Image(systemName: "terminal.fill")
-                .font(AppFont.system(size: 17, weight: .semibold))
+        HapticButton(hapticStyle: .medium, action: action) {
+            RemodexIcon.image(systemName: "terminal.fill", size: 17, weight: .semibold)
                 .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
                 .frame(width: 44, height: 44)
                 .adaptiveGlass(.regular, in: Circle())
@@ -71,6 +93,6 @@ struct SidebarComputerConnectionStatusView: View {
     }
 
     private var statusTitle: String {
-        isConnected ? "Connected to Computer" : "Saved Computer"
+        isConnected ? "Connected to Device" : "Saved Device"
     }
 }

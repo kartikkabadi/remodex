@@ -150,52 +150,34 @@ struct CodexBridgeUpdatePrompt: Identifiable, Equatable, Sendable {
     }
 }
 
-struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
-    var modelId: String?
-    var modelProvider: String?
+struct CodexThreadRuntimeOverride: Equatable, Sendable {
     var reasoningEffort: String?
     var serviceTierRawValue: String?
-    var overridesModel: Bool
+    var agentId: String?
+    var variantId: String?
     var overridesReasoning: Bool
     var overridesServiceTier: Bool
+    var overridesAgent: Bool
+    var overridesVariant: Bool
 
     init(
-        modelId: String? = nil,
-        modelProvider: String? = nil,
         reasoningEffort: String? = nil,
         serviceTierRawValue: String? = nil,
-        overridesModel: Bool = false,
+        agentId: String? = nil,
+        variantId: String? = nil,
         overridesReasoning: Bool = false,
-        overridesServiceTier: Bool = false
+        overridesServiceTier: Bool = false,
+        overridesAgent: Bool = false,
+        overridesVariant: Bool = false
     ) {
-        self.modelId = modelId
-        self.modelProvider = modelProvider
         self.reasoningEffort = reasoningEffort
         self.serviceTierRawValue = serviceTierRawValue
-        self.overridesModel = overridesModel
+        self.agentId = agentId
+        self.variantId = variantId
         self.overridesReasoning = overridesReasoning
         self.overridesServiceTier = overridesServiceTier
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case modelId
-        case modelProvider
-        case reasoningEffort
-        case serviceTierRawValue
-        case overridesModel
-        case overridesReasoning
-        case overridesServiceTier
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        modelId = try container.decodeIfPresent(String.self, forKey: .modelId)
-        modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
-        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
-        serviceTierRawValue = try container.decodeIfPresent(String.self, forKey: .serviceTierRawValue)
-        overridesModel = try container.decodeIfPresent(Bool.self, forKey: .overridesModel) ?? false
-        overridesReasoning = try container.decodeIfPresent(Bool.self, forKey: .overridesReasoning) ?? false
-        overridesServiceTier = try container.decodeIfPresent(Bool.self, forKey: .overridesServiceTier) ?? false
+        self.overridesAgent = overridesAgent
+        self.overridesVariant = overridesVariant
     }
 
     var serviceTier: CodexServiceTier? {
@@ -206,7 +188,58 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     }
 
     var isEmpty: Bool {
-        !overridesModel && !overridesReasoning && !overridesServiceTier
+        !overridesReasoning && !overridesServiceTier && !overridesAgent && !overridesVariant
+    }
+}
+
+extension CodexThreadRuntimeOverride: Codable {
+    enum CodingKeys: String, CodingKey {
+        case reasoningEffort
+        case serviceTierRawValue
+        case agentId
+        case variantId
+        case overridesReasoning
+        case overridesServiceTier
+        case overridesAgent
+        case overridesVariant
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+        serviceTierRawValue = try container.decodeIfPresent(String.self, forKey: .serviceTierRawValue)
+        agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
+        variantId = try container.decodeIfPresent(String.self, forKey: .variantId)
+        overridesReasoning = try container.decodeIfPresent(Bool.self, forKey: .overridesReasoning) ?? false
+        overridesServiceTier = try container.decodeIfPresent(Bool.self, forKey: .overridesServiceTier) ?? false
+        overridesAgent = try container.decodeIfPresent(Bool.self, forKey: .overridesAgent) ?? false
+        overridesVariant = try container.decodeIfPresent(Bool.self, forKey: .overridesVariant) ?? false
+
+        if !overridesAgent, Self.hasPersistedSelection(agentId) {
+            overridesAgent = true
+        }
+        if !overridesVariant, Self.hasPersistedSelection(variantId) {
+            overridesVariant = true
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
+        try container.encodeIfPresent(serviceTierRawValue, forKey: .serviceTierRawValue)
+        try container.encodeIfPresent(agentId, forKey: .agentId)
+        try container.encodeIfPresent(variantId, forKey: .variantId)
+        try container.encode(overridesReasoning, forKey: .overridesReasoning)
+        try container.encode(overridesServiceTier, forKey: .overridesServiceTier)
+        try container.encode(overridesAgent, forKey: .overridesAgent)
+        try container.encode(overridesVariant, forKey: .overridesVariant)
+    }
+
+    private static func hasPersistedSelection(_ value: String?) -> Bool {
+        guard let value else {
+            return false
+        }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -381,7 +414,7 @@ struct AssistantRevertStateCacheEntry {
 @MainActor
 @Observable
 final class CodexService {
-    static let minimumSupportedBridgePackageVersion = "1.3.9"
+    static let minimumSupportedBridgePackageVersion = "2.0.0"
 
     // --- Public state ---------------------------------------------------------
 
@@ -424,18 +457,24 @@ final class CodexService {
     var queuedTurnDraftsByThread: [String: [QueuedTurnDraft]] = [:]
     // Per-thread queue pause state (active by default when absent).
     var queuePauseStateByThread: [String: QueuePauseState] = [:]
+    // Per-thread unsent composer drafts that survive chat switches and app restarts.
+    var composerDraftsByThreadID: [String: TurnComposerLocalDraft] = [:]
     var messagesByThread: [String: [CodexMessage]] = [:]
     // Monotonic per-thread revision so views can react to message mutations without hashing full transcripts.
     var messageRevisionByThread: [String: Int] = [:]
     var syncRealtimeEnabled = true
     var availableModels: [CodexModelOption] = []
+    var availableAgents: [AgentOption] = []
     var selectedModelId: String?
+    var hasPersistedSelectedModelId = false
     var selectedGitWriterModelId: String?
     var selectedReasoningEffort: String?
     var selectedServiceTier: CodexServiceTier?
     // Per-chat runtime overrides let the composer diverge from app-wide defaults.
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var selectedAccessMode: CodexAccessMode = .onRequest
+    /// Next bridge pairing preference (ADR-001). Does not switch the live connected runtime.
+    var preferredAgentRuntime: String = "codex"
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
     var gptAccountSnapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot() {
         didSet {
@@ -445,6 +484,12 @@ final class CodexService {
     // Holds the most recent account-specific error without colliding with transport-level failures.
     var gptAccountErrorMessage: String?
     var isLoadingModels = false
+    var isAgentListLoading = false
+    var agentsErrorMessage: String?
+    // Coalesces post-connect model refreshes behind thread hydration so composer metadata cannot be skipped.
+    @ObservationIgnored var pendingRuntimeOptionRefresh = false
+    @ObservationIgnored var runtimeOptionRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var runtimeOptionRefreshToken: UUID?
     var modelsErrorMessage: String?
     var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     var pendingNotificationOpenThreadID: String?
@@ -455,7 +500,7 @@ final class CodexService {
     // Runtime compatibility flag for `thread/start|turn/start.serviceTier` speed controls.
     var supportsServiceTier = true
     // Runtime compatibility flag for the bridge-owned voice transcription flow.
-    var supportsBridgeVoiceAuth = true
+    var supportsBridgeVoiceTranscription = true
     // Runtime compatibility flag for native `thread/fork` conversation branching.
     var supportsThreadFork = true
     // Runtime compatibility flag for `thread/turns/list` and `excludeTurns`.
@@ -493,6 +538,8 @@ final class CodexService {
     var threadCompletionBanner: CodexThreadCompletionBanner?
     // Explains why a push-opened chat could not be restored and offers a recovery path.
     var missingNotificationThreadPrompt: CodexMissingNotificationThreadPrompt?
+    // Owns the scarce App Store review prompt budget for successful in-app runs.
+    @ObservationIgnored let appReviewPromptCoordinator = AppReviewPromptCoordinator()
     // Interactive SSH terminal state is owned on-device so it can bootstrap a Mac before the bridge runs.
     var terminalSnapshot: RemodexTerminalSnapshot = .idle
     var terminalSnapshotsById: [String: RemodexTerminalSnapshot] = [:]
@@ -506,6 +553,7 @@ final class CodexService {
     var webSocketSession: URLSession?
     var webSocketSessionDelegate: CodexURLSessionWebSocketDelegate?
     var webSocketTask: URLSessionWebSocketTask?
+    var webSocketKeepAliveTask: Task<Void, Never>?
     // Raw frame buffer used when the relay runs over manual TCP websocket framing.
     var manualWebSocketReadBuffer = Data()
     var usesManualWebSocketTransport = false
@@ -515,6 +563,10 @@ final class CodexService {
     @ObservationIgnored var requestTransportOverride: ((String, JSONValue?) async throws -> RPCMessage)?
     // Test hook: stubs trusted-session lookup without performing a real relay HTTP request.
     @ObservationIgnored var trustedSessionResolverOverride: (() async throws -> CodexTrustedSessionResolveResponse)?
+    // Test hooks: exercise keepalive lifecycle without waiting 25s or opening a real socket.
+    @ObservationIgnored var webSocketKeepAliveIntervalOverrideNanoseconds: UInt64?
+    @ObservationIgnored var webSocketForegroundProbeTimeoutOverrideNanoseconds: UInt64?
+    @ObservationIgnored var webSocketKeepAlivePingOverride: (() async throws -> Void)?
     // Keeps the trusted-session HTTP lookup cancellable so manual retry can preempt a stuck resolve.
     @ObservationIgnored var trustedSessionResolveTask: Task<CodexTrustedSessionResolveResponse, Error>?
     @ObservationIgnored var trustedSessionResolveTaskID: UUID?
@@ -531,7 +583,6 @@ final class CodexService {
     @ObservationIgnored var pendingAssistantDeltaContextByStreamID: [String: (threadId: String, turnId: String, itemId: String?, assistantPhase: String?)] = [:]
     @ObservationIgnored var pendingAssistantDeltaStreamOrder: [String] = []
     @ObservationIgnored var pendingAssistantDeltaFlushTask: Task<Void, Never>?
-    let assistantDeltaBatchIntervalNanoseconds: UInt64 = 50_000_000
     // Coalesces multiple invalidateAssistantRevertStates() calls within the same run loop tick into one refresh.
     var coalescedRevertRefreshTask: Task<Void, Never>?
     // Dedupes completion payloads when servers omit turn/item identifiers.
@@ -573,14 +624,6 @@ final class CodexService {
     @ObservationIgnored var turnStateRefreshTaskByThreadID: [String: Task<Bool, Never>] = [:]
     // Coalesces the full running-thread catch-up pipeline so open/foreground/reconnect share one path.
     @ObservationIgnored var runningThreadCatchupTaskByThreadID: [String: Task<RunningThreadCatchupOutcome, Never>] = [:]
-    // Tracks rollout bootstrap batches so desktop catch-up can stay compact without duplicate replay.
-    @ObservationIgnored var appliedRolloutBootstrapReplayBatchKeys: Set<String> = []
-    @ObservationIgnored var appliedRolloutBootstrapReplayBatchKeyOrder: [String] = []
-    @ObservationIgnored var rolloutBootstrapReplayCoalescingDepth = 0
-    @ObservationIgnored var rolloutBootstrapReplayNeedsMessagePersist = false
-    @ObservationIgnored var rolloutBootstrapReplayDeferredTimelineThreadIDs: Set<String> = []
-    @ObservationIgnored var rolloutBootstrapReplayDeferredSyncThreadIDs: Set<String> = []
-    @ObservationIgnored var rolloutBootstrapReplayDeferredHistoryReconcileThreadIDs: Set<String> = []
     // Lets a late foreground/open caller upgrade an in-flight running catch-up into a forced resume.
     @ObservationIgnored var forcedRunningCatchupEscalationThreadIDs: Set<String> = []
     // Invalidates stale async completions after archive/delete/reconnect tears refresh work down.
@@ -595,7 +638,13 @@ final class CodexService {
     @ObservationIgnored var canonicalHistoryReconcileTaskByThreadID: [String: Task<Void, Never>] = [:]
     // Tracks delayed retry timers for canonical reconcile so teardown can cancel the backoff too.
     @ObservationIgnored var canonicalHistoryReconcileRetryTaskByThreadID: [String: Task<Void, Never>] = [:]
+    // Coalesces sidebar/bootstrap thread/list refreshes so launch paths do not duplicate the same fetch.
+    @ObservationIgnored var threadListFetchTaskByLimit: [Int: (id: UUID, task: Task<[CodexThread], Error>)] = [:]
     var isAppInForeground = true
+    // Network quality flag: when true, sync and keepalive intervals are stretched to reduce
+    // bandwidth usage on constrained connections (Low Data Mode, hotspot tethering).
+    var isConstrainedNetwork = false
+    @ObservationIgnored var networkPathMonitor: NWPathMonitor?
     var threadListSyncTask: Task<Void, Never>?
     var activeThreadSyncTask: Task<Void, Never>?
     var runningThreadWatchSyncTask: Task<Void, Never>?
@@ -606,6 +655,42 @@ final class CodexService {
     var connectedServerIdentity: String?
     // Tracks whether the bridge is proxying a real Codex endpoint or a spawned local app-server.
     var codexTransportMode: CodexRuntimeTransportMode = .unknown
+    // Connected agent runtime from initialize capabilities (ADR-001: not transport mode).
+    var bridgeRuntimeCapabilities: CodexBridgeRuntimeCapabilities = .codexDefault
+    var connectedBridgeProvider: String {
+        bridgeRuntimeCapabilities.agentRuntime.rawValue
+    }
+    var requiresOpenaiAuth: Bool {
+        bridgeRuntimeCapabilities.requiresOpenaiAuth
+    }
+    var supportsAgents: Bool {
+        bridgeRuntimeCapabilities.supportsAgents
+    }
+    var supportsVariants: Bool {
+        bridgeRuntimeCapabilities.supportsVariants
+    }
+    var isOpenCodeBridgeConnected: Bool {
+        bridgeRuntimeCapabilities.isOpenCodeConnected
+    }
+
+    var preferredRuntimeMismatchHint: String? {
+        guard isConnected, isInitialized else {
+            return nil
+        }
+        let connected = connectedBridgeProvider
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let preferred = preferredAgentRuntime
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !connected.isEmpty, !preferred.isEmpty, connected != preferred else {
+            return nil
+        }
+        if preferred == "opencode" {
+            return "Connected to a Codex bridge. Switch on this Mac to use OpenCode."
+        }
+        return "Connected to an OpenCode bridge. Switch on this Mac to use Codex."
+    }
     var bridgeHostPlatform: CodexBridgeHostPlatform {
         if let hostPlatform = gptAccountSnapshot.hostPlatform {
             return hostPlatform
@@ -633,6 +718,9 @@ final class CodexService {
     var supportsKeepAwakeWhileBridgeRuns: Bool {
         bridgeHostCapabilities.keepAwake
     }
+    var supportsBridgePackageUpdate: Bool {
+        bridgeHostCapabilities.bridgeUpdate
+    }
     var hostComputerLabel: String {
         bridgeHostPlatform.displayName
     }
@@ -644,6 +732,9 @@ final class CodexService {
     }
     var runningThreadWatchByID: [String: CodexRunningThreadWatch] = [:]
     var mirroredRunningCatchupThreadIDs: Set<String> = []
+    var desktopMirroredRunningThreadIDs: Set<String> = []
+    var desktopMirroredRunningStaleSnapshotCountsByThread: [String: Int] = [:]
+    var desktopMirroredRunningLastActivityAtByThread: [String: Date] = [:]
     var lastMirroredRunningCatchupAtByThread: [String: Date] = [:]
     var localNetworkAuthorizationStatus: LocalNetworkAuthorizationStatus = .unknown
     var backgroundTurnGraceTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -662,7 +753,12 @@ final class CodexService {
     var pendingHandshake: CodexPendingHandshake?
     var phoneIdentityState: CodexPhoneIdentityState
     var trustedMacRegistry: CodexTrustedMacRegistry
+    var currentTrustedMacDeviceId: String?
     var lastTrustedMacDeviceId: String?
+    var previousTrustedMacDeviceId: String?
+    @ObservationIgnored var macScopedContextOverrideDeviceId: String?
+    @ObservationIgnored var suspendAutomaticMacScopedPersistence = false
+    @ObservationIgnored var isApplyingMacScopedState = false
     var pendingSecureControlContinuations: [String: [CodexSecureControlWaiter]] = [:]
     var bufferedSecureControlMessages: [String: [String]] = [:]
     // Assistant-scoped patch ledger used by the revert-changes flow.
@@ -706,10 +802,11 @@ final class CodexService {
     let encoder: JSONEncoder
     let decoder: JSONDecoder
     let messagePersistence = CodexMessagePersistence()
+    let composerDraftPersistence = CodexComposerDraftPersistence()
     let aiChangeSetPersistence = AIChangeSetPersistence()
     let defaults: UserDefaults
     let userNotificationCenter: CodexUserNotificationCentering
-    let remoteNotificationRegistrar: CodexRemoteNotificationRegistering
+    var remoteNotificationRegistrar: CodexRemoteNotificationRegistering?
 
     static let selectedModelIdDefaultsKey = "codex.selectedModelId"
     static let selectedGitWriterModelIdDefaultsKey = "codex.selectedGitWriterModelId"
@@ -718,7 +815,9 @@ final class CodexService {
     static let threadRuntimeOverridesDefaultsKey = "codex.threadRuntimeOverrides"
     static let planSessionSourcesDefaultsKey = "codex.planSessionSources"
     static let selectedAccessModeDefaultsKey = "codex.selectedAccessMode"
+    static let preferredAgentRuntimeDefaultsKey = "codex.preferredAgentRuntime"
     static let locallyArchivedThreadIDsKey = "codex.locallyArchivedThreadIDs"
+    static let locallyDeletedThreadIDsKey = "codex.locallyDeletedThreadIDs"
     static let forkedThreadOriginsDefaultsKey = "codex.forkedThreadOrigins"
     static let renamedThreadNamesDefaultsKey = "codex.renamedThreadNames"
     static let pinnedThreadIDsDefaultsKey = "codex.pinnedThreadIDs"
@@ -733,46 +832,30 @@ final class CodexService {
         encoder: JSONEncoder = JSONEncoder(),
         decoder: JSONDecoder = JSONDecoder(),
         defaults: UserDefaults = .standard,
-        userNotificationCenter: CodexUserNotificationCentering = UNUserNotificationCenter.current(),
-        remoteNotificationRegistrar: CodexRemoteNotificationRegistering = CodexApplicationRemoteNotificationRegistrar()
+        userNotificationCenter: CodexUserNotificationCentering? = nil,
+        remoteNotificationRegistrar: CodexRemoteNotificationRegistering? = nil
     ) {
         self.encoder = encoder
         self.decoder = decoder
         self.defaults = defaults
-        self.userNotificationCenter = userNotificationCenter
-        self.remoteNotificationRegistrar = remoteNotificationRegistrar
+        self.userNotificationCenter = userNotificationCenter ?? UNUserNotificationCenter.current()
+        self.remoteNotificationRegistrar = remoteNotificationRegistrar ?? CodexApplicationRemoteNotificationRegistrar()
         self.phoneIdentityState = codexPhoneIdentityStateFromSecureStore()
         self.trustedMacRegistry = codexTrustedMacRegistryFromSecureStore()
+        self.currentTrustedMacDeviceId = SecureStore.readString(for: CodexSecureKeys.currentTrustedMacDeviceId)
         self.lastTrustedMacDeviceId = SecureStore.readString(for: CodexSecureKeys.lastTrustedMacDeviceId)
-        let loadedMessages = messagePersistence.load().mapValues { messages in
-            messages.map { message in
-                var value = message
-                // Streaming cannot survive app relaunch; clear stale flags loaded from disk.
-                value.isStreaming = false
-                return value
-            }
-        }
-        CodexMessageOrderCounter.seed(from: loadedMessages)
-        self.messagesByThread = loadedMessages
+        self.messagesByThread = [:]
+        self.composerDraftsByThreadID = [:]
         rebuildSubagentIdentityDirectory()
-
-        let loadedChangeSets = aiChangeSetPersistence.load()
-        self.aiChangeSetsByID = loadedChangeSets.reduce(into: [:]) { partialResult, changeSet in
-            partialResult[changeSet.id] = changeSet
-        }
-        self.aiChangeSetIDByTurnID = loadedChangeSets.reduce(into: [:]) { partialResult, changeSet in
-            partialResult[changeSet.turnId] = changeSet.id
-        }
-        self.aiChangeSetIDByAssistantMessageID = loadedChangeSets.reduce(into: [:]) { partialResult, changeSet in
-            if let assistantMessageId = changeSet.assistantMessageId {
-                partialResult[assistantMessageId] = changeSet.id
-            }
-        }
+        self.aiChangeSetsByID = [:]
+        self.aiChangeSetIDByTurnID = [:]
+        self.aiChangeSetIDByAssistantMessageID = [:]
 
         let savedModelId = defaults.string(forKey: Self.selectedModelIdDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let hasSavedModelId = savedModelId?.isEmpty == false
-        self.selectedModelId = hasSavedModelId ? savedModelId : "gpt-5.5"
+        self.hasPersistedSelectedModelId = hasSavedModelId
+        self.selectedModelId = hasSavedModelId ? savedModelId : nil
 
         let savedGitWriterModelId = defaults.string(forKey: Self.selectedGitWriterModelIdDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -782,98 +865,26 @@ final class CodexService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectedReasoningEffort = (hasSavedModelId && savedReasoning?.isEmpty == false)
             ? savedReasoning
-            : "medium"
+            : nil
 
         if defaults.object(forKey: Self.keepMacAwakeWhileBridgeRunsDefaultsKey) != nil {
             self.keepMacAwakeWhileBridgeRuns = defaults.bool(forKey: Self.keepMacAwakeWhileBridgeRunsDefaultsKey)
         } else {
             self.keepMacAwakeWhileBridgeRuns = false
         }
+        self.threadRuntimeOverridesByThreadID = [:]
 
-        if let savedThreadRuntimeOverrides = defaults.data(forKey: Self.threadRuntimeOverridesDefaultsKey),
-           let decodedThreadRuntimeOverrides = try? decoder.decode(
-               [String: CodexThreadRuntimeOverride].self,
-               from: savedThreadRuntimeOverrides
-           ) {
-            self.threadRuntimeOverridesByThreadID = decodedThreadRuntimeOverrides
-        } else {
-            self.threadRuntimeOverridesByThreadID = [:]
-        }
+        self.planSessionSourceByThread = [:]
 
-        if let savedPlanSessionSources = defaults.data(forKey: Self.planSessionSourcesDefaultsKey),
-           let decodedPlanSessionSources = try? decoder.decode(
-               [String: CodexPlanSessionSource].self,
-               from: savedPlanSessionSources
-           ) {
-            self.planSessionSourceByThread = decodedPlanSessionSources
-        } else {
-            self.planSessionSourceByThread = [:]
-        }
+        self.forkedFromThreadIDByThreadID = [:]
 
-        if let savedForkOrigins = defaults.data(forKey: Self.forkedThreadOriginsDefaultsKey),
-           let decodedForkOrigins = try? decoder.decode([String: String].self, from: savedForkOrigins) {
-            self.forkedFromThreadIDByThreadID = decodedForkOrigins
-        } else {
-            self.forkedFromThreadIDByThreadID = [:]
-        }
+        self.renamedThreadNameByThreadID = [:]
 
-        if let savedRenamedThreadNames = defaults.data(forKey: Self.renamedThreadNamesDefaultsKey),
-           let decodedRenamedThreadNames = try? decoder.decode([String: String].self, from: savedRenamedThreadNames) {
-            self.renamedThreadNameByThreadID = decodedRenamedThreadNames
-        } else {
-            self.renamedThreadNameByThreadID = [:]
-        }
+        self.associatedManagedWorktreePathByThreadID = [:]
+        self.pinnedThreadIDs = []
+        self.pinnedThreadSnapshotsByRootID = [:]
 
-        if let savedPinnedThreadIDs = defaults.data(forKey: Self.pinnedThreadIDsDefaultsKey),
-           let decodedPinnedThreadIDs = try? decoder.decode([String].self, from: savedPinnedThreadIDs) {
-            self.pinnedThreadIDs = decodedPinnedThreadIDs
-        } else {
-            self.pinnedThreadIDs = []
-        }
-
-        if let savedPinnedThreadSnapshots = defaults.data(forKey: Self.pinnedThreadSnapshotsDefaultsKey),
-           let decodedPinnedThreadSnapshots = try? decoder.decode([String: [CodexThread]].self, from: savedPinnedThreadSnapshots) {
-            self.pinnedThreadSnapshotsByRootID = decodedPinnedThreadSnapshots
-        } else {
-            self.pinnedThreadSnapshotsByRootID = [:]
-        }
-
-        if let savedAssociatedManagedWorktreePaths = defaults.data(forKey: Self.associatedManagedWorktreePathsDefaultsKey),
-           let decodedAssociatedManagedWorktreePaths = try? decoder.decode(
-               [String: String].self,
-               from: savedAssociatedManagedWorktreePaths
-           ) {
-            self.associatedManagedWorktreePathByThreadID = decodedAssociatedManagedWorktreePaths
-        } else {
-            self.associatedManagedWorktreePathByThreadID = [:]
-        }
-
-        if let savedTurnTerminalStates = defaults.data(forKey: Self.turnTerminalStatesDefaultsKey),
-           let decodedTurnTerminalStates = try? decoder.decode(
-               [String: CodexTurnTerminalState].self,
-               from: savedTurnTerminalStates
-           ) {
-            self.terminalStateByTurnID = decodedTurnTerminalStates
-        } else {
-            self.terminalStateByTurnID = [:]
-        }
-        rehydrateLegacyFallbackChangeSetsFromPersistedMessages()
-
-        if let savedThreadHistoryPaginationState = defaults.data(
-            forKey: Self.threadHistoryPaginationStateDefaultsKey
-        ),
-           let decodedThreadHistoryPaginationState = try? decoder.decode(
-               [String: CodexThreadHistoryPaginationState].self,
-               from: savedThreadHistoryPaginationState
-           ) {
-            self.olderThreadHistoryCursorByThreadID = decodedThreadHistoryPaginationState.compactMapValues(\.olderCursor)
-            self.exhaustedOlderThreadHistoryCursorByThreadID = decodedThreadHistoryPaginationState.compactMapValues(\.exhaustedOlderCursor)
-            self.threadsWithAuthoritativeLocalHistoryStart = Set(
-                decodedThreadHistoryPaginationState.compactMap { threadId, state in
-                    state.hasAuthoritativeLocalHistoryStart ? threadId : nil
-                }
-            )
-        }
+        self.terminalStateByTurnID = [:]
 
         let savedServiceTier = defaults.string(forKey: Self.selectedServiceTierDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -893,31 +904,13 @@ final class CodexService {
             self.selectedAccessMode = .onRequest
         }
 
-        if let persistedGPTAccountSnapshot = loadPersistedGPTAccountSnapshot() {
-            self.gptAccountSnapshot = persistedGPTAccountSnapshot
+        if let savedPreferredRuntime = defaults.string(forKey: Self.preferredAgentRuntimeDefaultsKey) {
+            self.preferredAgentRuntime = CodexService.normalizedPreferredAgentRuntime(savedPreferredRuntime)
         } else {
-            self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()
+            self.preferredAgentRuntime = "codex"
         }
 
-        if let pendingLogin = gptPendingLoginState,
-           !self.gptAccountSnapshot.isAuthenticated,
-           self.gptAccountSnapshot.status != .loginPending {
-            self.gptAccountSnapshot = CodexGPTAccountSnapshot(
-                status: .loginPending,
-                authMethod: .chatgpt,
-                email: nil,
-                displayName: nil,
-                planType: nil,
-                hostPlatform: self.gptAccountSnapshot.hostPlatform,
-                hostCapabilities: self.gptAccountSnapshot.hostCapabilities,
-                loginInFlight: true,
-                needsReauth: false,
-                expiresAt: pendingLogin.expiresAt,
-                tokenReady: false,
-                tokenUnavailableSince: nil,
-                updatedAt: .now
-            )
-        }
+        self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()
 
         // Restore relay session from Keychain
         self.relaySessionId = SecureStore.readString(for: CodexSecureKeys.relaySessionId)
@@ -934,82 +927,115 @@ final class CodexService {
            let parsedLastAppliedSeq = Int(rawLastAppliedSeq) {
             self.lastAppliedBridgeOutboundSeq = parsedLastAppliedSeq
         }
+        migrateCurrentTrustedMacDeviceIdIfNeeded()
+        migrateLegacyMacScopedDefaultsIfNeeded()
+        loadCurrentMacScopedDefaultsState()
+        loadCurrentMacScopedLocalState()
         self.remoteNotificationDeviceToken = SecureStore.readString(for: CodexSecureKeys.pushDeviceToken)
         if let relayMacDeviceId,
            let trustedMac = trustedMacRegistry.records[relayMacDeviceId] {
             self.secureConnectionState = .trustedMac
             self.secureMacFingerprint = codexSecureFingerprint(for: trustedMac.macIdentityPublicKey)
-        } else if let trustedMac = preferredTrustedMacRecord {
+        } else if let trustedMac = currentTrustedMacRecord {
             self.secureConnectionState = .liveSessionUnresolved
             self.secureMacFingerprint = codexSecureFingerprint(for: trustedMac.macIdentityPublicKey)
         }
         rebuildThreadLookupCaches()
+        startNetworkPathMonitor()
+    }
+
+    func startNetworkPathMonitor() {
+        networkPathMonitor?.cancel()
+        let monitor = NWPathMonitor()
+        networkPathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let constrained = path.isConstrained
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.isConstrainedNetwork != constrained {
+                    self.isConstrainedNetwork = constrained
+                    if self.isConnected, self.isInitialized {
+                        self.startSyncLoop()
+                    }
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "CodexMobile.NetworkPathMonitor", qos: .utility))
     }
 
     // Persists per-thread plan-mode provenance so reconnect/relaunch keeps native vs fallback behavior stable.
     private func persistPlanSessionSources() {
+        guard !suspendAutomaticMacScopedPersistence, !isApplyingMacScopedState else {
+            return
+        }
+
         guard !planSessionSourceByThread.isEmpty else {
-            defaults.removeObject(forKey: Self.planSessionSourcesDefaultsKey)
+            defaults.removeObject(forKey: macScopedDefaultsKey(Self.planSessionSourcesDefaultsKey))
             return
         }
 
         guard let data = try? encoder.encode(planSessionSourceByThread) else {
-            defaults.removeObject(forKey: Self.planSessionSourcesDefaultsKey)
+            defaults.removeObject(forKey: macScopedDefaultsKey(Self.planSessionSourcesDefaultsKey))
             return
         }
 
-        defaults.set(data, forKey: Self.planSessionSourcesDefaultsKey)
+        defaults.set(data, forKey: macScopedDefaultsKey(Self.planSessionSourcesDefaultsKey))
     }
 
     // Remembers whether we can offer reconnect without forcing a fresh QR scan.
     var hasSavedRelaySession: Bool {
-        normalizedRelaySessionId != nil && normalizedRelayURL != nil
+        guard normalizedRelaySessionId != nil,
+              normalizedRelayURL != nil else {
+            return false
+        }
+
+        guard let normalizedCurrentTrustedMacDeviceId else {
+            return true
+        }
+
+        return normalizedRelayMacDeviceId == normalizedCurrentTrustedMacDeviceId
     }
 
     // Normalizes the persisted relay session id before reuse in reconnect flows.
     var normalizedRelaySessionId: String? {
         relaySessionId?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+            .codexNilIfEmpty
     }
 
     // Normalizes the persisted relay base URL before reuse in reconnect flows.
     var normalizedRelayURL: String? {
         relayUrl?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+            .codexNilIfEmpty
     }
 
     var normalizedRelayMacDeviceId: String? {
         relayMacDeviceId?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+            .codexNilIfEmpty
     }
 
     var normalizedRelayMacIdentityPublicKey: String? {
         relayMacIdentityPublicKey?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+            .codexNilIfEmpty
     }
 
     var normalizedLastTrustedMacDeviceId: String? {
         lastTrustedMacDeviceId?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+            .codexNilIfEmpty
+    }
+
+    var normalizedCurrentTrustedMacDeviceId: String? {
+        currentTrustedMacDeviceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty
     }
 
     var preferredTrustedMacDeviceId: String? {
-        if let normalizedLastTrustedMacDeviceId,
-           trustedMacRegistry.records[normalizedLastTrustedMacDeviceId] != nil {
-            return normalizedLastTrustedMacDeviceId
-        }
-
-        return trustedMacRegistry.records.values
-            .sorted { lhs, rhs in
-                (lhs.lastUsedAt ?? lhs.lastPairedAt) > (rhs.lastUsedAt ?? rhs.lastPairedAt)
-            }
-            .first?
-            .macDeviceId
+        normalizedCurrentTrustedMacDeviceId
     }
 
     var preferredTrustedMacRecord: CodexTrustedMacRecord? {
@@ -1019,29 +1045,56 @@ final class CodexService {
         return trustedMacRegistry.records[preferredTrustedMacDeviceId]
     }
 
+    var currentTrustedMacRecord: CodexTrustedMacRecord? {
+        guard let normalizedCurrentTrustedMacDeviceId else {
+            return nil
+        }
+
+        return trustedMacRegistry.records[normalizedCurrentTrustedMacDeviceId]
+    }
+
+    var normalizedPreviousTrustedMacDeviceId: String? {
+        previousTrustedMacDeviceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty
+    }
+
+    func trustedMacRecord(for deviceId: String?) -> CodexTrustedMacRecord? {
+        guard let normalizedDeviceId = deviceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty else {
+            return nil
+        }
+
+        return trustedMacRegistry.records[normalizedDeviceId]
+    }
+
     var hasTrustedMacReconnectCandidate: Bool {
-        preferredTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        currentTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     var hasReconnectCandidate: Bool {
         hasSavedRelaySession || hasTrustedMacReconnectCandidate
     }
 
-    // Chooses the relay base URL only when a saved live session can actually carry a wake request.
+    // Chooses the best relay base URL for a one-shot display wake before reconnecting.
     var preferredWakeRelayURL: String? {
-        guard !isConnected,
-              secureConnectionState != .rePairRequired,
-              hasTrustedReconnectContext else {
+        guard !isConnected else {
             return nil
         }
 
-        return normalizedRelayURL
+        if hasTrustedReconnectContext {
+            return normalizedRelayURL
+        }
+
+        return currentTrustedMacRecord?.relayURL?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty
     }
 
-    // Wake needs a concrete live-session URL; trusted-Mac-only recovery should show Reconnect, not Wake Screen.
+    // Wake can use either a saved live session or a freshly resolved trusted session.
     var canWakePreferredMacDisplay: Bool {
-        guard !isConnected,
-              secureConnectionState != .rePairRequired else {
+        guard !isConnected else {
             return false
         }
 
@@ -1062,16 +1115,92 @@ final class CodexService {
             return .loadingChats
         }
 
-        if isBootstrappingConnectionSync || isLoadingModels || isLoadingThreads {
+        if isBootstrappingConnectionSync || isLoadingThreads {
             return .syncing
         }
 
         return .connected
     }
+
+    var connectionPhaseDisplayLabel: String {
+        switch connectionPhase {
+        case .offline:
+            return "Offline"
+        case .connecting:
+            return "Connecting"
+        case .loadingChats:
+            return "Loading chats"
+        case .syncing:
+            return "Syncing"
+        case .connected:
+            return "Connected"
+        }
+    }
+
+    var secureConnectionDisplayLabel: String? {
+        let label = secureConnectionState.statusLabel
+        return label.isEmpty || secureConnectionState == .notPaired ? nil : label
+    }
+
+    func setCurrentTrustedMacDeviceId(_ deviceId: String?) {
+        let normalizedDeviceId = deviceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty
+        currentTrustedMacDeviceId = normalizedDeviceId
+        if let normalizedDeviceId {
+            SecureStore.writeString(normalizedDeviceId, for: CodexSecureKeys.currentTrustedMacDeviceId)
+        } else {
+            SecureStore.deleteValue(for: CodexSecureKeys.currentTrustedMacDeviceId)
+        }
+    }
+
+    func setPreviousTrustedMacDeviceId(_ deviceId: String?) {
+        previousTrustedMacDeviceId = deviceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .codexNilIfEmpty
+    }
+
+    func clearPreviousTrustedMacDeviceId() {
+        previousTrustedMacDeviceId = nil
+    }
+
+    func migrateCurrentTrustedMacDeviceIdIfNeeded() {
+        if let normalizedCurrentTrustedMacDeviceId,
+           trustedMacRegistry.records[normalizedCurrentTrustedMacDeviceId] != nil {
+            return
+        }
+
+        let bootstrapDeviceId = [
+            normalizedRelayMacDeviceId,
+            normalizedLastTrustedMacDeviceId,
+        ]
+        .compactMap { $0 }
+        .first { trustedMacRegistry.records[$0] != nil }
+
+        setCurrentTrustedMacDeviceId(bootstrapDeviceId)
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            networkPathMonitor?.cancel()
+            trustedSessionResolveTask?.cancel()
+            messagePersistenceDebounceTask?.cancel()
+            coalescedRevertRefreshTask?.cancel()
+            threadListSyncTask?.cancel()
+            activeThreadSyncTask?.cancel()
+            runningThreadWatchSyncTask?.cancel()
+            postConnectSyncTask?.cancel()
+            gptAccountLoginSyncTask?.cancel()
+
+            notificationObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+            notificationObserverTokens.removeAll()
+            notificationCenterDelegateProxy = nil
+        }
+    }
 }
 
 private extension String {
-    var nilIfEmpty: String? {
+    var codexNilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }

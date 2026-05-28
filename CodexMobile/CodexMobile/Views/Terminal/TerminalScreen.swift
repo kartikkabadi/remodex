@@ -8,44 +8,6 @@ import Foundation
 import SwiftUI
 import UIKit
 
-private let remodexTerminalDefaultFontSize = 10.0
-private let remodexTerminalFontSizeStep = 0.5
-private let remodexTerminalMinFontSize = 6.0
-private let remodexTerminalMaxFontSize = 14.0
-private let remodexTerminalAccessoryHeight: CGFloat = 52
-
-private enum TerminalPendingModifier: Equatable {
-    case ctrl
-    case meta
-}
-
-private enum TerminalHostPlatform {
-    case mac
-    case linux
-    case windows
-    case unknown
-
-    static func infer(from value: String?) -> TerminalHostPlatform {
-        let lowercased = value?.lowercased() ?? ""
-        if lowercased.contains("mac")
-            || lowercased.contains("macbook")
-            || lowercased.contains("mac mini")
-            || lowercased.contains("imac")
-            || lowercased.contains("darwin") {
-            return .mac
-        }
-        if lowercased.contains("windows") || lowercased.contains("win") {
-            return .windows
-        }
-        if lowercased.contains("linux")
-            || lowercased.contains("ubuntu")
-            || lowercased.contains("debian") {
-            return .linux
-        }
-        return .unknown
-    }
-}
-
 struct TerminalScreen: View {
     @Environment(CodexService.self) private var codex
     @Environment(\.colorScheme) private var colorScheme
@@ -57,10 +19,12 @@ struct TerminalScreen: View {
     @State private var activeTerminalId = CodexService.defaultTerminalId
     @State private var bootstrappedTerminalIds = Set<String>()
     @State private var userClosedTerminalIds = Set<String>()
+    @State private var initialWorkingDirectoryByTerminalId: [String: String] = [:]
     @State private var isNativeTerminalAvailable = true
     @State private var actionErrorMessage: String?
     @State private var didApplyPreferredWorkingDirectory = false
     @State private var pendingModifier: TerminalPendingModifier?
+    @State private var selectedModifier: TerminalPendingModifier = .ctrl
     @AppStorage("codex.terminal.fontSize") private var terminalFontSize = remodexTerminalDefaultFontSize
 
     let preferredWorkingDirectory: String?
@@ -99,18 +63,22 @@ struct TerminalScreen: View {
     }
 
     private var terminalKey: String {
-        "\(activeTerminalId):\(profileResolvedFromConnection.connectionString)"
+        "\(activeTerminalId):\(activeSnapshot.instanceId ?? "idle")"
     }
 
     private var activeSnapshot: RemodexTerminalSnapshot {
         codex.terminalSnapshot(for: activeTerminalId)
     }
 
+    private var routeInitialWorkingDirectory: String? {
+        let trimmed = preferredWorkingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private var currentWorkingDirectory: String {
         firstNonEmpty([
             activeSnapshot.cwd,
-            profileResolvedFromConnection.cwd,
-            preferredWorkingDirectory,
+            initialWorkingDirectoryByTerminalId[activeTerminalId],
         ]) ?? ""
     }
 
@@ -123,23 +91,18 @@ struct TerminalScreen: View {
     }
 
     private var navigationTopLine: String {
-        let topLine = [
-            terminalHostTitle,
-            projectDisplayName(for: currentWorkingDirectory),
-        ]
-        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { !$0.isEmpty }
-        .joined(separator: " · ")
-
-        return topLine.isEmpty ? "Terminal" : topLine
+        let trimmed = terminalHostTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Terminal" : trimmed
     }
 
+    // Keep the subtitle short and stable; long cwd/user-host strings are already
+    // available through terminal context and tend to crowd the navigation bar.
     private var navigationBottomLine: String {
-        firstNonEmpty([
-            currentWorkingDirectory,
-            profileResolvedFromConnection.connectionString,
-            "SSH terminal",
-        ]) ?? "SSH terminal"
+        if let project = projectDisplayName(for: currentWorkingDirectory),
+           !project.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return project
+        }
+        return "Terminal"
     }
 
     private var statusLabel: String {
@@ -178,33 +141,35 @@ struct TerminalScreen: View {
         }
     }
 
-    private var terminalToolbarActions: [TerminalToolbarAction] {
-        let modifierActions: [TerminalToolbarAction]
-        switch hostPlatform {
-        case .mac:
-            modifierActions = [
-                TerminalToolbarAction(kind: .modifier(.meta), key: "cmd", label: "cmd"),
-                TerminalToolbarAction(kind: .modifier(.ctrl), key: "ctrl", label: "ctrl"),
-            ]
-        case .linux, .windows, .unknown:
-            modifierActions = [
-                TerminalToolbarAction(kind: .modifier(.ctrl), key: "ctrl", label: "ctrl"),
-                TerminalToolbarAction(kind: .modifier(.meta), key: "alt", label: "alt"),
-            ]
-        }
-
-        return [
+    private var modifierClusterActions: [TerminalToolbarAction] {
+        [
             TerminalToolbarAction(kind: .send("\u{1B}"), key: "esc", label: "esc"),
-        ] + modifierActions + [
+            TerminalToolbarAction(
+                kind: .modifier(selectedModifier),
+                key: "modifier-selector",
+                label: selectedModifier.selectorLabel
+            ),
             TerminalToolbarAction(kind: .send("\t"), key: "tab", label: "tab"),
-            TerminalToolbarAction(kind: .send("\u{1B}[A"), key: "up", label: "↑"),
-            TerminalToolbarAction(kind: .send("\u{1B}[B"), key: "down", label: "↓"),
-            TerminalToolbarAction(kind: .send("\u{1B}[D"), key: "left", label: "←"),
-            TerminalToolbarAction(kind: .send("\u{1B}[C"), key: "right", label: "→"),
+        ]
+    }
+
+    private var symbolClusterActions: [TerminalToolbarAction] {
+        [
             TerminalToolbarAction(kind: .send("~"), key: "tilde", label: "~"),
             TerminalToolbarAction(kind: .send("|"), key: "pipe", label: "|"),
             TerminalToolbarAction(kind: .send("/"), key: "slash", label: "/"),
-            TerminalToolbarAction(kind: .send("-"), key: "dash", label: "-"),
+        ]
+    }
+
+    // Keep the accessory rail to two well-fitted capsules (matches the
+    // reference design in screenshot #2). A previous "extras" cluster with a
+    // standalone `-` key got hard-clipped between the symbols capsule and the
+    // keyboard-dismiss circle on standard-width iPhones, which is why the bar
+    // read as "cut off". Dash is still easy to type from the system numpad.
+    private var terminalToolbarClusters: [TerminalToolbarCluster] {
+        [
+            TerminalToolbarCluster(id: "modifiers", actions: modifierClusterActions),
+            TerminalToolbarCluster(id: "symbols", actions: symbolClusterActions),
         ]
     }
 
@@ -226,6 +191,10 @@ struct TerminalScreen: View {
         }
     }
 
+    private var canPasteIntoActiveTerminal: Bool {
+        activeSnapshot.status == .running && UIPasteboard.general.hasStrings
+    }
+
     var body: some View {
         ZStack {
             Color(hexString: theme.background)
@@ -234,8 +203,9 @@ struct TerminalScreen: View {
             terminalRouteBody
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color(hexString: theme.background), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        // Use the system bar (translucent over the black terminal background) instead
+        // of an opaque tinted bar so the native back button and status pill float on top.
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(colorScheme, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -246,17 +216,41 @@ struct TerminalScreen: View {
                 )
             }
             ToolbarItem(placement: .topBarTrailing) {
-                terminalOptionsMenu
+                TerminalOptionsMenu(
+                    statusLabel: statusLabel,
+                    errorDetail: terminalErrorDetail,
+                    statusTone: statusTone,
+                    theme: theme,
+                    fontSize: terminalFontSize,
+                    sessions: terminalMenuSessions,
+                    activeTerminalId: activeTerminalId,
+                    isRunning: isRunning,
+                    hasConnectionConfiguration: hasConnectionConfiguration,
+                    canPaste: canPasteIntoActiveTerminal,
+                    canClear: !activeSnapshot.bufferData.isEmpty,
+                    canResetKnownHost: !profileResolvedFromConnection.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    onSelectSession: selectTerminalSession,
+                    onOpenNewTerminal: openNewTerminalFromMenu,
+                    onToggleConnection: toggleTerminalConnection,
+                    onOpenConnectionEditor: showConnectionEditor,
+                    onPaste: pasteIntoActiveTerminal,
+                    onClear: clearTerminal,
+                    onResetKnownHost: resetKnownHost,
+                    onAdjustFontSize: adjustFontSize
+                )
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if hasConnectionConfiguration {
                 TerminalRouteAccessoryBar(
-                    actions: terminalToolbarActions,
+                    clusters: terminalToolbarClusters,
                     pendingModifier: pendingModifier,
                     theme: theme,
                     isEnabled: activeSnapshot.status == .running,
-                    onAction: handleToolbarActionPress
+                    onAction: handleToolbarActionPress,
+                    onSelectModifier: selectModifier,
+                    onDismissKeyboard: dismissSystemKeyboard,
+                    onDirectionalInput: sendDirectionalInput
                 )
             }
         }
@@ -293,9 +287,7 @@ struct TerminalScreen: View {
                 title: "Terminal unavailable",
                 detail: "SSH connection and key are required before opening a shell.",
                 theme: theme,
-                action: {
-                    isShowingConnectionEditor = true
-                }
+                action: showConnectionEditor
             )
         } else {
             if isNativeTerminalAvailable {
@@ -312,7 +304,11 @@ struct TerminalScreen: View {
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(8)
+                // Keep a small vertical breathing room from the toolbar / accessory bar
+                // but give the SSH output the full width; wide outputs like neofetch
+                // were reading as cropped with the previous 8pt horizontal inset.
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             } else {
                 TerminalFallbackSurface(
                     snapshot: activeSnapshot,
@@ -324,83 +320,6 @@ struct TerminalScreen: View {
                 )
             }
         }
-    }
-
-    private var terminalOptionsMenu: some View {
-        Menu {
-            Text(statusLabel)
-            if let terminalErrorDetail {
-                Text(terminalErrorDetail)
-            }
-
-            Section("Text size") {
-                Button("A- \(String(format: "%.1f", max(remodexTerminalMinFontSize, terminalFontSize - remodexTerminalFontSizeStep))) pt") {
-                    adjustFontSize(-remodexTerminalFontSizeStep)
-                }
-                .disabled(terminalFontSize <= remodexTerminalMinFontSize)
-
-                Button("A+ \(String(format: "%.1f", min(remodexTerminalMaxFontSize, terminalFontSize + remodexTerminalFontSizeStep))) pt") {
-                    adjustFontSize(remodexTerminalFontSizeStep)
-                }
-                .disabled(terminalFontSize >= remodexTerminalMaxFontSize)
-            }
-
-            Section {
-                ForEach(terminalMenuSessions) { session in
-                    Button {
-                        activeTerminalId = session.terminalId
-                    } label: {
-                        Label(session.displayLabel, systemImage: session.terminalId == activeTerminalId ? "checkmark" : "terminal")
-                    }
-                }
-
-                Button {
-                    Task { @MainActor in
-                        await openNewTerminal()
-                    }
-                } label: {
-                    Label("Open new terminal", systemImage: "plus")
-                }
-            }
-
-            Section {
-                Button(isRunning ? "Disconnect" : "Connect", systemImage: isRunning ? "xmark" : "terminal") {
-                    Task { @MainActor in
-                        if isRunning {
-                            await closeTerminal()
-                        } else {
-                            userClosedTerminalIds.remove(activeTerminalId)
-                            await openTerminal()
-                        }
-                    }
-                }
-                .disabled(!hasConnectionConfiguration && !isRunning)
-
-                Button("SSH connection", systemImage: "lock.shield") {
-                    isShowingConnectionEditor = true
-                }
-
-                Button("Clear", systemImage: "trash") {
-                    clearTerminal()
-                }
-                .disabled(activeSnapshot.bufferData.isEmpty)
-
-                Button("Reset host key", systemImage: "key") {
-                    resetKnownHost()
-                }
-                .disabled(profileResolvedFromConnection.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color(hexString: statusTone.tint))
-                Text(statusLabel)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color(hexString: statusTone.text))
-            }
-        }
-        .accessibilityLabel("Terminal options")
     }
 
     private func bootstrapTerminalRoute() async {
@@ -423,6 +342,7 @@ struct TerminalScreen: View {
         }
 
         bootstrappedTerminalIds.insert(activeTerminalId)
+        rememberRouteInitialWorkingDirectoryIfNeeded(for: activeTerminalId)
         await openTerminal()
     }
 
@@ -440,43 +360,69 @@ struct TerminalScreen: View {
         return true
     }
 
+    private func selectTerminalSession(_ terminalId: String) {
+        activeTerminalId = terminalId
+    }
+
+    private func openNewTerminalFromMenu() {
+        Task { @MainActor in
+            await openNewTerminal()
+        }
+    }
+
+    private func toggleTerminalConnection() {
+        Task { @MainActor in
+            if isRunning {
+                await closeTerminal()
+            } else {
+                userClosedTerminalIds.remove(activeTerminalId)
+                await openTerminal()
+            }
+        }
+    }
+
+    private func showConnectionEditor() {
+        isShowingConnectionEditor = true
+    }
+
     private func saveConnectionAndOpen() async {
         isShowingConnectionEditor = false
         userClosedTerminalIds.remove(activeTerminalId)
         bootstrappedTerminalIds.insert(activeTerminalId)
+        rememberRouteInitialWorkingDirectoryIfNeeded(for: activeTerminalId)
         await openTerminal()
     }
 
     private func openNewTerminal() async {
         let nextTerminalId = nextOpenTerminalId()
-        draftProfile.applyPreferredWorkingDirectoryOverride(currentWorkingDirectory)
         activeTerminalId = nextTerminalId
         userClosedTerminalIds.remove(nextTerminalId)
         bootstrappedTerminalIds.insert(nextTerminalId)
+        rememberRouteInitialWorkingDirectoryIfNeeded(for: nextTerminalId)
         actionErrorMessage = nil
         await openTerminal()
     }
 
     private func openTerminal() async {
-        draftProfile = profileResolvedFromConnection
-        let selectedCWD = activeSnapshot.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !selectedCWD.isEmpty {
-            draftProfile.cwd = selectedCWD
-        }
+        var connectionProfile = profileResolvedFromConnection
+        connectionProfile.cwd = ""
+        draftProfile = connectionProfile
         guard hasConnectionConfiguration else {
             isShowingConnectionEditor = true
             return
         }
 
         actionErrorMessage = nil
-        RemodexTerminalProfileStore.save(draftProfile)
+        RemodexTerminalProfileStore.save(connectionProfile)
         RemodexTerminalPrivateKeyStore.savePrivateKey(privateKeyDraft)
         RemodexTerminalPrivateKeyStore.savePassphrase(passphraseDraft)
 
+        var sessionProfile = connectionProfile
+        sessionProfile.cwd = initialWorkingDirectoryByTerminalId[activeTerminalId] ?? ""
         do {
             try await codex.openTerminal(
                 terminalId: activeTerminalId,
-                profile: draftProfile,
+                profile: sessionProfile,
                 cols: activeSnapshot.cols,
                 rows: activeSnapshot.rows
             )
@@ -515,16 +461,27 @@ struct TerminalScreen: View {
         }
     }
 
+    private func pasteIntoActiveTerminal() {
+        guard activeSnapshot.status == .running,
+              let pasteText = UIPasteboard.general.string,
+              !pasteText.isEmpty else { return }
+
+        pendingModifier = nil
+        writeInputChunks(Self.terminalPasteInputChunks(
+            for: pasteText,
+            bracketedPasteEnabled: activeSnapshot.bracketedPasteEnabled
+        ))
+    }
+
     private func applyPreferredWorkingDirectoryIfNeeded() {
         guard !didApplyPreferredWorkingDirectory else { return }
         didApplyPreferredWorkingDirectory = true
-        draftProfile.applyPreferredWorkingDirectoryOverride(preferredWorkingDirectory)
-        let trimmedCWD = draftProfile.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCWD.isEmpty,
+        guard let trimmedCWD = routeInitialWorkingDirectory,
               activeSnapshot.status == .running,
               activeSnapshot.cwd != trimmedCWD else {
             return
         }
+        initialWorkingDirectoryByTerminalId[activeTerminalId] = trimmedCWD
         Task { @MainActor in
             do {
                 try await codex.changeTerminalWorkingDirectory(trimmedCWD, terminalId: activeTerminalId)
@@ -532,6 +489,14 @@ struct TerminalScreen: View {
                 actionErrorMessage = terminalErrorText(error)
             }
         }
+    }
+
+    private func rememberRouteInitialWorkingDirectoryIfNeeded(for terminalId: String) {
+        guard let routeInitialWorkingDirectory,
+              initialWorkingDirectoryByTerminalId[terminalId] == nil else {
+            return
+        }
+        initialWorkingDirectoryByTerminalId[terminalId] = routeInitialWorkingDirectory
     }
 
     private func handleTerminalDataInput(_ data: Data) {
@@ -548,12 +513,15 @@ struct TerminalScreen: View {
 
         let outputText: String
         switch pendingModifier {
+        case .cmd, .alt:
+            pendingModifier = nil
+            outputText = "\u{1B}\(text)"
+        case .shift:
+            pendingModifier = nil
+            outputText = text
         case .ctrl:
             pendingModifier = nil
             outputText = Self.applyCtrlModifier(text)
-        case .meta:
-            pendingModifier = nil
-            outputText = "\u{1B}\(text)"
         case nil:
             outputText = text
         }
@@ -570,10 +538,51 @@ struct TerminalScreen: View {
         }
     }
 
+    private func selectModifier(_ modifier: TerminalPendingModifier) {
+        selectedModifier = modifier
+        pendingModifier = modifier
+    }
+
+    // Project-wide pattern (see ContentView.swift:985): nil-target resignFirstResponder
+    // walks the responder chain so we don't need a reference to the offscreen UITextField
+    // that GhosttyTerminalView uses as its first responder.
+    private func dismissSystemKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    private func sendDirectionalInput(_ text: String) {
+        guard !text.isEmpty else { return }
+        let outputText: String
+        if let modifier = pendingModifier,
+           let modifiedArrow = Self.modifiedArrowSequence(text, modifier: modifier) {
+            pendingModifier = nil
+            outputText = modifiedArrow
+        } else {
+            outputText = text
+        }
+        writeInput(Data(outputText.utf8))
+    }
+
     private func writeInput(_ data: Data) {
         guard activeSnapshot.status == .running else { return }
+        let terminalId = activeTerminalId
         Task { @MainActor in
-            try? await codex.writeTerminalInput(data, terminalId: activeTerminalId)
+            try? await codex.writeTerminalInput(data, terminalId: terminalId)
+        }
+    }
+
+    private func writeInputChunks(_ chunks: [Data]) {
+        guard activeSnapshot.status == .running, !chunks.isEmpty else { return }
+        let terminalId = activeTerminalId
+        Task { @MainActor in
+            for chunk in chunks where !chunk.isEmpty {
+                try? await codex.writeTerminalInput(chunk, terminalId: terminalId)
+            }
         }
     }
 
@@ -598,7 +607,7 @@ struct TerminalScreen: View {
            let description = localizedError.errorDescription {
             return description
         }
-        return error.localizedDescription
+        return RemodexNativeSSHTerminalError.userFacingDescription(for: error)
     }
 
     private func firstNonEmpty(_ values: [String?]) -> String? {
@@ -637,635 +646,86 @@ struct TerminalScreen: View {
         return value
     }
 
+    // Only the first character is modified by Ctrl; the rest of the chunk is
+    // passed through verbatim. Without preserving the tail, a paste or
+    // autocomplete arriving while Ctrl was armed would drop everything past
+    // the first character.
     private static func applyCtrlModifier(_ input: String) -> String {
         guard let firstCharacter = input.first else {
             return input
         }
 
+        let tail = String(input.dropFirst())
+
         let lowerCharacter = Character(firstCharacter.lowercased())
         if let scalar = lowerCharacter.unicodeScalars.first,
            lowerCharacter >= "a",
            lowerCharacter <= "z" {
-            return String(UnicodeScalar(scalar.value - 96) ?? scalar)
+            let modified = String(UnicodeScalar(scalar.value - 96) ?? scalar)
+            return modified + tail
         }
 
+        let modified: String
         switch firstCharacter {
-        case "@": return "\u{0}"
-        case "[": return "\u{1B}"
-        case "\\": return "\u{1C}"
-        case "]": return "\u{1D}"
-        case "^": return "\u{1E}"
-        case "_": return "\u{1F}"
-        case "?": return "\u{7F}"
+        case "@": modified = "\u{0}"
+        case "[": modified = "\u{1B}"
+        case "\\": modified = "\u{1C}"
+        case "]": modified = "\u{1D}"
+        case "^": modified = "\u{1E}"
+        case "_": modified = "\u{1F}"
+        case "?": modified = "\u{7F}"
         default: return input
         }
+        return modified + tail
+    }
+
+    private static func modifiedArrowSequence(_ input: String, modifier: TerminalPendingModifier) -> String? {
+        guard input.hasPrefix("\u{1B}[") else { return nil }
+        guard let final = input.last, ["A", "B", "C", "D"].contains(final) else { return nil }
+        return "\u{1B}[1;\(modifier.csiModifierParameter)\(final)"
+    }
+
+    static func terminalPasteInputChunks(
+        for text: String,
+        bracketedPasteEnabled: Bool,
+        maxChunkBytes: Int = 8_192
+    ) -> [Data] {
+        let normalizedText = normalizedTerminalPasteText(text)
+        let wrappedText = bracketedPasteEnabled
+            ? "\u{1B}[200~\(normalizedText)\u{1B}[201~"
+            : normalizedText
+
+        return Data(wrappedText.utf8).terminalPasteChunks(maxChunkBytes: maxChunkBytes)
+    }
+
+    private static func normalizedTerminalPasteText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\r")
+            .replacingOccurrences(of: "\n", with: "\r")
+            .replacingOccurrences(of: "\u{0}", with: "")
+            // Strip embedded bracketed-paste delimiters so clipboard content cannot
+            // prematurely close the wrapper and turn the rest into typed commands.
+            .replacingOccurrences(of: "\u{1B}[200~", with: "")
+            .replacingOccurrences(of: "\u{1B}[201~", with: "")
     }
 }
 
-// MARK: - t3code-style route chrome
+private extension Data {
+    func terminalPasteChunks(maxChunkBytes: Int) -> [Data] {
+        guard !isEmpty else { return [] }
+        let safeChunkSize = Swift.max(1, maxChunkBytes)
+        guard count > safeChunkSize else { return [self] }
 
-private struct TerminalRouteTitle: View {
-    let topLine: String
-    let bottomLine: String
-    let theme: RemodexTerminalTheme
+        var chunks: [Data] = []
+        chunks.reserveCapacity((count + safeChunkSize - 1) / safeChunkSize)
 
-    var body: some View {
-        VStack(spacing: 1) {
-            Text(topLine)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(hexString: theme.foreground))
-                .lineLimit(1)
-
-            Text(bottomLine)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color(hexString: theme.mutedForeground))
-                .lineLimit(1)
-                .truncationMode(.middle)
+        var offset = 0
+        while offset < count {
+            let end = Swift.min(offset + safeChunkSize, count)
+            chunks.append(subdata(in: offset..<end))
+            offset = end
         }
-        .frame(maxWidth: 240)
-    }
-}
 
-private struct TerminalRouteAccessoryBar: View {
-    let actions: [TerminalToolbarAction]
-    let pendingModifier: TerminalPendingModifier?
-    let theme: RemodexTerminalTheme
-    let isEnabled: Bool
-    let onAction: (TerminalToolbarAction) -> Void
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(actions) { action in
-                    TerminalRouteKeyButton(
-                        action: action,
-                        isActive: action.modifier == pendingModifier,
-                        theme: theme,
-                        isEnabled: isEnabled,
-                        onAction: onAction
-                    )
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .frame(minHeight: remodexTerminalAccessoryHeight)
-        }
-        .background(Color(hexString: theme.background))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color(hexString: theme.border))
-                .frame(height: 1)
-        }
-    }
-}
-
-private struct TerminalRouteKeyButton: View {
-    let action: TerminalToolbarAction
-    let isActive: Bool
-    let theme: RemodexTerminalTheme
-    let isEnabled: Bool
-    let onAction: (TerminalToolbarAction) -> Void
-
-    var body: some View {
-        Button {
-            onAction(action)
-        } label: {
-            Text(action.label)
-                .font(.system(size: 12, weight: .bold))
-                .textCase(action.isModifier ? .uppercase : nil)
-                .foregroundStyle(textColor)
-                .frame(minWidth: action.label.count > 1 ? 46 : 38)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 8)
-                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(borderColor, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.35)
-        .accessibilityLabel(action.label)
-    }
-
-    private var activeAccent: Color {
-        Color(hexString: theme.palette[safe: 10] ?? theme.foreground)
-    }
-
-    private var textColor: Color {
-        isActive ? activeAccent : Color(hexString: theme.foreground)
-    }
-
-    private var backgroundColor: Color {
-        isActive ? activeAccent.opacity(0.18) : Color(hexString: theme.foreground).opacity(0.07)
-    }
-
-    private var borderColor: Color {
-        isActive ? activeAccent.opacity(0.32) : Color(hexString: theme.border)
-    }
-}
-
-private struct TerminalRouteUnavailableView: View {
-    let title: String
-    let detail: String
-    let theme: RemodexTerminalTheme
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "terminal")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(Color(hexString: theme.foreground))
-
-            Text(title)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color(hexString: theme.foreground))
-
-            Text(detail)
-                .font(.system(size: 12))
-                .foregroundStyle(Color(hexString: theme.mutedForeground))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
-
-            Button("SSH connection", action: action)
-                .font(.system(size: 12, weight: .bold))
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(hexString: theme.background))
-    }
-}
-
-private struct TerminalFallbackSurface: View {
-    let snapshot: RemodexTerminalSnapshot
-    let fontSize: CGFloat
-    let theme: RemodexTerminalTheme
-    let isRunning: Bool
-    let onInput: (String) -> Void
-    let onResize: (Int, Int) -> Void
-    @State private var input = ""
-
-    private var statusLabel: String {
-        isRunning ? "Native terminal unavailable. Using text fallback." : "Open terminal to start a shell."
-    }
-
-    private var renderedBuffer: String {
-        let text = String(decoding: snapshot.bufferData, as: UTF8.self)
-        return text.isEmpty ? "$ " : text
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(statusLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(hexString: theme.mutedForeground))
-
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Text(renderedBuffer)
-                            .font(.system(size: fontSize, design: .monospaced))
-                            .foregroundStyle(Color(hexString: theme.foreground))
-                            .lineSpacing(max(0, round(fontSize * 0.35) - 1))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .padding(.bottom, 12)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                HStack(spacing: 8) {
-                    TextField("type and press return", text: $input)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(Color(hexString: theme.foreground))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .disabled(!isRunning)
-                        .onSubmit(sendInput)
-
-                    Button("Ctrl-C") {
-                        onInput("\u{3}")
-                    }
-                    .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(hexString: theme.border), in: RoundedRectangle(cornerRadius: 8))
-                    .foregroundStyle(Color(hexString: theme.foreground))
-                    .disabled(!isRunning)
-                    .opacity(isRunning ? 1 : 0.35)
-                }
-                .padding(8)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(Color(hexString: theme.border))
-                        .frame(height: 1)
-                }
-            }
-            .background(Color(hexString: theme.background))
-            .onAppear {
-                emitResize(for: proxy.size)
-            }
-            .onChange(of: proxy.size) { _, size in
-                emitResize(for: size)
-            }
-        }
-    }
-
-    private func sendInput() {
-        guard !input.isEmpty else { return }
-        onInput("\(input)\n")
-        input = ""
-    }
-
-    private func emitResize(for size: CGSize) {
-        let cellWidth = max(fontSize * 0.62, 1)
-        let cellHeight = max(fontSize * 1.35, 1)
-        onResize(
-            max(20, min(400, Int(size.width / cellWidth))),
-            max(5, min(200, Int(size.height / cellHeight)))
-        )
-    }
-}
-
-private struct TerminalStatusTone {
-    let tint: String
-    let text: String
-}
-
-private struct TerminalMenuSessionItem: Identifiable {
-    let terminalId: String
-    let displayLabel: String
-    let status: RemodexTerminalStatus
-    let cwd: String
-
-    var id: String { terminalId }
-}
-
-private enum TerminalToolbarActionKind {
-    case send(String)
-    case modifier(TerminalPendingModifier)
-}
-
-private struct TerminalToolbarAction: Identifiable {
-    let kind: TerminalToolbarActionKind
-    let key: String
-    let label: String
-
-    var id: String { key }
-
-    var modifier: TerminalPendingModifier? {
-        if case .modifier(let modifier) = kind {
-            return modifier
-        }
-        return nil
-    }
-
-    var isModifier: Bool {
-        modifier != nil
-    }
-}
-
-// MARK: - SSH connection sheet
-
-private struct TerminalConnectionEditorSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var profile: RemodexTerminalProfile
-    @Binding var connection: String
-    @Binding var privateKey: String
-    @Binding var passphrase: String
-
-    let canSave: Bool
-    let onSave: () -> Void
-    let onResetKnownHost: () -> Void
-    @State private var isShowingAdvanced = false
-    @State private var isShowingKeyEditor = false
-    @State private var isConfirmingKnownHostReset = false
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    TerminalEditorSection(title: "Connection") {
-                        TerminalConnectionStringField(connection: $connection)
-                    }
-
-                    TerminalEditorSection(title: "Nickname") {
-                        TerminalRoundedTextField(
-                            placeholder: "Nickname",
-                            text: $profile.nickname
-                        )
-                    }
-
-                    TerminalEditorSection(title: "Authentication") {
-                        VStack(spacing: 0) {
-                            TerminalEditorRow(title: "Method", value: "SSH Key")
-                            Divider()
-                            Button {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                                    isShowingKeyEditor.toggle()
-                                }
-                            } label: {
-                                TerminalEditorRow(
-                                    title: "SSH Key",
-                                    value: keyLabel,
-                                    showsChevron: true
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            if isShowingKeyEditor || !RemodexTerminalPrivateKeyStore.hasPrivateKey(privateKey) {
-                                TerminalPrivateKeyEditor(privateKey: $privateKey, passphrase: $passphrase)
-                                    .padding(.top, 14)
-                            }
-                        }
-                        .padding(16)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
-                    }
-
-                    TerminalEditorSection(title: "SSH") {
-                        VStack(spacing: 0) {
-                            Button {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                                    isShowingAdvanced.toggle()
-                                }
-                            } label: {
-                                TerminalEditorRow(
-                                    title: "Advanced Configuration",
-                                    value: advancedLabel,
-                                    showsChevron: true
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            if isAdvancedVisible {
-                                Divider()
-                                HStack(spacing: 12) {
-                                    TerminalTextField(
-                                        title: "Port",
-                                        text: portBinding,
-                                        placeholder: "22",
-                                        keyboardType: .numberPad
-                                    )
-                                    TerminalTextField(
-                                        title: "Working directory",
-                                        text: $profile.cwd,
-                                        placeholder: "/Users/name"
-                                    )
-                                }
-                                .padding(.top, 14)
-                            }
-
-                            Divider()
-                            Button {
-                                isConfirmingKnownHostReset = true
-                            } label: {
-                                TerminalEditorRow(
-                                    title: "Known Host",
-                                    value: "Reset"
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(profile.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        .padding(16)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 22)
-            }
-            .navigationTitle("New Server")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Connect") {
-                        onSave()
-                    }
-                    .font(.system(size: 15, weight: .bold))
-                    .disabled(!canSave)
-                }
-            }
-            .confirmationDialog(
-                "Reset saved SSH host key?",
-                isPresented: $isConfirmingKnownHostReset,
-                titleVisibility: .visible
-            ) {
-                Button("Reset Host Key", role: .destructive, action: onResetKnownHost)
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The next connection to this host will trust the key it presents.")
-            }
-        }
-    }
-
-    private var keyLabel: String {
-        RemodexTerminalPrivateKeyStore.hasPrivateKey(privateKey) ? "Imported" : "Import"
-    }
-
-    private var advancedLabel: String {
-        profile.port == 22 && profile.cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Default"
-            : "Custom"
-    }
-
-    private var isAdvancedVisible: Bool {
-        isShowingAdvanced
-            || profile.port != 22
-            || !profile.cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var portBinding: Binding<String> {
-        Binding(
-            get: { String(profile.port) },
-            set: { value in
-                if let parsedPort = Int(value) {
-                    profile.port = max(1, min(65535, parsedPort))
-                }
-            }
-        )
-    }
-}
-
-private struct TerminalEditorSection<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.primary)
-            content
-        }
-    }
-}
-
-private struct TerminalConnectionStringField: View {
-    @Binding var connection: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 4) {
-                Text("ssh")
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
-            }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.secondary)
-
-            TextField("user@hostname", text: $connection)
-                .font(.system(size: 15, weight: .medium))
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        .padding(.horizontal, 22)
-        .frame(height: 64)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24))
-    }
-}
-
-private struct TerminalRoundedTextField: View {
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        TextField(placeholder, text: $text)
-            .font(.system(size: 15, weight: .medium))
-            .textInputAutocapitalization(.words)
-            .autocorrectionDisabled()
-            .padding(.horizontal, 22)
-            .frame(height: 64)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24))
-    }
-}
-
-private struct TerminalEditorRow: View {
-    let title: String
-    let value: String
-    var showsChevron = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.system(size: 15))
-                .foregroundStyle(.primary)
-            Spacer(minLength: 8)
-            Text(value)
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(minHeight: 46)
-    }
-}
-
-private struct TerminalPrivateKeyEditor: View {
-    @Binding var privateKey: String
-    @Binding var passphrase: String
-    @State private var isShowingKey = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Private key")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Button(isShowingKey ? "Hide" : "Paste/Edit") {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                        isShowingKey.toggle()
-                    }
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .buttonStyle(.plain)
-            }
-
-            if isShowingKey || !RemodexTerminalPrivateKeyStore.hasPrivateKey(privateKey) {
-                TextEditor(text: $privateKey)
-                    .font(.system(size: 11, design: .monospaced))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .frame(minHeight: 124)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                    Text("Private key saved")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-            }
-
-            SecureField("Passphrase (optional)", text: $passphrase)
-                .font(.system(size: 11, design: .monospaced))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-private struct TerminalTextField: View {
-    let title: String
-    @Binding var text: String
-    var placeholder: String = ""
-    var keyboardType: UIKeyboardType = .default
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            TextField(placeholder.isEmpty ? title : placeholder, text: $text)
-                .font(.system(size: 11, design: .monospaced))
-                .keyboardType(keyboardType)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
-
-private extension Color {
-    init(hexString: String) {
-        let sanitized = hexString.replacingOccurrences(of: "#", with: "")
-        let value = Int(sanitized, radix: 16) ?? 0
-        self.init(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
+        return chunks
     }
 }
