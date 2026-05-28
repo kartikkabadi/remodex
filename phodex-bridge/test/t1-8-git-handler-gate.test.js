@@ -1,6 +1,6 @@
 // FILE: t1-8-git-handler-gate.test.js
-// Purpose: Verifies bridge.js gates git-handler for OpenCode runtime so
-//          thread/name/set routes to opencode-transport's PATCH /session/{id}.
+// Purpose: Verifies bridge.js method-level git gate (WT-2): OpenCode git/* local;
+//          thread/name/set → transport; Codex keeps local rename via git-handler.
 // Layer: Unit test
 // Depends on: node:test, node:assert/strict, fs, path, ../src/git-handler, ../src/bridge
 
@@ -11,6 +11,7 @@ const path = require("node:path");
 
 const { handleGitRequest } = require("../src/git-handler");
 const { isOpenCodeRuntime } = require("../src/opencode-runtime-policy");
+const { shouldInvokeGitHandler } = require("../src/bridge");
 
 const BRIDGE_SRC = path.join(__dirname, "..", "src", "bridge.js");
 
@@ -30,22 +31,43 @@ test("git-handler intercepts thread/name/set when called directly (Codex behavio
   );
 });
 
-test("bridge.js gates git-handler behind !isOpenCodeRuntimeActive", () => {
+test("shouldInvokeGitHandler excludes thread/name/set under OpenCode", () => {
+  const previous = process.env.REMODEX_PROVIDER;
+  process.env.REMODEX_PROVIDER = "opencode";
+  try {
+    assert.equal(
+      shouldInvokeGitHandler(JSON.stringify({
+        id: "rename-oc",
+        method: "thread/name/set",
+        params: { threadId: "thread-1", title: "Via transport" },
+      })),
+      false
+    );
+    assert.equal(
+      shouldInvokeGitHandler(JSON.stringify({ id: "git-1", method: "git/status", params: {} })),
+      true
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_PROVIDER;
+    } else {
+      process.env.REMODEX_PROVIDER = previous;
+    }
+  }
+});
+
+test("bridge.js gates git-handler with shouldInvokeGitHandler", () => {
   const source = fs.readFileSync(BRIDGE_SRC, "utf8");
 
-  // The gate must prefix the handleGitRequest call
-  const gatePattern = '!isOpenCodeRuntimeActive && handleGitRequest(rawMessage, sendApplicationResponse, {';
   assert.ok(
-    source.includes(gatePattern),
-    "bridge.js must gate handleGitRequest with !isOpenCodeRuntimeActive &&"
+    source.includes("if (shouldInvokeGitHandler(rawMessage)"),
+    "bridge.js must gate handleGitRequest with shouldInvokeGitHandler"
   );
 
-  // Verify the gate is on the actual call site (not just a comment)
-  // Line should look like: if (!isOpenCodeRuntimeActive && handleGitRequest(
-  const gatedCall = /if\s*\(!isOpenCodeRuntimeActive\s*&&\s*handleGitRequest\(/;
-  assert.ok(
-    gatedCall.test(source),
-    "bridge.js must contain if (!isOpenCodeRuntimeActive && handleGitRequest(..."
+  assert.equal(
+    /if\s*\(!isOpenCodeRuntimeActive\s*&&\s*handleGitRequest\(/.test(source),
+    false,
+    "runtime blanket !isOpenCodeRuntimeActive git gate must be removed (WT-2)"
   );
 });
 
@@ -61,21 +83,18 @@ test("isOpenCodeRuntime gates correctly per provider env var", () => {
   );
 });
 
-test("bridge.js has exactly one handleGitRequest call site (the gated one)", () => {
+test("bridge.js has exactly one handleGitRequest call site", () => {
   const source = fs.readFileSync(BRIDGE_SRC, "utf8");
 
-  // Count lines containing handleGitRequest( — the actual invocation
   const callSites = source.match(/handleGitRequest\(/g) || [];
   assert.equal(callSites.length, 1,
-    "handleGitRequest should be called exactly once in bridge.js " +
-    "(the import uses destructuring, not a call)"
+    "handleGitRequest should be called exactly once in bridge.js"
   );
 });
 
 test("handleGitRequest is imported at module level in bridge.js", () => {
   const source = fs.readFileSync(BRIDGE_SRC, "utf8");
 
-  // The import pattern at line 41
   const importPattern = 'const { handleGitRequest } = require("./git-handler");';
   assert.ok(
     source.includes(importPattern),
