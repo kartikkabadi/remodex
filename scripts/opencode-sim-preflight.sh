@@ -92,9 +92,10 @@ run_codex_smoke() {
     echo "warning: filtered bridge smoke did not match; running relay npm test instead" >&2
     (cd "${REPO_ROOT}/relay" && sfw npm test)
   }
-  echo "preflight: codex-smoke complete — restore OpenCode with:"
-  echo "  STOP_LAUNCHER=1 ./scripts/opencode-sim-preflight.sh --check-only"
-  echo "  ./scripts/opencode-sim-preflight.sh"
+  ./scripts/opencode-sim-record-row.sh 9 codex-regression pass "" "codex-smoke: launcher without --opencode"
+  stop_launcher
+  ensure_opencode_launcher
+  echo "preflight: codex-smoke complete (row 9 recorded; OpenCode launcher restored)"
 }
 
 preflight_check_only() {

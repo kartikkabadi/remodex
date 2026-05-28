@@ -3,7 +3,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MATRIX_FILE="${REPO_ROOT}/opencode-sim-matrix.json"
+MATRIX_DIR="${REPO_ROOT}/.qa-screenshots/opencode-sim"
+MATRIX_FILE="${MATRIX_DIR}/opencode-sim-matrix.json"
 
 usage() {
   cat <<'EOF'
@@ -35,6 +36,8 @@ esac
 if [[ -n "${screenshot}" && "${screenshot}" = "${REPO_ROOT}"* ]]; then
   screenshot="${screenshot#"${REPO_ROOT}/"}"
 fi
+
+mkdir -p "${MATRIX_DIR}"
 
 export REPO_ROOT MATRIX_FILE ROW="${row}" SLUG="${slug}" STATUS="${status}" SCREENSHOT="${screenshot}" NOTES="${notes}"
 
