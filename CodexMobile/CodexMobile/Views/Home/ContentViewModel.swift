@@ -166,6 +166,49 @@ final class ContentViewModel {
         }
     }
 
+    #if DEBUG
+    // Simulator QA: auto-pair from RMX1 launch arg or REMODOX_DEBUG_PAIRING_RMX1 before saved-session reconnect.
+    func attemptDebugPairingOnLaunchIfNeeded(codex: CodexService) async -> Bool {
+        guard !hasAttemptedInitialAutoConnect else {
+            return false
+        }
+        guard let token = RemodexDebugPairing.loadToken() else {
+            return false
+        }
+
+        hasAttemptedInitialAutoConnect = true
+
+        guard !codex.isConnected, !codex.isConnecting else {
+            return true
+        }
+
+        await stopAutoReconnectForManualScan(codex: codex)
+
+        switch validatePairingQRCode(token) {
+        case .success(let payload):
+            await connectToRelay(pairingPayload: payload, codex: codex)
+            return true
+        case .shortCode(let code):
+            do {
+                let payload = try await codex.resolvePairingCode(code)
+                await connectToRelay(pairingPayload: payload, codex: codex)
+                return true
+            } catch {
+                if codex.lastErrorMessage?.isEmpty ?? true {
+                    codex.lastErrorMessage = codex.userFacingConnectFailureMessage(error)
+                }
+                return false
+            }
+        case .bridgeUpdateRequired(let prompt):
+            codex.lastErrorMessage = prompt.message
+            return false
+        case .scanError(let message):
+            codex.lastErrorMessage = message
+            return false
+        }
+    }
+    #endif
+
     // Attempts one automatic connection on app launch using saved relay session.
     func attemptAutoConnectOnLaunchIfNeeded(codex: CodexService) async {
         guard !hasAttemptedInitialAutoConnect else {

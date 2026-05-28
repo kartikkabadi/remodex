@@ -1,0 +1,7 @@
+defaults:
+  projectPath: CodexMobile/CodexMobile.xcodeproj
+  scheme: CodexMobile
+  simulatorId: 118307B9-FFB8-4D62-80E0-21901FE91639
+  simulatorName: iPhone 17
+  configuration: Debug
+  derivedDataPath: .build/DerivedData-Sim
