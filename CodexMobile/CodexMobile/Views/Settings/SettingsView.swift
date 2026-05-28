@@ -4,10 +4,9 @@
 // Exports: SettingsView
 
 import SwiftUI
-import StoreKit
 import UIKit
 
-private struct SettingsComputerNamePresentation: Identifiable, Equatable {
+private struct SettingsComputerNamePresentation: Identifiable {
     let deviceId: String?
     let currentName: String
     let systemName: String
@@ -15,173 +14,40 @@ private struct SettingsComputerNamePresentation: Identifiable, Equatable {
     var id: String { deviceId ?? currentName }
 }
 
-private enum SettingsSheet: Identifiable, Equatable {
-    case computerName(SettingsComputerNamePresentation)
-    case commandReference
-    case macLoginInfo
-    case paywall
-
-    var id: String {
-        switch self {
-        case .computerName(let presentation):
-            return "computerName-\(presentation.id)"
-        case .commandReference:
-            return "commandReference"
-        case .macLoginInfo:
-            return "macLoginInfo"
-        case .paywall:
-            return "paywall"
-        }
-    }
-}
-
-// One active presentation at a time so sheets and offer-code redemption
-// never compete while Settings is already inside a full-screen cover.
-private enum SettingsActivePresentation: Equatable {
-    case none
-    case sheet(SettingsSheet)
-    case offerCodeRedemption
-}
-
 struct SettingsView: View {
     @Environment(CodexService.self) private var codex
-    @Environment(SubscriptionService.self) private var subscriptions
     @AppStorage("codex.appFontStyle") private var appFontStyleRawValue = AppFont.defaultStoredStyleRawValue
-    @State private var activePresentation: SettingsActivePresentation = .none
-    @State private var isShowingAboutRemodex = false
+    @State private var computerNamePresentation: SettingsComputerNamePresentation?
 
     var body: some View {
         List {
+            SettingsArchivedChatsCard()
             SettingsAppearanceCard(appFontStyle: appFontStyleBinding)
             SettingsAppIconCard()
             SettingsNotificationsCard()
+            SettingsGPTAccountCard()
+            SettingsSubscriptionCard()
+            SettingsBridgeVersionCard()
+            SettingsCommandReferenceCard()
             SettingsRuntimeDefaultsCard()
-            SettingsBridgeVersionCard {
-                presentSettingsSheet(.commandReference)
-            }
-            SettingsSubscriptionCard(
-                onShowPaywall: {
-                    presentSettingsSheet(.paywall)
-                },
-                onRedeemCode: {
-                    presentOfferCodeRedemption()
-                }
-            )
+            SettingsAboutCard()
             SettingsUsageCard()
-            SettingsGPTAccountCard {
-                presentSettingsSheet(.macLoginInfo)
-            }
-            SettingsArchivedChatsCard()
-            SettingsAboutCard {
-                showAboutRemodex()
-            }
             SettingsConnectionCard {
                 presentComputerNameSheet()
             }
         }
         .listStyle(.insetGrouped)
-        .listSectionSpacing(10)
         .font(AppFont.body())
         .tint(.primary)
         .navigationTitle("Settings")
-        // Keep the About push anchored to SettingsView so custom List rows do
-        // not depend on NavigationLink behavior inside rebuilt sections.
-        .navigationDestination(isPresented: $isShowingAboutRemodex) {
-            AboutRemodexView()
-        }
-        .sheet(item: activeSheetBinding) { sheet in
-            settingsSheetContent(for: sheet)
-        }
-        .offerCodeRedemption(isPresented: isPresentingOfferCodeRedemption) { result in
-            handleOfferCodeRedemptionCompletion(result)
-        }
-    }
-
-    private var activeSheetBinding: Binding<SettingsSheet?> {
-        Binding(
-            get: {
-                if case .sheet(let sheet) = activePresentation {
-                    return sheet
-                }
-                return nil
-            },
-            set: { newSheet in
-                if let newSheet {
-                    activePresentation = .sheet(newSheet)
-                } else if case .sheet = activePresentation {
-                    activePresentation = .none
-                }
-            }
-        )
-    }
-
-    private var isPresentingOfferCodeRedemption: Binding<Bool> {
-        Binding(
-            get: {
-                if case .offerCodeRedemption = activePresentation {
-                    return true
-                }
-                return false
-            },
-            set: { isPresented in
-                if isPresented {
-                    activePresentation = .offerCodeRedemption
-                } else if case .offerCodeRedemption = activePresentation {
-                    activePresentation = .none
-                }
-            }
-        )
-    }
-
-    @ViewBuilder
-    private func settingsSheetContent(for sheet: SettingsSheet) -> some View {
-        switch sheet {
-        case .computerName(let presentation):
+        // Own settings modals from the stable screen root; List rows can be
+        // rebuilt while connection status changes and should not own sheets.
+        .sheet(item: $computerNamePresentation) { presentation in
             SettingsComputerNameSheet(
                 nickname: sidebarComputerNicknameBinding(for: presentation.deviceId),
                 currentName: presentation.currentName,
                 systemName: presentation.systemName
             )
-        case .commandReference:
-            SettingsCommandReferenceSheet()
-        case .macLoginInfo:
-            GPTVoiceSetupSheet()
-        case .paywall:
-            RevenueCatPaywallView()
-        }
-    }
-
-    private func handleOfferCodeRedemptionCompletion(_ result: Result<Void, Error>) {
-        Task {
-            if case .failure = result {
-                await subscriptions.refreshCustomerInfoSilently()
-            } else {
-                await subscriptions.syncPurchasesAfterOfferCodeRedemption()
-            }
-        }
-    }
-
-    private func showAboutRemodex() {
-        isShowingAboutRemodex = true
-    }
-
-    private func presentSettingsSheet(_ sheet: SettingsSheet) {
-        activePresentation = .sheet(sheet)
-    }
-
-    private func presentOfferCodeRedemption() {
-        switch activePresentation {
-        case .none:
-            activePresentation = .offerCodeRedemption
-        case .sheet:
-            activePresentation = .none
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(350))
-                guard activePresentation == .none else { return }
-                activePresentation = .offerCodeRedemption
-            }
-        case .offerCodeRedemption:
-            break
         }
     }
 
@@ -198,14 +64,10 @@ struct SettingsView: View {
             return
         }
 
-        presentSettingsSheet(
-            .computerName(
-                SettingsComputerNamePresentation(
-                    deviceId: trustedPairPresentation.deviceId,
-                    currentName: trustedPairPresentation.name,
-                    systemName: trustedPairPresentation.systemName ?? trustedPairPresentation.name
-                )
-            )
+        computerNamePresentation = SettingsComputerNamePresentation(
+            deviceId: trustedPairPresentation.deviceId,
+            currentName: trustedPairPresentation.name,
+            systemName: trustedPairPresentation.systemName ?? trustedPairPresentation.name
         )
     }
 
@@ -225,17 +87,13 @@ private struct SettingsUsageCard: View {
     @State private var isRefreshing = false
 
     var body: some View {
-        SettingsCard(
-            title: "Usage",
-            footer: "Account-wide rate limits from your paired device."
-        ) {
+        SettingsCard(title: "Usage") {
             UsageStatusSummaryContent(
                 contextWindowUsage: nil,
                 showsContextWindowSection: false,
                 rateLimitBuckets: codex.rateLimitBuckets,
                 isLoadingRateLimits: codex.isLoadingRateLimits,
                 rateLimitsErrorMessage: codex.rateLimitsErrorMessage,
-                showsRateLimitHeader: false,
                 refreshControl: UsageStatusRefreshControl(
                     title: "Refresh",
                     isRefreshing: isRefreshing,
@@ -404,16 +262,16 @@ private struct AppIconChoiceRow: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             iconPreview
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(icon.title)
                     .font(AppFont.body(weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Text(icon.subtitle)
-                    .font(AppFont.footnote())
+                    .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -421,11 +279,11 @@ private struct AppIconChoiceRow: View {
 
             if isSelected {
                 RemodexIcon.image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.green)
             }
         }
-        .frame(minHeight: 58)
+        .frame(minHeight: 74)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -435,9 +293,9 @@ private struct AppIconChoiceRow: View {
     private var iconPreview: some View {
         switch icon {
         case .classic:
-            AppIconPreviewImage(name: "AppIconClassicPreview", size: 44)
+            AppIconPreviewImage(name: "AppIconClassicPreview", size: 52)
         case .contrast:
-            AppIconPreviewImage(name: contrastPreviewName, size: 44)
+            AppIconPreviewImage(name: contrastPreviewName, size: 52)
         }
     }
 
@@ -534,11 +392,11 @@ private struct SettingsPetCompanionSection: View {
 
             if petStore.isEnabled {
                 if petStore.availablePets.isEmpty {
-                    SettingsInlineMessage(
-                        text: petStore.isLoading
-                            ? "Loading pets from your device…"
-                            : "No local pets found in ~/.codex/pets."
-                    )
+                    Text(petStore.isLoading
+                         ? "Loading local Codex pets from your device..."
+                         : "No local Codex pets found in ~/.codex/pets.")
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
                 } else {
                     Picker("Pet", selection: selectedPetBinding) {
                         ForEach(petStore.availablePets) { pet in
@@ -547,10 +405,19 @@ private struct SettingsPetCompanionSection: View {
                     }
                     .pickerStyle(.menu)
                     .tint(settingsAccentColor)
+
+                    if let description = petStore.selectedPet?.description,
+                       !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(description)
+                            .font(AppFont.caption())
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let errorMessage = petStore.errorMessage {
-                    SettingsInlineMessage(text: errorMessage, tint: .red)
+                    Text(errorMessage)
+                        .font(AppFont.caption())
+                        .foregroundStyle(.red)
                 }
 
                 SettingsButton("Refresh Pets", isLoading: petStore.isLoading) {
@@ -604,14 +471,22 @@ private struct SettingsNotificationsCard: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        SettingsCard(
-            title: "Notifications",
-            footer: "Alerts you when a run finishes while Remodex is in the background."
-        ) {
-            SettingsValueRow(title: "Permission", value: statusLabel)
+        SettingsCard(title: "Notifications") {
+            HStack(spacing: 10) {
+                RemodexIcon.image(systemName: "bell.badge")
+                    .foregroundStyle(.primary)
+                Text("Status")
+                Spacer()
+                Text(statusLabel)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Used for local alerts when a run finishes while the app is in background.")
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
 
             if codex.notificationAuthorizationStatus == .notDetermined {
-                SettingsButton("Allow Notifications") {
+                SettingsButton("Allow notifications") {
                     HapticFeedback.shared.triggerImpactFeedback()
                     Task {
                         await codex.requestNotificationPermission()
@@ -654,21 +529,26 @@ private struct SettingsNotificationsCard: View {
 }
 
 private struct SettingsGPTAccountCard: View {
-    let onShowInfo: () -> Void
+    @State private var isShowingMacLoginInfo = false
 
     var body: some View {
-        SettingsCard(title: "Voice") {
+        SettingsCard(title: "ChatGPT voice mode") {
             Button {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                onShowInfo()
+                isShowingMacLoginInfo = true
             } label: {
-                SettingsLinkRow(
-                    title: "ChatGPT Setup",
-                    subtitle: "Auth and transcription on your paired Mac"
-                ) {
-                    RemodexIcon.image(systemName: "waveform")
+                HStack(spacing: 8) {
+                    Label("Info", systemImage: "info.circle")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    RemodexIcon.image(systemName: "chevron.right")
+                        .font(AppFont.caption(weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
+        }
+        .sheet(isPresented: $isShowingMacLoginInfo) {
+            GPTVoiceSetupSheet()
         }
     }
 }
@@ -676,34 +556,35 @@ private struct SettingsGPTAccountCard: View {
 private struct SettingsBridgeVersionCard: View {
     @Environment(CodexService.self) private var codex
     @Environment(\.scenePhase) private var scenePhase
-    let onShowCommands: () -> Void
     @State private var isUpdatingBridge = false
     @State private var bridgeUpdateMessage: String?
     @State private var bridgeUpdateFailed = false
 
     var body: some View {
-        SettingsCard(
-            title: "Bridge",
-            footer: guidanceText
-        ) {
-            SettingsValueRow(
-                title: "Status",
-                value: versionStatusLabel,
-                valueColor: versionStatusColor
-            )
+        SettingsCard(title: "Bridge Version") {
+            HStack(spacing: 10) {
+                Text("Status")
+                Spacer()
+                SettingsStatusPill(label: versionStatusLabel)
+            }
 
-            SettingsValueRow(
-                title: "Installed",
+            settingsVersionRow(
+                title: "Installed on Device",
                 value: installedVersionLabel,
-                valueColor: installedValueStyle,
-                usesMonospacedValue: true
+                valueStyle: installedValueStyle
             )
 
-            SettingsValueRow(
-                title: "Latest",
+            settingsVersionRow(
+                title: "Latest available",
                 value: latestVersionLabel,
-                usesMonospacedValue: true
+                valueStyle: .primary
             )
+
+            if let guidance = guidanceText {
+                Text(guidance)
+                    .font(AppFont.caption())
+                    .foregroundStyle(guidanceColor)
+            }
 
             if codex.supportsBridgePackageUpdate {
                 SettingsButton(bridgeUpdateButtonTitle, isLoading: isUpdatingBridge) {
@@ -714,23 +595,10 @@ private struct SettingsBridgeVersionCard: View {
                 .disabled(!codex.isConnected || isUpdatingBridge)
             }
 
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                onShowCommands()
-            } label: {
-                SettingsLinkRow(
-                    title: "Terminal Commands",
-                    subtitle: "Start, repair, or inspect the bridge on your Mac"
-                ) {
-                    RemodexIcon.image(systemName: "terminal")
-                }
-            }
-
             if let bridgeUpdateMessage {
-                SettingsInlineMessage(
-                    text: bridgeUpdateMessage,
-                    tint: bridgeUpdateFailed ? .orange : .secondary
-                )
+                Text(bridgeUpdateMessage)
+                    .font(AppFont.caption())
+                    .foregroundStyle(bridgeUpdateFailed ? .orange : .secondary)
             }
         }
         .task {
@@ -754,32 +622,22 @@ private struct SettingsBridgeVersionCard: View {
 
     private var guidanceText: String? {
         guard let installedVersion else {
-            return "Connect to your paired device to read the installed bridge version."
+            return "Connect to a device bridge to read the installed package version."
         }
 
         guard let latestVersion else {
-            return nil
+            return "Installed version detected. The latest published package is unavailable right now."
         }
 
         if installedVersion == latestVersion {
-            return "Your Mac bridge matches the latest published package."
+            return "The installed bridge matches the latest published package."
         }
 
         if installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending {
-            return "A newer Remodex package is available."
+            return "A newer Remodex package is available on npm."
         }
 
-        return "This device is running a different build than npm latest."
-    }
-
-    private var versionStatusColor: Color {
-        guard let installedVersion,
-              let latestVersion,
-              installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending else {
-            return .secondary
-        }
-
-        return .orange
+        return "This device is running a different build than the current npm latest."
     }
 
     private var versionStatusLabel: String {
@@ -800,6 +658,16 @@ private struct SettingsBridgeVersionCard: View {
         }
 
         return "Different build"
+    }
+
+    private var guidanceColor: Color {
+        guard let installedVersion,
+              let latestVersion,
+              installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending else {
+            return .secondary
+        }
+
+        return .orange
     }
 
     private var bridgeUpdateButtonTitle: String {
@@ -866,6 +734,18 @@ private struct SettingsBridgeVersionCard: View {
 
         return trimmed
     }
+
+    private func settingsVersionRow(title: String, value: String, valueStyle: Color) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer()
+            Text(value)
+                .font(AppFont.mono(.subheadline))
+                .foregroundStyle(valueStyle)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
 }
 
 private struct SettingsArchivedChatsCard: View {
@@ -876,16 +756,17 @@ private struct SettingsArchivedChatsCard: View {
     }
 
     var body: some View {
-        SettingsCard(title: "Archived") {
+        SettingsCard(title: "Archived Chats") {
             NavigationLink {
                 ArchivedChatsView()
             } label: {
-                SettingsLinkRow(
-                    title: "Archived Chats",
-                    subtitle: archivedCount > 0 ? "\(archivedCount) saved locally" : nil,
-                    showsDisclosure: false
-                ) {
-                    RemodexIcon.image(systemName: "archivebox")
+                HStack {
+                    RemodexIcon.label("Archived Chats", systemName: "archivebox")
+                    Spacer()
+                    if archivedCount > 0 {
+                        Text("\(archivedCount)")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }

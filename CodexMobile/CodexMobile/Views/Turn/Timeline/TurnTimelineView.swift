@@ -595,12 +595,22 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
         )
     }
 
-    // Keep the thinking label pinned above the composer for the whole run, even while
-    // assistant prose and late tool rows stream into the scroll stack above it.
+    // Keep the thinking label pinned until assistant prose is actually visible.
+    // Tool/thinking placeholder rows alone should not hide it, otherwise the run
+    // looks idle during the Mac mirroring gap before the first assistant token.
     private var shouldShowStickyPendingAssistantIndicator: Bool {
         TurnTimelinePendingAssistantState.shouldShowIndicator(
             isRunStartingOrRunning: isRunStartingOrRunning
-        )
+        ) && !hasVisibleStreamingAssistantText
+    }
+
+    private var hasVisibleStreamingAssistantText: Bool {
+        visibleMessages.contains { message in
+            guard message.role == .assistant, message.isStreaming else {
+                return false
+            }
+            return message.text.contains { !$0.isWhitespace }
+        }
     }
 
     private func timelineRowsBottomPadding(showsStickyPendingAssistantIndicator: Bool) -> CGFloat {

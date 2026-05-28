@@ -1257,6 +1257,11 @@ extension CodexService {
                         markTurnPaginationUnsupportedForCurrentRuntime()
                         didRequestExcludedTurns = false
                     }
+                    let historyTerminalStates = decodeTurnTerminalStatesFromThreadRead(threadObject)
+                    let didUpdateTerminalStates = mergeHistoryTurnTerminalStates(
+                        threadId: threadId,
+                        terminalStatesByTurnID: historyTerminalStates
+                    )
                     let historyMessages = decodeMessagesFromThreadRead(threadId: threadId, threadObject: threadObject)
                     registerSubagentThreads(from: historyMessages, parentThreadId: threadId)
                     if !historyMessages.isEmpty {
@@ -1300,12 +1305,16 @@ extension CodexService {
                             messagesByThread[threadId] = merged
                             persistMessages()
                             updateCurrentOutput(for: threadId)
+                        } else if didUpdateTerminalStates {
+                            refreshThreadTimelineState(for: threadId)
                         }
                         if usedRecentWindow, !threadHasActiveOrRunningTurn(threadId) {
                             scheduleCanonicalHistoryReconcileIfNeeded(for: threadId)
                         } else if !threadHasActiveOrRunningTurn(threadId) {
                             markThreadCanonicalHistoryReconciled(threadId)
                         }
+                    } else if didUpdateTerminalStates {
+                        refreshThreadTimelineState(for: threadId)
                     }
                 }
             } else if let index = threadIndex(for: threadId) {
@@ -2682,7 +2691,16 @@ extension CodexService {
         }
 
         let message = rpcError.message.lowercased()
-        guard message.contains("image_url") else {
+        let mentionsImageURLField = message.contains("image_url")
+        let rejectsURLField = message.contains("url")
+            && (
+                message.contains("unknown field")
+                    || message.contains("unexpected field")
+                    || message.contains("unrecognized field")
+                    || message.contains("invalid field")
+            )
+
+        guard mentionsImageURLField || rejectsURLField else {
             return false
         }
 

@@ -11,6 +11,7 @@ const {
   printMacOSBridgeServiceStatus,
   readBridgeConfig,
   resetMacOSBridgePairing,
+  restartMacOSBridgeService,
   runMacOSBridgeService,
   startBridge,
   startMacOSBridgeService,
@@ -27,6 +28,7 @@ const defaultDeps = {
   printMacOSBridgeServiceStatus,
   readBridgeConfig,
   resetMacOSBridgePairing,
+  restartMacOSBridgeService,
   runMacOSBridgeService,
   startBridge,
   startMacOSBridgeService,
@@ -37,10 +39,28 @@ const defaultDeps = {
 };
 
 if (require.main === module) {
-  void main();
+  void runCli();
 }
 
 // ─── ENTRY POINT ─────────────────────────────────────────────
+
+// Runs the CLI process and turns expected configuration failures into readable terminal output.
+async function runCli({
+  mainImpl = main,
+  consoleImpl = console,
+  exitImpl = process.exit,
+} = {}) {
+  try {
+    await mainImpl();
+  } catch (error) {
+    const rawMessage = error && typeof error.message === "string"
+      ? error.message.trim()
+      : String(error || "Command failed");
+    const message = rawMessage || "Command failed";
+    consoleImpl.error(message.startsWith("[remodex]") ? message : `[remodex] ${message}`);
+    exitImpl(1);
+  }
+}
 
 async function main({
   argv = process.argv,
@@ -49,12 +69,7 @@ async function main({
   exitImpl = process.exit,
   deps = defaultDeps,
 } = {}) {
-  const {
-    command,
-    extraRelaySessions,
-    jsonOutput,
-    watchThreadId,
-  } = parseCliArgs(argv.slice(2));
+  const { command, jsonOutput, watchThreadId } = parseCliArgs(argv.slice(2));
 
   if (isVersionCommand(command)) {
     emitVersion({ jsonOutput, consoleImpl });
@@ -78,7 +93,6 @@ async function main({
   }
 
   if (command === "run") {
-    applyExtraRelaySessions(extraRelaySessions);
     deps.startBridge();
     return;
   }
@@ -94,16 +108,13 @@ async function main({
       consoleImpl,
       exitImpl,
     });
-    deps.readBridgeConfig();
-    const result = await deps.startMacOSBridgeService({
-      waitForPairing: false,
-    });
+    const result = await deps.startMacOSBridgeService();
     emitResult({
       payload: {
         ok: true,
         currentVersion: version,
         plistPath: result?.plistPath,
-        pairingSession: result?.pairingSession,
+        pairingSession: sanitizePairingSessionForOutput(result?.pairingSession),
       },
       message: "[remodex] macOS bridge service is running.",
       jsonOutput,
@@ -118,20 +129,43 @@ async function main({
       consoleImpl,
       exitImpl,
     });
-    deps.readBridgeConfig();
-    const result = await deps.startMacOSBridgeService({
-      waitForPairing: false,
-    });
+    const result = await deps.restartMacOSBridgeService();
     emitResult({
       payload: {
         ok: true,
         currentVersion: version,
         plistPath: result?.plistPath,
-        pairingSession: result?.pairingSession,
+        pairingSession: sanitizePairingSessionForOutput(result?.pairingSession),
       },
       message: "[remodex] macOS bridge service restarted.",
       jsonOutput,
       consoleImpl,
+    });
+    return;
+  }
+
+  if (command === "qr" || command === "pair") {
+    assertMacOSCommand(command, {
+      platform,
+      consoleImpl,
+      exitImpl,
+    });
+    const result = await deps.startMacOSBridgeService({
+      waitForPairing: true,
+    });
+    if (jsonOutput) {
+      emitJson({
+        ok: true,
+        currentVersion: version,
+        plistPath: result?.plistPath,
+        pairingSession: sanitizePairingSessionForOutput(result?.pairingSession),
+      });
+      return;
+    }
+
+    consoleImpl.log("[remodex] Refreshing bridge pairing QR...");
+    deps.printMacOSBridgePairingQr({
+      pairingSession: result.pairingSession,
     });
     return;
   }
@@ -163,7 +197,7 @@ async function main({
     });
     if (jsonOutput) {
       emitJson({
-        ...deps.getMacOSBridgeServiceStatus(),
+        ...sanitizeBridgeServiceStatusForOutput(deps.getMacOSBridgeServiceStatus()),
         currentVersion: version,
       });
       return;
@@ -239,16 +273,15 @@ async function main({
 
   consoleImpl.error(`Unknown command: ${command}`);
   consoleImpl.error(
-    "Usage: remodex up | remodex run [--extra-device] | remodex start | remodex restart | remodex stop | remodex status | "
+    "Usage: remodex up | remodex run | remodex start | remodex restart | remodex qr | remodex pair | remodex stop | remodex status | "
     + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | "
-    + "append --json to start/restart/stop/status/reset-pairing/resume for machine-readable output"
+    + "append --json to start/restart/qr/pair/stop/status/reset-pairing/resume for machine-readable output"
   );
   exitImpl(1);
 }
 
 function parseCliArgs(rawArgs) {
   const positionals = [];
-  let extraRelaySessions = 0;
   let jsonOutput = false;
 
   for (const arg of rawArgs) {
@@ -257,45 +290,14 @@ function parseCliArgs(rawArgs) {
       continue;
     }
 
-    if (arg === "--extra-device" || arg === "--second-device" || arg === "--multi-device") {
-      extraRelaySessions = Math.max(extraRelaySessions, 1);
-      continue;
-    }
-
-    if (arg.startsWith("--extra-devices=")) {
-      extraRelaySessions = Math.max(
-        extraRelaySessions,
-        parsePositiveInteger(arg.slice("--extra-devices=".length))
-      );
-      continue;
-    }
-
     positionals.push(arg);
   }
 
   return {
     command: positionals[0] || "up",
-    extraRelaySessions,
     jsonOutput,
     watchThreadId: positionals[1] || "",
   };
-}
-
-function applyExtraRelaySessions(extraRelaySessions) {
-  if (!extraRelaySessions || process.env.REMODEX_EXTRA_RELAY_SESSIONS) {
-    return;
-  }
-
-  process.env.REMODEX_EXTRA_RELAY_SESSIONS = String(Math.min(extraRelaySessions, 3));
-}
-
-function parsePositiveInteger(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 0;
-  }
-
-  return parsed;
 }
 
 function emitVersion({
@@ -330,6 +332,47 @@ function emitJson(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
+// Keeps machine-readable CLI output useful without exposing relay endpoints or live pairing payloads.
+function sanitizeBridgeServiceStatusForOutput(status = {}) {
+  const sanitized = {
+    ...status,
+    daemonConfig: sanitizeDaemonConfigForOutput(status.daemonConfig),
+    pairingSession: sanitizePairingSessionForOutput(status.pairingSession),
+  };
+  return sanitized;
+}
+
+function sanitizeDaemonConfigForOutput(config) {
+  if (!config || typeof config !== "object") {
+    return config || null;
+  }
+  const { relayUrl, pushServiceUrl, ...rest } = config;
+  return {
+    ...rest,
+    relayConfigured: Boolean(relayUrl),
+    pushServiceConfigured: Boolean(pushServiceUrl),
+  };
+}
+
+function sanitizePairingSessionForOutput(pairingSession) {
+  if (!pairingSession || typeof pairingSession !== "object") {
+    return pairingSession || null;
+  }
+  const payload = pairingSession.pairingPayload || {};
+  return {
+    createdAt: pairingSession.createdAt,
+    pairingCode: pairingSession.pairingCode,
+    pairingPayload: {
+      v: payload.v,
+      expiresAt: payload.expiresAt,
+      hasRelay: Boolean(payload.relay),
+      hasSessionId: Boolean(payload.sessionId),
+      hasMacIdentityPublicKey: Boolean(payload.macIdentityPublicKey),
+      displayName: payload.displayName,
+    },
+  };
+}
+
 function assertMacOSCommand(name, {
   platform = process.platform,
   consoleImpl = console,
@@ -350,5 +393,5 @@ function isVersionCommand(value) {
 module.exports = {
   isVersionCommand,
   main,
-  parseCliArgs,
+  runCli,
 };

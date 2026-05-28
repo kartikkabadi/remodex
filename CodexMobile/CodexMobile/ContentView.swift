@@ -21,8 +21,18 @@ private enum RootSheetRoute: Identifiable, Equatable {
     }
 }
 
-private struct TerminalNavigationRoute: Hashable {
-    let preferredWorkingDirectory: String?
+enum ContentNavigationRoute: Hashable {
+    case newChatDraft(NewChatDraftRoute)
+    case newChatOpening
+    case thread(id: String)
+    case settings
+    case terminal(preferredWorkingDirectory: String?)
+}
+
+private struct MacContextTransitionSnapshot {
+    let selectedThread: CodexThread?
+    let activeThreadId: String?
+    let suppressAutomaticThreadSelection: Bool
 }
 
 struct ContentView: View {
@@ -37,9 +47,9 @@ struct ContentView: View {
     @State private var sidebarDragOffset: CGFloat = 0
     @State private var isSidebarPrewarmed = false
     @State private var selectedThread: CodexThread?
-    @State private var navigationPath = NavigationPath()
-    @State private var showSettings = false
+    @State private var navigationPath: [ContentNavigationRoute] = []
     @State private var isShowingManualScanner = false
+    @State private var isShowingMyMacsScanner = false
     @State private var hasDismissedAutomaticScanner = false
     @State private var scannerCanReturnToOnboarding = false
     @State private var isShowingManualPairingEntry = false
@@ -47,13 +57,15 @@ struct ContentView: View {
     @State private var manualPairingErrorMessage: String?
     @State private var isResolvingManualPairingCode = false
     @State private var isSearchActive = false
-    @State private var preferredSplitCompactColumn = NavigationSplitViewColumn.detail
     @State private var isRetryingBridgeUpdate = false
     @State private var isPreparingManualScanner = false
+    @State private var macSwitchTask: Task<Void, Never>?
+    @State private var threadSelectionSyncTask: Task<Void, Never>?
     @State private var isWakingSavedMacDisplay = false
     @State private var hasAttemptedAutomaticWakeSavedMacDisplay = false
     @State private var threadCompletionBannerDismissTask: Task<Void, Never>?
     @State private var whatsNewPresentationTask: Task<Void, Never>?
+    @State private var suppressAutomaticThreadSelection = false
     @State private var sidebarPrewarmTask: Task<Void, Never>?
     @State private var presentedRootSheet: RootSheetRoute?
     @State private var isWhatsNewPresentationReady = false
@@ -62,13 +74,20 @@ struct ContentView: View {
     @State private var lastSidebarGestureLogBucket: Int?
     @State private var sidebarGestureAutoCommitted = false
     @State private var sidebarSelectionSuppressedUntil: Date?
+    @State private var activeNewChatDraftRoute: NewChatDraftRoute?
     @State private var isOpeningNewChatFromSidebar = false
+    @State private var threadIDsPendingInitialAssistantAnchor: Set<String> = []
+    // Settings is presented as a `fullScreenCover` instead of being pushed
+    // onto `navigationPath` so the gear button works even when the sidebar
+    // header is hosted inside an iOS 26 `safeAreaBar`, whose Liquid Glass
+    // chrome can interfere with navigation-stack pushes from buttons nested
+    // inside the bar.
+    @State private var isShowingSettingsCover = false
+    @State private var isShowingDevicesSettingsSheet = false
     @AppStorage("codex.hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("codex.whatsNew.lastPresentedVersion") private var lastPresentedWhatsNewVersion = ""
 
     private let sidebarWidth: CGFloat = 330
-    private let iPadSidebarIdealWidth: CGFloat = 360
-    private let iPadSidebarMaxWidth: CGFloat = 420
     // Lets the drawer gesture start a bit inside the content instead of only on the bezel edge.
     private let sidebarOpenActivationWidth: CGFloat = 80
     private let sidebarPrewarmDelayNanoseconds: UInt64 = 700_000_000
@@ -103,13 +122,6 @@ struct ContentView: View {
             .task(id: rootSheetPresentationFingerprint) {
                 syncRootSheetPresentationIfNeeded()
             }
-            .onChange(of: showSettings) { _, show in
-                if show {
-                    preferredSplitCompactColumn = .detail
-                    navigationPath.append("settings")
-                    showSettings = false
-                }
-            }
             .onChange(of: isSidebarOpen) { wasOpen, isOpen in
                 debugSidebarLog(
                     "open-state changed wasOpen=\(wasOpen) isOpen=\(isOpen) prewarmed=\(isSidebarPrewarmed) "
@@ -118,13 +130,7 @@ struct ContentView: View {
                 guard !wasOpen, isOpen else {
                     return
                 }
-                if !isSidebarPrewarmed,
-                   viewModel.shouldRequestSidebarFreshSync(isConnected: codex.isConnected) {
-                    debugSidebarLog("sidebar open triggers immediate sync activeThread=\(codex.activeThreadId ?? "nil")")
-                    codex.requestImmediateSync(threadId: codex.activeThreadId)
-                } else {
-                    debugSidebarLog("sidebar open skips immediate sync prewarmed=\(isSidebarPrewarmed) connected=\(codex.isConnected)")
-                }
+                requestSidebarFreshSyncIfNeeded()
             }
             .onChange(of: navigationPath) { _, _ in
                 debugSidebarLog("navigation path changed count=\(navigationPath.count) sidebarOpen=\(isSidebarOpen)")
@@ -139,6 +145,9 @@ struct ContentView: View {
                     to: thread?.id
                 )
                 codex.activeThreadId = thread?.id
+                if thread != nil {
+                    suppressAutomaticThreadSelection = false
+                }
             }
             .onChange(of: codex.activeThreadId) { _, activeThreadId in
                 debugSidebarLog("activeThreadId changed to=\(activeThreadId ?? "nil")")
@@ -151,7 +160,7 @@ struct ContentView: View {
             }
             .onChange(of: codex.threads) { _, threads in
                 debugSidebarLog("threads changed count=\(threads.count) sidebarOpen=\(isSidebarOpen) prewarmed=\(isSidebarPrewarmed)")
-                syncSelectedThread(with: threads)
+                scheduleSelectedThreadSync()
                 scheduleSidebarPrewarmIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
@@ -166,6 +175,7 @@ struct ContentView: View {
                             return
                         }
 
+                        await codex.probeForegroundConnectionIfNeeded()
                         await attemptSavedMacReconnectRecoveryIfNeeded()
                         await subscriptionRefresh
                         scheduleSidebarPrewarmIfNeeded()
@@ -251,12 +261,53 @@ struct ContentView: View {
                     manualPairingCode = ""
                 }
             } message: {
-                Text("Paste the pairing code shown in the terminal on your computer or in your iPad shell.")
+                Text("Paste the pairing code shown in the terminal on your Mac.")
             }
+            // Settings rides on a full-screen cover instead of `navigationPath`
+            // so the gear tap inside the iOS 26 `safeAreaBar` header always
+            // surfaces a destination, even if push routing is being swallowed
+            // by the Liquid Glass bar chrome.
+            .fullScreenCover(isPresented: $isShowingSettingsCover) {
+                settingsCoverContent
+            }
+            .sheet(isPresented: $isShowingDevicesSettingsSheet) {
+                MyDevicesSettingsSheet(
+                    isSwitchingMac: viewModel.isSwitchingMac,
+                    switchingDeviceId: viewModel.switchingMacDeviceId,
+                    switchNotice: viewModel.macSwitchNotice,
+                    onSelectDevice: switchToTrustedMac,
+                    onForgetDevice: forgetTrustedMac,
+                    onAddConnection: presentMyMacsScanner,
+                    onPairWithCode: presentMyMacsPairingCode,
+                    onCancelSwitch: cancelMacSwitch
+                )
+                .environment(codex)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+    }
+
+    private var settingsCoverContent: some View {
+        NavigationStack {
+            SettingsView()
+                .adaptiveNavigationBar()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            isShowingSettingsCover = false
+                        }
+                    }
+                }
+        }
     }
 
     private var rootContentWithBannerOverlay: some View {
         rootContentWithPresentations
+            .overlay {
+                if viewModel.isSwitchingMac {
+                    deviceSwitchingOverlay
+                }
+            }
             .overlay(alignment: .top) {
                 if let banner = codex.threadCompletionBanner {
                     ThreadCompletionBannerView(
@@ -274,6 +325,41 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.88), value: codex.threadCompletionBanner?.id)
+            .animation(.easeInOut(duration: 0.18), value: viewModel.isSwitchingMac)
+    }
+
+    private var deviceSwitchingOverlay: some View {
+        DeviceSwitchingOverlayView(
+            title: "Switching device…",
+            primaryStatus: switchingConnectionPhaseLabel,
+            secondaryStatus: switchingSecureStatusLabel,
+            deviceName: switchingDeviceName,
+            cancelTitle: viewModel.isCancellingMacSwitch ? "Cancelling..." : "Cancel",
+            isCancelDisabled: viewModel.isCancellingMacSwitch,
+            onCancel: cancelMacSwitch
+        )
+    }
+
+    private var switchingConnectionPhaseLabel: String? {
+        let label = codex.connectionPhaseDisplayLabel
+        return label == "Offline" ? nil : label
+    }
+
+    private var switchingSecureStatusLabel: String? {
+        codex.secureConnectionDisplayLabel
+    }
+
+    private var switchingDeviceName: String? {
+        guard let switchingMacDeviceId = viewModel.switchingMacDeviceId,
+              let trustedMac = codex.trustedMacRecord(for: switchingMacDeviceId) else {
+            return nil
+        }
+
+        return MyDevicesPresentation.rowModel(
+            for: trustedMac,
+            codex: codex,
+            switchingDeviceId: switchingMacDeviceId
+        ).primaryName
     }
 
     @ViewBuilder
@@ -325,23 +411,28 @@ struct ContentView: View {
     private var qrScannerBody: some View {
         QRScannerView(
             onBack: scannerBackAction,
-            onPairWithCode: presentManualPairingEntryAfterStoppingReconnect,
             onScan: { pairingPayload in
                 Task {
                     isShowingManualScanner = false
                     hasDismissedAutomaticScanner = false
                     scannerCanReturnToOnboarding = false
-                    await viewModel.connectToRelay(
-                        pairingPayload: pairingPayload,
-                        codex: codex
-                    )
+                    if isShowingMyMacsScanner {
+                        isShowingMyMacsScanner = false
+                        prepareForMacContextTransition()
+                        startScannedMacSwitch(pairingPayload)
+                    } else {
+                        await viewModel.connectToRelay(
+                            pairingPayload: pairingPayload,
+                            codex: codex
+                        )
+                    }
                 }
             }
         )
     }
 
-    // Expands the drawer to the full container width on compact layouts so the sidebar
-    // can comfortably host longer titles, paths, and search results.
+    // Lets the drawer expand when search needs room; compact devices normally
+    // use the native sidebar route instead of the drawer presentation.
     private var shouldUseFullWidthSidebar: Bool {
         horizontalSizeClass == .compact || isSearchActive
     }
@@ -352,39 +443,32 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainAppBody: some View {
-        if usesSplitNavigationShell {
-            splitMainAppBody
+        if shouldPresentSidebarAsNavigation {
+            nativeNavigationAppBody
         } else {
             drawerMainAppBody
         }
     }
 
-    // Uses the PR #24 iPad proportions while keeping the current sidebar/detail behavior.
-    private var splitMainAppBody: some View {
-        NavigationSplitView(preferredCompactColumn: $preferredSplitCompactColumn) {
-            SidebarView(
-                selectedThread: $selectedThread,
-                showSettings: $showSettings,
-                isSearchActive: $isSearchActive,
-                showsInlineCloseButton: false,
-                isVisible: true,
-                onClose: {},
-                onNewChatCreationStateChange: { isCreating in
-                    setNewChatOpeningState(isCreating)
-                },
-                onOpenThread: { thread in
-                    openThreadFromSidebar(thread)
-                }
-            )
-            .navigationSplitViewColumnWidth(
-                min: sidebarWidth,
-                ideal: iPadSidebarIdealWidth,
-                max: iPadSidebarMaxWidth
-            )
-        } detail: {
-            detailNavigationLayer
+    // Keeps compact devices on the native NavigationStack path instead of animating
+    // a full-width drawer in the same render tree as the active chat timeline.
+    private var shouldPresentSidebarAsNavigation: Bool {
+        horizontalSizeClass == .compact
+    }
+
+    private var nativeNavigationAppBody: some View {
+        ZStack(alignment: .leading) {
+            nativeSidebarNavigationLayer
+
+            PetCompanionStatusSyncView()
+
+            if !navigationPath.isEmpty {
+                PetCompanionOverlay(
+                    isInteractionEnabled: true,
+                    bottomExclusionHeight: 16
+                )
+            }
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
     private var drawerMainAppBody: some View {
@@ -394,22 +478,10 @@ struct ContentView: View {
 
             ZStack(alignment: .leading) {
                 if sidebarVisible || isSidebarPrewarmed {
-                    SidebarView(
-                        selectedThread: $selectedThread,
-                        showSettings: $showSettings,
-                        isSearchActive: $isSearchActive,
+                    sidebarContent(
                         showsInlineCloseButton: shouldUseFullWidthSidebar,
                         isVisible: sidebarVisible,
-                        onClose: { closeSidebar() },
-                        onOpenTerminal: {
-                            openTerminal(preferredWorkingDirectory: nil)
-                        },
-                        onNewChatCreationStateChange: { isCreating in
-                            setNewChatOpeningState(isCreating)
-                        },
-                        onOpenThread: { thread in
-                            openThreadFromSidebar(thread)
-                        }
+                        onClose: { closeSidebar() }
                     )
                     .frame(width: currentSidebarWidth)
                     .animation(.easeInOut(duration: 0.25), value: shouldUseFullWidthSidebar)
@@ -450,58 +522,244 @@ struct ContentView: View {
 
     // MARK: - Layers
 
-    private var usesSplitNavigationShell: Bool {
-        PadPresentationStyle.usesPadPresentation(horizontalSizeClass: horizontalSizeClass)
-    }
-
-    private var detailNavigationLayer: some View {
-        GeometryReader { proxy in
-            ZStack {
-                mainNavigationLayer
-                    .id(selectedThread?.id ?? "home")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                PetCompanionStatusSyncView()
-
-                PetCompanionOverlay(
-                    isInteractionEnabled: true,
-                    bottomExclusionHeight: 16
-                )
-                .frame(width: proxy.size.width, height: proxy.size.height)
+    // Native SwiftUI NavigationStack with the sidebar as the persistent root.
+    // Threads, settings, and terminal are pushed as destinations and use the
+    // system swipe-back gesture for a fluid, reliable pop animation.
+    //
+    // The system navigation bar is hidden on the sidebar root because
+    // `SidebarHeaderView` already supplies the logo, settings, and overflow
+    // actions; pushed destinations keep their own bars (with back button)
+    // by re-enabling visibility via `.toolbar(.visible, for: .navigationBar)`
+    // inside `navigationDestination(for:)`.
+    private var nativeSidebarNavigationLayer: some View {
+        NavigationStack(path: $navigationPath) {
+            sidebarContent(
+                showsInlineCloseButton: false,
+                isVisible: true,
+                onClose: { closeSidebarPresentation() }
+            )
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: ContentNavigationRoute.self) { route in
+                navigationDestination(for: route)
+                    .toolbar(.visible, for: .navigationBar)
             }
-            .background(Color(.systemBackground))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var mainNavigationLayer: some View {
         NavigationStack(path: $navigationPath) {
             mainContent
                 .adaptiveNavigationBar()
-                .navigationDestination(for: String.self) { destination in
-                    if destination == "settings" {
-                        SettingsView()
-                            .adaptiveNavigationBar()
-                    }
-                }
-                .navigationDestination(for: TerminalNavigationRoute.self) { route in
-                    TerminalScreen(preferredWorkingDirectory: route.preferredWorkingDirectory)
-                        .adaptiveNavigationBar()
+                .navigationDestination(for: ContentNavigationRoute.self) { route in
+                    navigationDestination(for: route)
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private var mainContent: some View {
+    private func navigationDestination(for route: ContentNavigationRoute) -> some View {
+        switch route {
+        case .newChatDraft(let draftRoute):
+            newChatDraftDestination(route: draftRoute)
+        case .newChatOpening:
+            NewChatOpeningStateView()
+        case .thread(let threadID):
+            nativeThreadDestination(threadID: threadID)
+        case .settings:
+            SettingsView()
+                .adaptiveNavigationBar()
+        case .terminal(let preferredWorkingDirectory):
+            TerminalScreen(preferredWorkingDirectory: preferredWorkingDirectory)
+                .adaptiveNavigationBar()
+        }
+    }
+
+    private func sidebarContent(
+        showsInlineCloseButton: Bool,
+        isVisible: Bool,
+        onClose: @escaping () -> Void
+    ) -> some View {
+        SidebarView(
+            selectedThread: $selectedThread,
+            isSearchActive: $isSearchActive,
+            showsInlineCloseButton: showsInlineCloseButton,
+            isVisible: isVisible,
+            connectionPhase: homeConnectionPhase,
+            onClose: onClose,
+            onOpenSettings: {
+                openSettingsFromSidebar()
+            },
+            onOpenDevicesSettings: {
+                openDevicesSettingsFromSidebar()
+            },
+            onOpenTerminal: {
+                openTerminalFromSidebar(preferredWorkingDirectory: nil)
+            },
+            onOpenNewChatDraft: { source, preferredProjectPath in
+                openNewChatDraftFromSidebar(source: source, preferredProjectPath: preferredProjectPath)
+            },
+            onNewChatCreationStateChange: { isCreating in
+                setNewChatOpeningState(isCreating)
+            },
+            onOpenThread: { thread in
+                openThreadFromSidebar(thread)
+            },
+            connectionEmptyStatePanel: {
+                sidebarConnectionEmptyStatePanel
+            },
+            connectionEmptyStateFooter: {
+                sidebarConnectionEmptyStateFooter
+            }
+        )
+    }
+
+    // Builds the connect/reconnect/scan-QR card shown inside the sidebar's
+    // empty state. Lives here so all sheet/scanner state stays owned by the
+    // root view; the sidebar just slots the panel into its centered layout.
+    private var sidebarConnectionEmptyStatePanel: some View {
+        SidebarConnectionEmptyStatePanel(
+            connectionPhase: homeConnectionPhase,
+            trustedPairPresentation: codex.trustedPairPresentation,
+            securityLabel: codex.secureConnectionState.statusLabel,
+            hasReconnectCandidate: codex.hasReconnectCandidate,
+            isWakingSavedMacDisplay: isWakingSavedMacDisplay,
+            shouldOfferWakeAction: shouldOfferWakeSavedMacDisplayAction,
+            isPreparingManualScanner: isPreparingManualScanner,
+            isResolvingManualPairingCode: isResolvingManualPairingCode,
+            offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? "Reconnect" : "Scan QR Code",
+            onPrimaryAction: {
+                if homeConnectionPhase == .offline && !codex.hasReconnectCandidate {
+                    presentAutomaticScanner()
+                    return
+                }
+
+                Task {
+                    await viewModel.toggleConnection(codex: codex)
+                }
+            },
+            onScanNewQR: {
+                presentManualScannerAfterStoppingReconnect()
+            },
+            onPairWithCode: {
+                presentManualPairingEntryAfterStoppingReconnect()
+            },
+            onWakeMacDisplay: {
+                wakeSavedMacDisplay()
+            }
+        )
+    }
+
+    // Pinned footer that surfaces the long status message and the Forget Pair
+    // action just above the bottom action bar, keeping the centered panel
+    // focused on the primary reconnect CTA.
+    private var sidebarConnectionEmptyStateFooter: some View {
+        SidebarConnectionEmptyStateFooter(
+            statusMessage: codex.lastErrorMessage,
+            canForgetPair: codex.hasReconnectCandidate && !codex.isConnected,
+            onForgetPair: {
+                codex.forgetReconnectCandidate()
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func newChatDraftDestination(route: NewChatDraftRoute) -> some View {
+        NewChatDraftView(
+            route: route,
+            leadingControl: .back,
+            onOpenTerminal: { workingDirectory in
+                openTerminal(preferredWorkingDirectory: workingDirectory)
+            },
+            onOpenThread: { thread in
+                openThreadFromNewChatDraft(thread)
+            }
+        )
+        .adaptiveNavigationBar()
+    }
+
+    @ViewBuilder
+    private func nativeThreadDestination(threadID: String) -> some View {
         if isOpeningNewChatFromSidebar {
             NewChatOpeningStateView()
+        } else if let thread = (selectedThread?.id == threadID
+                    ? selectedThread
+                    : codex.threads.first(where: { $0.id == threadID })) {
+            TurnView(
+                thread: thread,
+                isWakingMacDisplayRecovery: isWakingSavedMacDisplay,
+                initialShouldAnchorToAssistantResponse: threadIDsPendingInitialAssistantAnchor.contains(thread.id),
+                onInitialAssistantAnchorConsumed: {
+                    threadIDsPendingInitialAssistantAnchor.remove(thread.id)
+                },
+                onOpenTerminal: { workingDirectory in
+                    openTerminal(preferredWorkingDirectory: workingDirectory)
+                }
+            )
+            .id(thread.id)
+            .adaptiveNavigationBar()
+            .environment(\.reconnectAction, {
+                Task {
+                    await viewModel.toggleConnection(codex: codex)
+                }
+            })
+            .environment(\.wakeMacDisplayAction, wakeMacDisplayRecoveryAction)
+        } else {
+            HomeEmptyStateView(
+                connectionPhase: homeConnectionPhase,
+                statusMessage: codex.lastErrorMessage,
+                securityLabel: codex.secureConnectionState.statusLabel,
+                trustedPairPresentation: codex.trustedPairPresentation,
+                offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? "Reconnect" : "Scan QR Code",
+                onPrimaryAction: {
+                    if homeConnectionPhase == .offline && !codex.hasReconnectCandidate {
+                        presentAutomaticScanner()
+                        return
+                    }
+
+                    Task {
+                        await viewModel.toggleConnection(codex: codex)
+                    }
+                }
+            ) {
+                EmptyView()
+            } footer: {
+                EmptyView()
+            }
+            .adaptiveNavigationBar()
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if let activeNewChatDraftRoute {
+            NewChatDraftView(
+                route: activeNewChatDraftRoute,
+                leadingControl: .hamburger(action: { openSidebarPresentation() }),
+                onOpenTerminal: { workingDirectory in
+                    openTerminal(preferredWorkingDirectory: workingDirectory)
+                },
+                onOpenThread: { thread in
+                    openThreadFromNewChatDraft(thread)
+                }
+            )
+            .id(activeNewChatDraftRoute.id)
+        } else if isOpeningNewChatFromSidebar {
+            NewChatOpeningStateView()
                 .toolbar {
-                    sidebarToggleToolbarItem
+                    ToolbarItem(placement: .topBarLeading) {
+                        hamburgerButton
+                    }
                 }
         } else if let thread = selectedThread {
             TurnView(
                 thread: thread,
                 isWakingMacDisplayRecovery: isWakingSavedMacDisplay,
+                initialShouldAnchorToAssistantResponse: threadIDsPendingInitialAssistantAnchor.contains(thread.id),
+                onInitialAssistantAnchorConsumed: {
+                    threadIDsPendingInitialAssistantAnchor.remove(thread.id)
+                },
                 onOpenTerminal: { workingDirectory in
                     openTerminal(preferredWorkingDirectory: workingDirectory)
                 }
@@ -514,7 +772,9 @@ struct ContentView: View {
                 })
                 .environment(\.wakeMacDisplayAction, wakeMacDisplayRecoveryAction)
                 .toolbar {
-                    sidebarToggleToolbarItem
+                    ToolbarItem(placement: .topBarLeading) {
+                        hamburgerButton
+                    }
                 }
         } else {
             HomeEmptyStateView(
@@ -555,16 +815,9 @@ struct ContentView: View {
                 }
             }
             .toolbar {
-                sidebarToggleToolbarItem
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var sidebarToggleToolbarItem: some ToolbarContent {
-        if !usesSplitNavigationShell {
-            ToolbarItem(placement: .topBarLeading) {
-                hamburgerButton
+                ToolbarItem(placement: .topBarLeading) {
+                    hamburgerButton
+                }
             }
         }
     }
@@ -572,7 +825,7 @@ struct ContentView: View {
     private var hamburgerButton: some View {
         Button {
             HapticFeedback.shared.triggerImpactFeedback(style: .light)
-            toggleSidebar()
+            openSidebarPresentation()
         } label: {
             TwoLineHamburgerIcon()
                 .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
@@ -618,7 +871,6 @@ struct ContentView: View {
             && hasSeenOnboarding
             && !isShowingManualScanner
             && !isShowingManualPairingEntry
-            && codex.shouldAutoReconnectOnForeground
             && canWakeSavedMacDisplay
             && codex.supportsDisplayWake
             && !hasAttemptedAutomaticWakeSavedMacDisplay
@@ -818,6 +1070,40 @@ struct ContentView: View {
         setSidebar(open: shouldOpenSidebar)
     }
 
+    private func openSidebarPresentation() {
+        if shouldPresentSidebarAsNavigation {
+            requestSidebarFreshSyncIfNeeded()
+            guard !navigationPath.isEmpty else { return }
+            navigationPath.removeAll()
+        } else {
+            toggleSidebar()
+        }
+    }
+
+    private func closeSidebarPresentation() {
+        if shouldPresentSidebarAsNavigation {
+            navigationPath.removeAll()
+        } else {
+            closeSidebar()
+        }
+    }
+
+    private func appendNavigationRoute(_ route: ContentNavigationRoute) {
+        guard navigationPath.last != route else { return }
+        navigationPath.append(route)
+    }
+
+    // Keeps the native route and drawer presentations on the same fresh-thread sync path.
+    private func requestSidebarFreshSyncIfNeeded() {
+        if !isSidebarPrewarmed,
+           viewModel.shouldRequestSidebarFreshSync(isConnected: codex.isConnected) {
+            debugSidebarLog("sidebar presentation triggers immediate sync activeThread=\(codex.activeThreadId ?? "nil")")
+            codex.requestImmediateSync(threadId: codex.activeThreadId)
+        } else {
+            debugSidebarLog("sidebar presentation skips immediate sync prewarmed=\(isSidebarPrewarmed) connected=\(codex.isConnected)")
+        }
+    }
+
     private func closeSidebar() {
         HapticFeedback.shared.triggerImpactFeedback(style: .light)
         setSidebar(open: false)
@@ -829,35 +1115,106 @@ struct ContentView: View {
             return
         }
 
+        activeNewChatDraftRoute = nil
         isOpeningNewChatFromSidebar = false
         if isSidebarOpen || sidebarDragOffset > 0 {
             closeSidebar()
         }
 
-        if !navigationPath.isEmpty {
-            navigationPath = NavigationPath()
-        }
         selectedThread = thread
-        preferredSplitCompactColumn = .detail
         codex.activeThreadId = thread.id
         codex.markThreadAsViewed(thread.id)
+        if shouldPresentSidebarAsNavigation {
+            navigationPath = [.thread(id: thread.id)]
+        }
         Task { @MainActor in
             do {
                 let restoredThread = try await codex.restorePinnedThreadIfNeeded(threadId: thread.id)
                 if let restoredThread {
                     selectedThread = restoredThread
                     codex.activeThreadId = restoredThread.id
+                    if shouldPresentSidebarAsNavigation {
+                        navigationPath = [.thread(id: restoredThread.id)]
+                    }
                 }
             } catch {
                 codex.lastErrorMessage = codex.userFacingTurnErrorMessageForFooter(from: error)
             }
 
-            codex.requestImmediateActiveThreadSync(threadId: thread.id)
+            codex.requestImmediateActiveThreadSync(threadId: thread.id, forceHistoryRefresh: true)
+        }
+    }
+
+    // Keeps sidebar chat creation compose-first while preserving which affordance
+    // opened it, so the draft UI can distinguish general Chat from folder Chat.
+    private func openNewChatDraftFromSidebar(
+        source: NewChatDraftSource,
+        preferredProjectPath: String?
+    ) {
+        let route = NewChatDraftRoute(
+            id: "new-chat-draft-\(UUID().uuidString)",
+            preferredProjectPath: preferredProjectPath,
+            source: source
+        )
+        isOpeningNewChatFromSidebar = false
+        selectedThread = nil
+        codex.activeThreadId = nil
+
+        if shouldPresentSidebarAsNavigation {
+            activeNewChatDraftRoute = nil
+            navigationPath = [.newChatDraft(route)]
+        } else {
+            activeNewChatDraftRoute = route
+            if isSidebarOpen || sidebarDragOffset > 0 {
+                closeSidebar()
+            }
+        }
+    }
+
+    private func openThreadFromNewChatDraft(_ thread: CodexThread) {
+        isOpeningNewChatFromSidebar = false
+        threadIDsPendingInitialAssistantAnchor.insert(thread.id)
+        selectedThread = thread
+        codex.activeThreadId = thread.id
+        codex.markThreadAsViewed(thread.id)
+
+        if shouldPresentSidebarAsNavigation {
+            Task { @MainActor in
+                await Task.yield()
+                guard selectedThread?.id == thread.id else { return }
+                navigationPath = [.thread(id: thread.id)]
+            }
+        } else {
+            activeNewChatDraftRoute = nil
         }
     }
 
     private func openTerminal(preferredWorkingDirectory: String?) {
-        navigationPath.append(TerminalNavigationRoute(preferredWorkingDirectory: preferredWorkingDirectory))
+        appendNavigationRoute(.terminal(preferredWorkingDirectory: preferredWorkingDirectory))
+    }
+
+    private func openTerminalFromSidebar(preferredWorkingDirectory: String?) {
+        let route = ContentNavigationRoute.terminal(preferredWorkingDirectory: preferredWorkingDirectory)
+        if shouldPresentSidebarAsNavigation {
+            appendNavigationRoute(route)
+        } else {
+            closeSidebar()
+            appendNavigationRoute(route)
+        }
+    }
+
+    private func openSettingsFromSidebar() {
+        if !shouldPresentSidebarAsNavigation {
+            closeSidebar()
+        }
+        isShowingSettingsCover = true
+    }
+
+    private func openDevicesSettingsFromSidebar() {
+        if !shouldPresentSidebarAsNavigation {
+            closeSidebar()
+        }
+        isShowingDevicesSettingsSheet = true
     }
 
     // Prevents a close-swipe release from also activating whichever sidebar row was under the finger.
@@ -874,12 +1231,19 @@ struct ContentView: View {
         return false
     }
 
+    // Pushes a real native route before `thread/start` returns so compact sidebar users see progress immediately.
     private func setNewChatOpeningState(_ isOpening: Bool) {
         isOpeningNewChatFromSidebar = isOpening
         if isOpening {
+            activeNewChatDraftRoute = nil
             selectedThread = nil
-            preferredSplitCompactColumn = .detail
             codex.activeThreadId = nil
+            if shouldPresentSidebarAsNavigation {
+                navigationPath = [.newChatOpening]
+            }
+        } else if shouldPresentSidebarAsNavigation,
+                  navigationPath.last == .newChatOpening {
+            navigationPath.removeLast()
         }
     }
 
@@ -974,6 +1338,7 @@ struct ContentView: View {
               hasSeenOnboarding,
               subscriptions.hasAppAccess,
               !isShowingManualScanner,
+              !shouldPresentSidebarAsNavigation,
               !isSidebarPrewarmed,
               sidebarPrewarmTask == nil,
               (codex.isConnected || !codex.threads.isEmpty) else {
@@ -1320,6 +1685,18 @@ struct ContentView: View {
         }
     }
 
+    private func presentMyMacsScanner() {
+        hasDismissedAutomaticScanner = true
+        isShowingMyMacsScanner = true
+        presentManualScannerAfterStoppingReconnect()
+    }
+
+    private func presentMyMacsPairingCode() {
+        hasDismissedAutomaticScanner = true
+        isShowingMyMacsScanner = true
+        presentManualPairingEntryAfterStoppingReconnect()
+    }
+
     // Re-opens the scanner after the user backed out to the empty state without a saved pairing.
     private func presentAutomaticScanner() {
         withAnimation {
@@ -1331,6 +1708,7 @@ struct ContentView: View {
     private func dismissScannerToHome() {
         withAnimation {
             isShowingManualScanner = false
+            isShowingMyMacsScanner = false
             hasDismissedAutomaticScanner = true
             scannerCanReturnToOnboarding = false
         }
@@ -1344,6 +1722,7 @@ struct ContentView: View {
 
         withAnimation {
             isShowingManualScanner = false
+            isShowingMyMacsScanner = false
             hasDismissedAutomaticScanner = false
             scannerCanReturnToOnboarding = false
             hasSeenOnboarding = false
@@ -1429,7 +1808,19 @@ struct ContentView: View {
             await viewModel.stopAutoReconnectForManualScan(codex: codex)
 
             do {
-                let pairingPayload = try await codex.resolvePairingCode(pendingCode)
+                let pairingPayload: CodexPairingQRPayload
+                switch validatePairingQRCode(pendingCode) {
+                case .success(let payload):
+                    pairingPayload = payload
+                case .shortCode(let code):
+                    pairingPayload = try await codex.resolvePairingCode(code)
+                case .scanError(let message):
+                    throw CodexSecureTransportError.invalidQR(message)
+                case .bridgeUpdateRequired(let prompt):
+                    codex.bridgeUpdatePrompt = prompt
+                    return
+                }
+
                 isShowingManualPairingEntry = false
                 manualPairingCode = ""
                 withAnimation {
@@ -1437,6 +1828,12 @@ struct ContentView: View {
                     isShowingManualScanner = false
                     hasDismissedAutomaticScanner = true
                     scannerCanReturnToOnboarding = false
+                }
+                if isShowingMyMacsScanner {
+                    isShowingMyMacsScanner = false
+                    prepareForMacContextTransition()
+                    startScannedMacSwitch(pairingPayload)
+                    return
                 }
                 await viewModel.connectToRelay(
                     pairingPayload: pairingPayload,
@@ -1452,7 +1849,6 @@ struct ContentView: View {
         do {
             let thread = try await codex.startThread()
             selectedThread = thread
-            preferredSplitCompactColumn = .detail
         } catch {
             codex.lastErrorMessage = codex.userFacingTurnErrorMessage(from: error)
         }
@@ -1496,6 +1892,15 @@ struct ContentView: View {
     }
 
     // Keeps selected thread coherent with server list updates.
+    private func scheduleSelectedThreadSync() {
+        threadSelectionSyncTask?.cancel()
+        threadSelectionSyncTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            syncSelectedThread(with: codex.threads)
+        }
+    }
+
     private func syncSelectedThread(with threads: [CodexThread]) {
         guard !isOpeningNewChatFromSidebar else { return }
 
@@ -1516,10 +1921,115 @@ struct ContentView: View {
 
         if selectedThread == nil,
            codex.activeThreadId == nil,
+           !suppressAutomaticThreadSelection,
            codex.pendingNotificationOpenThreadID == nil,
            let first = threads.first {
             selectedThread = first
         }
+    }
+
+    private func prepareForMacContextTransition() {
+        hasDismissedAutomaticScanner = true
+        suppressAutomaticThreadSelection = true
+        selectedThread = nil
+        codex.activeThreadId = nil
+        if isSidebarOpen {
+            closeSidebar()
+        }
+    }
+
+    private func captureMacContextTransitionSnapshot() -> MacContextTransitionSnapshot {
+        MacContextTransitionSnapshot(
+            selectedThread: selectedThread,
+            activeThreadId: codex.activeThreadId,
+            suppressAutomaticThreadSelection: suppressAutomaticThreadSelection
+        )
+    }
+
+    // Restores the chat selection only when the service kept an existing Mac alive after a failed saved-device switch.
+    private func restoreMacContextTransitionSnapshotIfStillConnected(_ snapshot: MacContextTransitionSnapshot) {
+        guard codex.isConnected || codex.isInitialized else {
+            return
+        }
+
+        if let selectedThread = snapshot.selectedThread {
+            self.selectedThread = codex.threads.first(where: { $0.id == selectedThread.id }) ?? selectedThread
+        } else {
+            self.selectedThread = nil
+        }
+        codex.activeThreadId = snapshot.activeThreadId
+        suppressAutomaticThreadSelection = snapshot.suppressAutomaticThreadSelection
+    }
+
+    private func switchToTrustedMac(_ deviceId: String) {
+        guard !viewModel.isSwitchingMac else {
+            return
+        }
+        let contextTransitionSnapshot = captureMacContextTransitionSnapshot()
+        prepareForMacContextTransition()
+        macSwitchTask = Task {
+            do {
+                try await viewModel.switchToTrustedMac(deviceId: deviceId, codex: codex)
+                await MainActor.run {
+                    navigationPath.removeAll()
+                }
+            } catch {
+                await MainActor.run {
+                    restoreMacContextTransitionSnapshotIfStillConnected(contextTransitionSnapshot)
+                }
+            }
+            await MainActor.run {
+                macSwitchTask = nil
+            }
+        }
+    }
+
+    private func startScannedMacSwitch(_ pairingPayload: CodexPairingQRPayload) {
+        guard !viewModel.isSwitchingMac else {
+            return
+        }
+
+        macSwitchTask = Task {
+            do {
+                try await viewModel.switchToScannedMac(
+                    pairingPayload: pairingPayload,
+                    codex: codex
+                )
+                await MainActor.run {
+                    navigationPath.removeAll()
+                }
+            } catch {
+                // Error is already exposed through CodexService state.
+            }
+            await MainActor.run {
+                macSwitchTask = nil
+            }
+        }
+    }
+
+    private func cancelMacSwitch() {
+        guard let macSwitchTask else {
+            return
+        }
+
+        macSwitchTask.cancel()
+        Task {
+            await viewModel.requestMacSwitchCancellation(codex: codex)
+        }
+    }
+
+    private func forgetTrustedMac(_ deviceId: String) {
+        let isCurrentTrustedMac = codex.normalizedCurrentTrustedMacDeviceId == deviceId
+        if isCurrentTrustedMac {
+            prepareForMacContextTransition()
+            Task {
+                await codex.disconnect()
+                codex.forgetTrustedMac(deviceId: deviceId)
+            }
+            return
+        }
+
+        codex.forgetTrustedMac(deviceId: deviceId)
     }
 }
 

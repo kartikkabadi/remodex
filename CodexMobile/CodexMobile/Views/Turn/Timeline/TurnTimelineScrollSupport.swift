@@ -55,6 +55,8 @@ final class TurnTimelineRenderItemsCache {
         for signature: TurnTimelineRenderItemsCacheSignature,
         messages: ArraySlice<CodexMessage>,
         completedTurnIDs: Set<String>,
+        activeTurnID: String? = nil,
+        isThreadRunning: Bool = false,
         projector: (([CodexMessage], Set<String>) -> [TurnTimelineRenderItem])? = nil
     ) -> [TurnTimelineRenderItem] {
         if signature == cachedSignature {
@@ -65,7 +67,9 @@ final class TurnTimelineRenderItemsCache {
         let projectedItems = projector.map { $0(sourceMessages, completedTurnIDs) }
             ?? TurnTimelineRenderProjection.project(
                 messages: sourceMessages,
-                completedTurnIDs: completedTurnIDs
+                completedTurnIDs: completedTurnIDs,
+                activeTurnID: activeTurnID,
+                isThreadRunning: isThreadRunning
             )
         cachedSignature = signature
         cachedItems = projectedItems
