@@ -50,7 +50,7 @@ struct OnboardingStepPage: View {
                             )
                             .frame(width: 140, height: 140)
 
-                        RemodexIcon.image(systemName: icon)
+                        Image(systemName: icon)
                             .font(.system(size: 32, weight: .light))
                             .foregroundStyle(.white)
                             .frame(width: 80, height: 80)
@@ -112,7 +112,7 @@ struct OnboardingStepPage: View {
             stepNumber: 1,
             icon: "terminal",
             title: "Install Codex CLI",
-            description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
+            description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPad.",
             command: "npm install -g @openai/codex@latest"
         )
     }
@@ -126,9 +126,9 @@ struct OnboardingStepPage: View {
             stepNumber: 2,
             icon: "link",
             title: "Install the Bridge",
-            description: "A lightweight relay that securely connects your device to your iPhone.",
+            description: "A lightweight relay that securely connects your Mac to your iPad.",
             command: "npm install -g remodex@latest",
-            commandCaption: "Remodex can keep your device awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
+            commandCaption: "Remodex can keep your Mac awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
         )
     }
     .preferredColorScheme(.dark)
@@ -141,7 +141,7 @@ struct OnboardingStepPage: View {
             stepNumber: 3,
             icon: "qrcode.viewfinder",
             title: "Start Pairing",
-            description: "Run this on your device. A QR code will appear in your terminal — scan it next.",
+            description: "Run this on your computer. A QR code will appear in your terminal — scan it next.",
             command: "remodex up"
         )
     }

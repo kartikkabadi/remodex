@@ -9,7 +9,11 @@ import SwiftUI
 import UIKit
 
 struct QRScannerView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.openURL) private var openURL
+
     let onBack: (() -> Void)?
+    let onPairWithCode: (() -> Void)?
     let onScan: (CodexPairingQRPayload) -> Void
 
     @State private var scannerError: String?
@@ -23,9 +27,11 @@ struct QRScannerView: View {
         initialHasCameraPermission: Bool = false,
         initialIsCheckingPermission: Bool = true,
         onBack: (() -> Void)? = nil,
+        onPairWithCode: (() -> Void)? = nil,
         onScan: @escaping (CodexPairingQRPayload) -> Void
     ) {
         self.onBack = onBack
+        self.onPairWithCode = onPairWithCode
         self.onScan = onScan
         _bridgeUpdatePrompt = State(initialValue: initialBridgeUpdatePrompt)
         _hasCameraPermission = State(initialValue: initialHasCameraPermission)
@@ -33,25 +39,26 @@ struct QRScannerView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-            if isCheckingPermission {
-                ProgressView()
-                    .tint(.white)
-            } else if let bridgeUpdatePrompt {
-                bridgeUpdateView(prompt: bridgeUpdatePrompt)
-            } else if hasCameraPermission {
-                QRCameraPreview { code, resetScanLock in
-                    handleScanResult(code, resetScanLock: resetScanLock)
+                if isCheckingPermission {
+                    ProgressView()
+                        .tint(.white)
+                } else if let bridgeUpdatePrompt {
+                    bridgeUpdateView(prompt: bridgeUpdatePrompt, availableWidth: geometry.size.width)
+                } else if hasCameraPermission {
+                    QRCameraPreview { code, resetScanLock in
+                        handleScanResult(code, resetScanLock: resetScanLock)
+                    }
+                    .ignoresSafeArea()
+
+                    scannerOverlay(for: geometry.size.width)
+                } else {
+                    cameraPermissionView(for: geometry.size.width)
                 }
-                .ignoresSafeArea()
-
-                scannerOverlay
-            } else {
-                cameraPermissionView
             }
-
         }
         .safeAreaInset(edge: .top) {
             if let onBack {
@@ -77,58 +84,55 @@ struct QRScannerView: View {
     }
 
     // Blocks repeated scans when the camera spots a bridge QR from an incompatible npm release.
-    private func bridgeUpdateView(prompt: CodexBridgeUpdatePrompt) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(prompt.title)
-                        .font(AppFont.title3(weight: .semibold))
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
+    private func bridgeUpdateView(prompt: CodexBridgeUpdatePrompt, availableWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Spacer()
 
-                    Text(prompt.message)
-                        .font(AppFont.body())
-                        .foregroundStyle(.white.opacity(0.82))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(prompt.title)
+                    .font(AppFont.title3(weight: .semibold))
+                    .foregroundStyle(.white)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    if let command = prompt.command, !command.isEmpty {
-                        Text("Do these steps on your device")
-                            .font(AppFont.caption(weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-
-                        bridgeUpdateStep(number: "1", title: "Update Remodex", detail: command, showsCopyButton: true)
-                        bridgeUpdateStep(number: "2", title: "Start it again", detail: "Run remodex up")
-                        bridgeUpdateStep(number: "3", title: "Make a new QR code", detail: "Use the new QR shown in the terminal")
-                        bridgeUpdateStep(number: "4", title: "Come back here", detail: "Then scan the new QR code from the iPhone")
-                    } else {
-                        Text("Do these steps on your iPhone")
-                            .font(AppFont.caption(weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-
-                        bridgeUpdateStep(number: "1", title: "Update Remodex", detail: "Install the latest Remodex build on this iPhone.")
-                        bridgeUpdateStep(number: "2", title: "Come back here", detail: "Then retry the connection or scan a fresh QR code.")
-                    }
-                }
-
-                Button("I Updated It") {
-                    bridgeUpdatePrompt = nil
-                    didCopyBridgeUpdateCommand = false
-                }
-                .font(AppFont.body(weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .foregroundStyle(.black)
-                .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .buttonStyle(.plain)
+                Text(prompt.message)
+                    .font(AppFont.body())
+                    .foregroundStyle(.white.opacity(0.82))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.top, 96)
-            .padding(.bottom, 36)
+
+            VStack(alignment: .leading, spacing: 14) {
+                if let command = prompt.command, !command.isEmpty {
+                    Text("Do these steps on your computer")
+                        .font(AppFont.caption(weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    bridgeUpdateStep(number: "1", title: "Update Remodex", detail: command, showsCopyButton: true)
+                    bridgeUpdateStep(number: "2", title: "Start it again", detail: "Run remodex up")
+                    bridgeUpdateStep(number: "3", title: "Make a new QR code", detail: "Use the new QR shown in the terminal")
+                    bridgeUpdateStep(number: "4", title: "Come back here", detail: "Then scan the new QR code from this iPad")
+                } else {
+                    Text("Do these steps on this iPad")
+                        .font(AppFont.caption(weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    bridgeUpdateStep(number: "1", title: "Update Remodex", detail: "Install the latest Remodex build on this iPad.")
+                    bridgeUpdateStep(number: "2", title: "Come back here", detail: "Then retry the connection or scan a fresh QR code.")
+                }
+            }
+
+            Button("I Updated It") {
+                bridgeUpdatePrompt = nil
+                didCopyBridgeUpdateCommand = false
+            }
+            .font(AppFont.body(weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .foregroundStyle(.black)
+            .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .buttonStyle(.plain)
+
+            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: permissionContentWidth(for: availableWidth), alignment: .leading)
+        .padding(.horizontal, 24)
     }
 
     private func bridgeUpdateStep(
@@ -149,13 +153,11 @@ struct QRScannerView: View {
                 Text(title)
                     .font(AppFont.subheadline(weight: .semibold))
                     .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(detail)
                     .font(showsCopyButton ? AppFont.mono(.caption) : AppFont.caption())
                     .foregroundStyle(.white.opacity(0.82))
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
                     .background(
@@ -187,7 +189,7 @@ struct QRScannerView: View {
     // Keeps the first-run scanner escapable without turning reconnect recovery into onboarding.
     private func backButton(action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            RemodexIcon.image(systemName: "chevron.left")
+            Image(systemName: "chevron.left")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
@@ -201,25 +203,45 @@ struct QRScannerView: View {
         .accessibilityLabel("Back")
     }
 
-    private var scannerOverlay: some View {
-        VStack(spacing: 24) {
+    private var usesRegularPadLayout: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private func scannerFrameSize(for availableWidth: CGFloat) -> CGFloat {
+        usesWidePadLayout(for: availableWidth) ? 320 : 250
+    }
+
+    private func permissionContentWidth(for availableWidth: CGFloat) -> CGFloat {
+        usesWidePadLayout(for: availableWidth) ? 460 : 360
+    }
+
+    private func usesWidePadLayout(for availableWidth: CGFloat) -> Bool {
+        usesRegularPadLayout && availableWidth >= 900
+    }
+
+    private func scannerOverlay(for availableWidth: CGFloat) -> some View {
+        let frameSize = scannerFrameSize(for: availableWidth)
+
+        return VStack(spacing: 24) {
             Spacer()
 
             RoundedRectangle(cornerRadius: 20)
                 .stroke(Color.white.opacity(0.6), lineWidth: 2)
-                .frame(width: 250, height: 250)
+                .frame(width: frameSize, height: frameSize)
 
             Text("Scan the Remodex QR code")
                 .font(AppFont.subheadline(weight: .medium))
                 .foregroundStyle(.white)
 
+            pairWithCodeButton
+
             Spacer()
         }
     }
 
-    private var cameraPermissionView: some View {
+    private func cameraPermissionView(for availableWidth: CGFloat) -> some View {
         VStack(spacing: 20) {
-            RemodexIcon.image(systemName: "camera.fill")
+            Image(systemName: "camera.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
 
@@ -235,10 +257,37 @@ struct QRScannerView: View {
 
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
+                    openURL(url)
                 }
             }
             .buttonStyle(.borderedProminent)
+
+            pairWithCodeButton
+        }
+        .frame(maxWidth: permissionContentWidth(for: availableWidth))
+        .padding(.horizontal, 24)
+    }
+
+    @ViewBuilder
+    private var pairWithCodeButton: some View {
+        if let onPairWithCode {
+            Button(action: onPairWithCode) {
+                HStack(spacing: 8) {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Pair with Code")
+                        .font(AppFont.subheadline(weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.12), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -285,8 +334,8 @@ struct QRScannerView: View {
 
 private extension CodexBridgeUpdatePrompt {
     static let previewScannerMismatch = CodexBridgeUpdatePrompt(
-        title: "Update Remodex on your Mac before scanning",
-        message: "This QR code was generated by a different Remodex npm version. Update the package on your Mac to the latest release before scanning a new QR code.",
+        title: "Update Remodex on your computer before scanning",
+        message: "This QR code was generated by a different Remodex npm version. Update the package on your computer to the latest release before scanning a new QR code.",
         command: "npm install -g remodex@latest"
     )
 }
@@ -401,7 +450,11 @@ private class QRCameraUIView: UIView, AVCaptureMetadataOutputObjectsDelegate {
     var onScan: ((String) -> Void)?
 
     private let captureSession = AVCaptureSession()
+    private let metadataOutput = AVCaptureMetadataOutput()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+    private var captureRotationObservation: NSKeyValueObservation?
     private var hasScanned = false
     private var isStoppingCamera = false
 
@@ -418,6 +471,12 @@ private class QRCameraUIView: UIView, AVCaptureMetadataOutputObjectsDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer?.frame = bounds
+        updateCaptureOrientation()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateCaptureOrientation()
     }
 
     // Configures the metadata session once and starts it off the main thread.
@@ -431,11 +490,10 @@ private class QRCameraUIView: UIView, AVCaptureMetadataOutputObjectsDelegate {
             captureSession.addInput(input)
         }
 
-        let output = AVCaptureMetadataOutput()
-        if captureSession.canAddOutput(output) {
-            captureSession.addOutput(output)
-            output.setMetadataObjectsDelegate(self, queue: .main)
-            output.metadataObjectTypes = [.qr]
+        if captureSession.canAddOutput(metadataOutput) {
+            captureSession.addOutput(metadataOutput)
+            metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
+            metadataOutput.metadataObjectTypes = [.qr]
         }
 
         let layer = AVCaptureVideoPreviewLayer(session: captureSession)
@@ -443,11 +501,52 @@ private class QRCameraUIView: UIView, AVCaptureMetadataOutputObjectsDelegate {
         self.layer.addSublayer(layer)
         previewLayer = layer
 
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: layer)
+        rotationCoordinator = coordinator
+        observeRotationCoordinator(coordinator)
+        updateCaptureOrientation()
+
         QRCameraLifecycleCoordinator.shared.start(session: captureSession) { [weak self] in
             guard let self else {
                 return false
             }
             return !self.isStoppingCamera
+        }
+    }
+
+    private func updateCaptureOrientation() {
+        guard let rotationCoordinator else {
+            return
+        }
+
+        if let connection = previewLayer?.connection,
+           connection.isVideoRotationAngleSupported(rotationCoordinator.videoRotationAngleForHorizonLevelPreview) {
+            connection.videoRotationAngle = rotationCoordinator.videoRotationAngleForHorizonLevelPreview
+        }
+
+        if let connection = metadataOutput.connection(with: .video),
+           connection.isVideoRotationAngleSupported(rotationCoordinator.videoRotationAngleForHorizonLevelCapture) {
+            connection.videoRotationAngle = rotationCoordinator.videoRotationAngleForHorizonLevelCapture
+        }
+    }
+
+    private func observeRotationCoordinator(_ coordinator: AVCaptureDevice.RotationCoordinator) {
+        previewRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview,
+            options: [.new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateCaptureOrientation()
+            }
+        }
+
+        captureRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelCapture,
+            options: [.new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateCaptureOrientation()
+            }
         }
     }
 
