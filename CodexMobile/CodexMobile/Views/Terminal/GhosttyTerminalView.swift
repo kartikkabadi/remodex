@@ -37,10 +37,6 @@ private final class TerminalInputField: UITextField {
     }
 }
 
-private final class GhosttyTerminalCallbackState {
-    weak var view: GhosttyTerminalView?
-}
-
 private enum TerminalAppearanceScheme: String {
     case light
     case dark
@@ -72,260 +68,23 @@ private extension UIColor {
     }
 }
 
-private struct TerminalSelectionCell: Equatable {
-    let column: Int
-    let row: Int
-}
-
-private struct TerminalSelectionRange {
-    let anchor: TerminalSelectionCell
-    let focus: TerminalSelectionCell
-
-    var normalized: (start: TerminalSelectionCell, end: TerminalSelectionCell) {
-        if anchor.row < focus.row || (anchor.row == focus.row && anchor.column <= focus.column) {
-            return (anchor, focus)
-        }
-        return (focus, anchor)
-    }
-}
-
-private struct TerminalSelectionMetrics: Equatable {
-    let columns: Int
-    let rows: Int
-    let cellSize: CGSize
-}
-
-private struct TerminalRowCharacter {
-    let character: Character
-    let startColumn: Int
-    let endColumn: Int
-}
-
-private struct TerminalVisualRow {
-    let text: String
-    let hasHardLineBreakAfter: Bool
-}
-
-private enum TerminalSelectionHandle {
-    case start
-    case end
-}
-
-private final class TerminalSelectionOverlayView: UIView {
-    private static let handleRadius: CGFloat = 7
-    private static let handleHitRadius: CGFloat = 30
-
-    private let handlePanGesture = UIPanGestureRecognizer()
-    private var activeHandle: TerminalSelectionHandle?
-
-    var onHandleDrag: ((TerminalSelectionHandle, CGPoint, UIGestureRecognizer.State) -> Void)?
-
-    var metrics: TerminalSelectionMetrics? {
-        didSet {
-            guard oldValue != metrics else { return }
-            setNeedsDisplay()
-        }
-    }
-
-    var selectionRange: TerminalSelectionRange? {
-        didSet {
-            setNeedsDisplay()
-        }
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        configureHandleGestures()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configureHandleGestures()
-    }
-
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        handle(at: point) != nil
-    }
-
-    override func draw(_ rect: CGRect) {
-        guard let metrics, let selectionRange else { return }
-
-        UIColor.systemBlue.withAlphaComponent(0.24).setFill()
-        for selectionRect in selectionRects(for: selectionRange, metrics: metrics) {
-            UIBezierPath(roundedRect: selectionRect, cornerRadius: 2).fill()
-        }
-
-        drawHandles(for: selectionRange, metrics: metrics)
-    }
-
-    func menuTargetRect() -> CGRect? {
-        guard let metrics, let selectionRange else { return nil }
-        let rects = selectionRects(for: selectionRange, metrics: metrics)
-        guard var unionRect = rects.first else { return nil }
-        for rect in rects.dropFirst() {
-            unionRect = unionRect.union(rect)
-        }
-        return unionRect.insetBy(dx: 0, dy: -6)
-    }
-
-    private func configureHandleGestures() {
-        isMultipleTouchEnabled = false
-        handlePanGesture.addTarget(self, action: #selector(handleHandlePan(_:)))
-        addGestureRecognizer(handlePanGesture)
-    }
-
-    @objc private func handleHandlePan(_ gesture: UIPanGestureRecognizer) {
-        let location = gesture.location(in: self)
-        switch gesture.state {
-        case .began:
-            activeHandle = handle(at: location)
-            if let activeHandle {
-                onHandleDrag?(activeHandle, location, gesture.state)
-            }
-        case .changed, .ended, .cancelled, .failed:
-            guard let activeHandle else { return }
-            onHandleDrag?(activeHandle, location, gesture.state)
-            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
-                self.activeHandle = nil
-            }
-        default:
-            break
-        }
-    }
-
-    private func selectionRects(
-        for selectionRange: TerminalSelectionRange,
-        metrics: TerminalSelectionMetrics
-    ) -> [CGRect] {
-        let normalizedRange = selectionRange.normalized
-        let start = normalizedRange.start
-        let end = normalizedRange.end
-        guard start.row <= end.row else { return [] }
-
-        let rowRange = start.row...end.row
-        return rowRange.compactMap { row in
-            let firstColumn = row == start.row ? start.column : 0
-            let lastColumn = row == end.row ? end.column : metrics.columns - 1
-            guard lastColumn >= firstColumn else { return nil }
-
-            return CGRect(
-                x: CGFloat(firstColumn) * metrics.cellSize.width,
-                y: CGFloat(row) * metrics.cellSize.height,
-                width: CGFloat(lastColumn - firstColumn + 1) * metrics.cellSize.width,
-                height: metrics.cellSize.height
-            ).insetBy(dx: 0, dy: max(1, metrics.cellSize.height * 0.08))
-        }
-    }
-
-    private func handle(at point: CGPoint) -> TerminalSelectionHandle? {
-        guard let metrics, let selectionRange else { return nil }
-        let centers = handleCenters(for: selectionRange, metrics: metrics)
-        let startDistance = hypot(point.x - centers.start.x, point.y - centers.start.y)
-        let endDistance = hypot(point.x - centers.end.x, point.y - centers.end.y)
-        let hitRadius = Self.handleHitRadius
-
-        switch (startDistance <= hitRadius, endDistance <= hitRadius) {
-        case (true, true):
-            return startDistance <= endDistance ? .start : .end
-        case (true, false):
-            return .start
-        case (false, true):
-            return .end
-        case (false, false):
-            return nil
-        }
-    }
-
-    private func handleCenters(
-        for selectionRange: TerminalSelectionRange,
-        metrics: TerminalSelectionMetrics
-    ) -> (start: CGPoint, end: CGPoint) {
-        let normalizedRange = selectionRange.normalized
-        let start = normalizedRange.start
-        let end = normalizedRange.end
-        let rawCenters = (
-            CGPoint(
-                x: CGFloat(start.column) * metrics.cellSize.width,
-                y: CGFloat(start.row + 1) * metrics.cellSize.height
-            ),
-            CGPoint(
-                x: CGFloat(end.column + 1) * metrics.cellSize.width,
-                y: CGFloat(end.row + 1) * metrics.cellSize.height
-            )
-        )
-        return (
-            clampHandleCenter(rawCenters.0),
-            clampHandleCenter(rawCenters.1)
-        )
-    }
-
-    private func clampHandleCenter(_ point: CGPoint) -> CGPoint {
-        let radius = Self.handleRadius
-        guard bounds.width > radius * 2, bounds.height > radius * 2 else { return point }
-        return CGPoint(
-            x: min(max(point.x, radius), bounds.width - radius),
-            y: min(max(point.y, radius), bounds.height - radius)
-        )
-    }
-
-    private func drawHandles(
-        for selectionRange: TerminalSelectionRange,
-        metrics: TerminalSelectionMetrics
-    ) {
-        let radius = Self.handleRadius
-        let centers = handleCenters(for: selectionRange, metrics: metrics)
-
-        UIColor.black.withAlphaComponent(0.92).setFill()
-        UIBezierPath(
-            ovalIn: CGRect(x: centers.start.x - radius, y: centers.start.y - radius, width: radius * 2, height: radius * 2)
-        ).fill()
-        UIBezierPath(
-            ovalIn: CGRect(x: centers.end.x - radius, y: centers.end.y - radius, width: radius * 2, height: radius * 2)
-        ).fill()
-    }
-}
-
-final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognizerDelegate {
+final class GhosttyTerminalView: UIView, UITextFieldDelegate {
     private static let minimumVerticalScrollStepPoints: CGFloat = 18
     private static let verticalScrollStepMultiplier: CGFloat = 1.15
-    private static let selectionDragActivationDistance: CGFloat = 10
-    private static let minimumDrawableViewportSize = CGSize(width: 24, height: 24)
-    private static let maximumLayoutRetryCount = 20
-    private static let terminalResetSequence = Data("\u{1B}c".utf8)
-    private static let terminalReturnSequence = Data([0x0D])
 
     private let terminalViewport = UIView()
-    private let selectionOverlay = TerminalSelectionOverlayView()
     private let inputField = TerminalInputField()
-    private let callbackState = GhosttyTerminalCallbackState()
     private let focusTapGesture = UITapGestureRecognizer()
     private let scrollPanGesture = UIPanGestureRecognizer()
-    private let selectionLongPressGesture = UILongPressGestureRecognizer()
     private var lastViewportSize: CGSize = .zero
     private var lastContentScale: CGFloat = 0
     private var lastReportedGrid: (cols: Int, rows: Int)?
     private var lastAppliedBuffer = Data()
     private var pendingVerticalScrollPoints: CGFloat = 0
-    private var isSelectingText = false
-    private var selectionAnchorCell: TerminalSelectionCell?
-    private var selectionFocusCell: TerminalSelectionCell?
-    private var handleDragOppositeCell: TerminalSelectionCell?
-    private var handleDragStartCell: TerminalSelectionCell?
-    private var handleDragStartLocation: CGPoint?
-    private var handleDragTouchOffset: CGPoint?
-    private var selectionGestureStartPoint: CGPoint?
-    private var selectionGestureDidDrag = false
     private var app: ghostty_app_t?
     private var surface: ghostty_surface_t?
     private var isCreatingSurface = false
     private var surfaceCreationFailed = false
-    private var isRendererSuspended = false
-    private var isSurfaceRefreshScheduled = false
-    private var isForegroundResumeScheduled = false
-    private var isLayoutRetryScheduled = false
-    private var needsSurfaceRefreshAfterResume = false
-    private var layoutRetryCount = 0
-    private var surfaceLifecycleGeneration = 0
     private var appearance = TerminalAppearanceScheme.dark
     private var backgroundColorValue = UIColor(hexString: "#0a0a0a")
 
@@ -336,6 +95,9 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
     var terminalKey: String = "" {
         didSet {
             accessibilityIdentifier = "remodex-terminal-\(terminalKey)"
+            if oldValue != terminalKey {
+                resetSurface()
+            }
         }
     }
 
@@ -350,7 +112,7 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         didSet {
             guard oldValue != fontSize else { return }
             inputField.font = UIFont.monospacedSystemFont(ofSize: max(fontSize, 13), weight: .regular)
-            scheduleSurfaceRefresh()
+            refreshSurface()
         }
     }
 
@@ -358,14 +120,14 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         didSet {
             guard oldValue != appearanceScheme else { return }
             appearance = TerminalAppearanceScheme(value: appearanceScheme)
-            scheduleSurfaceRefresh()
+            refreshSurface()
         }
     }
 
     var themeConfig: String = "" {
         didSet {
             guard oldValue != themeConfig else { return }
-            scheduleSurfaceRefresh()
+            refreshSurface()
         }
     }
 
@@ -387,8 +149,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
-        callbackState.view = nil
         destroySurface()
     }
 
@@ -397,11 +157,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         updateContentScale()
 
         let viewportSize = terminalViewport.bounds.size
-        guard Self.isDrawableViewportSize(viewportSize) else {
-            scheduleLayoutRetryIfNeeded()
-            return
-        }
-        layoutRetryCount = 0
         if surface == nil {
             createSurfaceIfPossible()
         }
@@ -417,18 +172,8 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        updateSurfaceRuntimeVisibility()
-        guard window != nil else {
-            inputField.resignFirstResponder()
-            return
-        }
-        if surface != nil {
-            resizeSurface()
-        } else {
-            setNeedsLayout()
-        }
+        guard window != nil else { return }
         DispatchQueue.main.async { [weak self] in
-            guard self?.canRenderSurface == true else { return }
             self?.requestKeyboardFocus()
         }
     }
@@ -439,13 +184,13 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         replacementString string: String
     ) -> Bool {
         if !string.isEmpty {
-            emitInput(Self.terminalInputData(for: string))
+            emitInput(Data(string.utf8))
         }
         return false
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        emitInput(Self.terminalReturnSequence)
+        emitInput(Data("\n".utf8))
         textField.text = ""
         return false
     }
@@ -453,7 +198,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
     // MARK: - Setup
 
     private func configureViewHierarchy() {
-        callbackState.view = self
         applyTheme()
         clipsToBounds = true
         contentScaleFactor = UIScreen.main.scale
@@ -462,14 +206,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         terminalViewport.contentScaleFactor = contentScaleFactor
         terminalViewport.translatesAutoresizingMaskIntoConstraints = false
         terminalViewport.isUserInteractionEnabled = true
-
-        selectionOverlay.translatesAutoresizingMaskIntoConstraints = false
-        selectionOverlay.backgroundColor = .clear
-        selectionOverlay.isOpaque = false
-        selectionOverlay.isUserInteractionEnabled = true
-        selectionOverlay.onHandleDrag = { [weak self] handle, location, state in
-            self?.handleSelectionHandleDrag(handle, location: location, state: state)
-        }
 
         inputField.delegate = self
         inputField.backgroundColor = .clear
@@ -481,7 +217,7 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         inputField.spellCheckingType = .no
         inputField.smartDashesType = .no
         inputField.smartQuotesType = .no
-        inputField.returnKeyType = .default
+        inputField.returnKeyType = .send
         inputField.keyboardType = .asciiCapable
         inputField.enablesReturnKeyAutomatically = false
         inputField.translatesAutoresizingMaskIntoConstraints = false
@@ -495,22 +231,12 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
 
         focusTapGesture.addTarget(self, action: #selector(handleViewportTap))
         terminalViewport.addGestureRecognizer(focusTapGesture)
-
         scrollPanGesture.addTarget(self, action: #selector(handleViewportPan(_:)))
         scrollPanGesture.maximumNumberOfTouches = 1
         scrollPanGesture.cancelsTouchesInView = false
-        scrollPanGesture.delegate = self
         terminalViewport.addGestureRecognizer(scrollPanGesture)
 
-        selectionLongPressGesture.addTarget(self, action: #selector(handleTextSelectionLongPress(_:)))
-        selectionLongPressGesture.minimumPressDuration = 0.35
-        selectionLongPressGesture.allowableMovement = 18
-        selectionLongPressGesture.cancelsTouchesInView = false
-        selectionLongPressGesture.delegate = self
-        terminalViewport.addGestureRecognizer(selectionLongPressGesture)
-
         addSubview(terminalViewport)
-        addSubview(selectionOverlay)
         addSubview(inputField)
 
         NSLayoutConstraint.activate([
@@ -519,163 +245,32 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
             terminalViewport.topAnchor.constraint(equalTo: topAnchor),
             terminalViewport.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            selectionOverlay.leadingAnchor.constraint(equalTo: terminalViewport.leadingAnchor),
-            selectionOverlay.trailingAnchor.constraint(equalTo: terminalViewport.trailingAnchor),
-            selectionOverlay.topAnchor.constraint(equalTo: terminalViewport.topAnchor),
-            selectionOverlay.bottomAnchor.constraint(equalTo: terminalViewport.bottomAnchor),
-
             inputField.trailingAnchor.constraint(equalTo: trailingAnchor),
             inputField.topAnchor.constraint(equalTo: bottomAnchor, constant: 8),
             inputField.widthAnchor.constraint(equalToConstant: 1),
             inputField.heightAnchor.constraint(equalToConstant: 1),
         ])
-
-        registerApplicationLifecycleNotifications()
-    }
-
-    private func registerApplicationLifecycleNotifications() {
-        isRendererSuspended = UIApplication.shared.applicationState != .active
-        let center = NotificationCenter.default
-        center.addObserver(
-            self,
-            selector: #selector(handleApplicationWillResignActive),
-            name: UIApplication.willResignActiveNotification,
-            object: nil
-        )
-        center.addObserver(
-            self,
-            selector: #selector(handleApplicationDidEnterBackground),
-            name: UIApplication.didEnterBackgroundNotification,
-            object: nil
-        )
-        center.addObserver(
-            self,
-            selector: #selector(handleApplicationDidBecomeActive),
-            name: UIApplication.didBecomeActiveNotification,
-            object: nil
-        )
-    }
-
-    // MARK: - App Visibility
-
-    @objc private func handleApplicationWillResignActive() {
-        suspendRendererForAppBackground()
-    }
-
-    @objc private func handleApplicationDidEnterBackground() {
-        suspendRendererForAppBackground()
-    }
-
-    @objc private func handleApplicationDidBecomeActive() {
-        resumeRendererForActiveApp()
-    }
-
-    private var canRenderSurface: Bool {
-        window != nil && !isRendererSuspended
-    }
-
-    // UIKit may purge IOSurface-backed layers while the app is inactive. Tear
-    // Ghostty down before suspension and rebuild it from the SSH snapshot later.
-    private func suspendRendererForAppBackground() {
-        guard !isRendererSuspended else { return }
-        inputField.resignFirstResponder()
-        isRendererSuspended = true
-        surfaceLifecycleGeneration &+= 1
-        needsSurfaceRefreshAfterResume = true
-        isForegroundResumeScheduled = false
-        isLayoutRetryScheduled = false
-        tearDownSurfaceForAppBackground()
-    }
-
-    private func resumeRendererForActiveApp() {
-        guard isRendererSuspended else { return }
-        isRendererSuspended = false
-        scheduleForegroundSurfaceResume()
-    }
-
-    // UIKit can still be reattaching IOSurface-backed layers when didBecomeActive fires.
-    // Deferring the rebuild avoids resuming an empty first-run terminal inside that transition.
-    private func scheduleForegroundSurfaceResume() {
-        guard !isForegroundResumeScheduled else { return }
-        isForegroundResumeScheduled = true
-        let generation = surfaceLifecycleGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in
-            guard let self else { return }
-            guard self.surfaceLifecycleGeneration == generation else { return }
-            self.isForegroundResumeScheduled = false
-            self.resumeSurfaceAfterForegroundTransition()
-        }
-    }
-
-    private func resumeSurfaceAfterForegroundTransition() {
-        updateSurfaceRuntimeVisibility()
-        guard canRenderSurface else { return }
-        guard Self.isDrawableViewportSize(terminalViewport.bounds.size) else {
-            scheduleLayoutRetryIfNeeded()
-            return
-        }
-        layoutRetryCount = 0
-        if needsSurfaceRefreshAfterResume {
-            needsSurfaceRefreshAfterResume = false
-            resetSurface()
-        }
-        if surface == nil {
-            createSurfaceIfPossible()
-        }
-        resizeSurface()
-        replayRemoteBufferAfterForegroundTransition()
-        requestKeyboardFocus()
-    }
-
-    private func tearDownSurfaceForAppBackground() {
-        guard surface != nil || app != nil else {
-            purgeTerminalViewportSurfaceLayers()
-            return
-        }
-        destroySurface()
-        resetSurfaceStateAfterTeardown()
-        purgeTerminalViewportSurfaceLayers()
-    }
-
-    private func updateSurfaceRuntimeVisibility() {
-        let isVisible = canRenderSurface
-        let isAttached = window != nil
-        if let app {
-            ghostty_app_set_focus(app, isVisible)
-        }
-        if let surface {
-            ghostty_surface_set_focus(surface, isVisible)
-            ghostty_surface_set_occlusion(surface, isAttached)
-        }
     }
 
     // MARK: - Input
 
     @objc private func handleViewportTap() {
-        if hasAppSelection {
-            clearAppSelection()
-            return
-        }
         requestKeyboardFocus()
     }
 
-    // Scroll stays gesture-driven; text selection gets its own long-press path below.
     @objc private func handleViewportPan(_ gesture: UIPanGestureRecognizer) {
         guard let surface else { return }
-        guard !isSelectingText else {
-            pendingVerticalScrollPoints = 0
-            gesture.setTranslation(.zero, in: terminalViewport)
-            return
-        }
 
         let location = gesture.location(in: terminalViewport)
-        sendGhosttyMousePosition(location)
+        ghostty_surface_mouse_pos(
+            surface,
+            Double(location.x * contentScaleFactor),
+            Double(location.y * contentScaleFactor),
+            GHOSTTY_MODS_NONE
+        )
 
         switch gesture.state {
         case .began:
-            if hasAppSelection {
-                clearAppSelection()
-            }
             pendingVerticalScrollPoints = 0
             gesture.setTranslation(.zero, in: terminalViewport)
         case .changed:
@@ -699,51 +294,8 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         }
     }
 
-    // Long-press selection is iOS-owned: UIKit handles the touch UX while
-    // Ghostty remains the source of truth for the text in selected cells.
-    @objc private func handleTextSelectionLongPress(_ gesture: UILongPressGestureRecognizer) {
-        let location = gesture.location(in: terminalViewport)
-        switch gesture.state {
-        case .began:
-            clearAppSelection()
-            guard let cell = terminalCell(at: location),
-                  let initialRange = wordSelectionRange(at: cell) else { return }
-            selectionGestureStartPoint = location
-            selectionGestureDidDrag = false
-            selectionAnchorCell = initialRange.anchor
-            selectionFocusCell = initialRange.focus
-            isSelectingText = true
-            updateSelectionOverlay()
-            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-        case .changed:
-            guard isSelectingText else { return }
-            guard shouldExtendSelectionDrag(to: location) else { return }
-            updateSelectionFocus(at: location)
-        case .ended:
-            guard isSelectingText else { return }
-            if selectionGestureDidDrag {
-                updateSelectionFocus(at: location)
-            }
-            isSelectingText = false
-            selectionGestureStartPoint = nil
-            selectionGestureDidDrag = false
-            copyCurrentSelectionToPasteboard()
-        case .cancelled, .failed:
-            clearAppSelection()
-        default:
-            break
-        }
-    }
-
     @objc private func handleInputEditingDidBegin() {
         textInputModeDidChange()
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        false
     }
 
     private func requestKeyboardFocus() {
@@ -754,9 +306,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
 
     private func emitInput(_ data: Data) {
         guard !data.isEmpty else { return }
-        if hasAppSelection {
-            clearAppSelection()
-        }
         onInput?(data)
     }
 
@@ -765,537 +314,11 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         ghostty_app_keyboard_changed(app)
     }
 
-    // Terminal apps expect Return as carriage return; raw-mode pickers often ignore LF.
-    private static func terminalInputData(for text: String) -> Data {
-        text == "\n" || text == "\r" ? terminalReturnSequence : Data(text.utf8)
-    }
-
-    private var hasAppSelection: Bool {
-        selectionAnchorCell != nil && selectionFocusCell != nil
-    }
-
-    private func sendGhosttyMousePosition(_ location: CGPoint) {
-        guard let surface else { return }
-        ghostty_surface_mouse_pos(
-            surface,
-            Double(location.x * contentScaleFactor),
-            Double(location.y * contentScaleFactor),
-            GHOSTTY_MODS_NONE
-        )
-    }
-
-    // Avoid UIKit's edit menu inside the Ghostty surface; presenting/dismissing
-    // it during route teardown can crash, so selection copies directly.
-    private func copyCurrentSelectionToPasteboard() {
-        let latestSelection = readTextForCurrentSelection() ?? ""
-        guard !latestSelection.isEmpty else { return }
-        UIPasteboard.general.string = latestSelection
-        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-    }
-
-    private func shouldExtendSelectionDrag(to location: CGPoint) -> Bool {
-        guard !selectionGestureDidDrag else { return true }
-        guard let selectionGestureStartPoint else { return false }
-
-        let distance = hypot(location.x - selectionGestureStartPoint.x, location.y - selectionGestureStartPoint.y)
-        guard distance >= Self.selectionDragActivationDistance else { return false }
-
-        selectionGestureDidDrag = true
-        return true
-    }
-
-    private func updateSelectionFocus(at location: CGPoint) {
-        guard let cell = terminalCell(at: location), cell != selectionFocusCell else { return }
-        selectionFocusCell = cell
-        updateSelectionOverlay()
-    }
-
-    private func handleSelectionHandleDrag(
-        _ handle: TerminalSelectionHandle,
-        location: CGPoint,
-        state: UIGestureRecognizer.State
-    ) {
-        guard let currentRange = selectionRange?.normalized else { return }
-
-        if state == .began {
-            guard let metrics = currentSelectionMetrics() else { return }
-            let startCell = handle == .start ? currentRange.start : currentRange.end
-            let startLocation = handleBoundaryPoint(for: startCell, handle: handle, metrics: metrics)
-            handleDragOppositeCell = handle == .start ? currentRange.end : currentRange.start
-            handleDragStartCell = startCell
-            handleDragStartLocation = startLocation
-            handleDragTouchOffset = CGPoint(x: location.x - startLocation.x, y: location.y - startLocation.y)
-            return
-        }
-
-        if state == .cancelled || state == .failed {
-            handleDragOppositeCell = nil
-            handleDragStartCell = nil
-            handleDragStartLocation = nil
-            handleDragTouchOffset = nil
-            return
-        }
-
-        guard let cell = terminalCellForHandleDrag(at: location) else { return }
-        let oppositeCell = handleDragOppositeCell ?? (handle == .start ? currentRange.end : currentRange.start)
-
-        switch handle {
-        case .start:
-            selectionAnchorCell = cell
-            selectionFocusCell = oppositeCell
-        case .end:
-            selectionAnchorCell = oppositeCell
-            selectionFocusCell = cell
-        }
-
-        updateSelectionOverlay()
-
-        if state == .ended {
-            handleDragOppositeCell = nil
-            handleDragStartCell = nil
-            handleDragStartLocation = nil
-            handleDragTouchOffset = nil
-            copyCurrentSelectionToPasteboard()
-        }
-    }
-
-    private func updateSelectionOverlay() {
-        selectionOverlay.metrics = currentSelectionMetrics()
-        if let selectionRange {
-            selectionOverlay.selectionRange = selectionRange
-        } else {
-            selectionOverlay.selectionRange = nil
-        }
-    }
-
-    private func clearAppSelection() {
-        isSelectingText = false
-        selectionAnchorCell = nil
-        selectionFocusCell = nil
-        handleDragOppositeCell = nil
-        handleDragStartCell = nil
-        handleDragStartLocation = nil
-        handleDragTouchOffset = nil
-        selectionGestureStartPoint = nil
-        selectionGestureDidDrag = false
-        selectionOverlay.selectionRange = nil
-    }
-
-    private var selectionRange: TerminalSelectionRange? {
-        guard let selectionAnchorCell, let selectionFocusCell else { return nil }
-        return TerminalSelectionRange(anchor: selectionAnchorCell, focus: selectionFocusCell)
-    }
-
-    private func terminalCell(at location: CGPoint) -> TerminalSelectionCell? {
-        guard let metrics = currentSelectionMetrics() else { return nil }
-        let clampedX = min(max(location.x, 0), max(terminalViewport.bounds.width - 1, 0))
-        let clampedY = min(max(location.y, 0), max(terminalViewport.bounds.height - 1, 0))
-        let column = min(max(Int(floor(clampedX / metrics.cellSize.width)), 0), metrics.columns - 1)
-        let row = min(max(Int(floor(clampedY / metrics.cellSize.height)), 0), metrics.rows - 1)
-        return TerminalSelectionCell(column: column, row: row)
-    }
-
-    private func terminalCellForHandleDrag(at location: CGPoint) -> TerminalSelectionCell? {
-        guard let metrics = currentSelectionMetrics(),
-              let handleDragStartCell,
-              let handleDragStartLocation,
-              let handleDragTouchOffset else { return nil }
-
-        let effectiveHandleLocation = CGPoint(
-            x: location.x - handleDragTouchOffset.x,
-            y: location.y - handleDragTouchOffset.y
-        )
-        let columnDelta = Int(round((effectiveHandleLocation.x - handleDragStartLocation.x) / metrics.cellSize.width))
-        let rowDelta = Int(round((effectiveHandleLocation.y - handleDragStartLocation.y) / metrics.cellSize.height))
-        return TerminalSelectionCell(
-            column: min(max(handleDragStartCell.column + columnDelta, 0), metrics.columns - 1),
-            row: min(max(handleDragStartCell.row + rowDelta, 0), metrics.rows - 1)
-        )
-    }
-
-    private func handleBoundaryPoint(
-        for cell: TerminalSelectionCell,
-        handle: TerminalSelectionHandle,
-        metrics: TerminalSelectionMetrics
-    ) -> CGPoint {
-        CGPoint(
-            x: CGFloat(cell.column + (handle == .end ? 1 : 0)) * metrics.cellSize.width,
-            y: CGFloat(cell.row + 1) * metrics.cellSize.height
-        )
-    }
-
-    private func currentSelectionMetrics() -> TerminalSelectionMetrics? {
-        guard let surface else { return nil }
-        let size = ghostty_surface_size(surface)
-        guard size.columns > 0,
-              size.rows > 0,
-              size.cell_width_px > 0,
-              size.cell_height_px > 0 else {
-            return nil
-        }
-
-        return TerminalSelectionMetrics(
-            columns: Int(size.columns),
-            rows: Int(size.rows),
-            cellSize: CGSize(
-                width: CGFloat(size.cell_width_px) / contentScaleFactor,
-                height: CGFloat(size.cell_height_px) / contentScaleFactor
-            )
-        )
-    }
-
-    private func wordSelectionRange(at cell: TerminalSelectionCell) -> TerminalSelectionRange? {
-        guard let metrics = currentSelectionMetrics() else { return nil }
-        guard let rowText = visibleTerminalLine(at: cell.row, metrics: metrics) else { return nil }
-
-        let rowCharacters = terminalRowCharacters(for: rowText, maxColumns: metrics.columns)
-        guard let selectedIndex = rowCharacters.firstIndex(where: { rowCharacter in
-            cell.column >= rowCharacter.startColumn && cell.column < rowCharacter.endColumn
-        }) else {
-            return nil
-        }
-
-        guard isTerminalWordCharacter(rowCharacters[selectedIndex].character) else { return nil }
-
-        var startIndex = selectedIndex
-        while startIndex > 0, isTerminalWordCharacter(rowCharacters[startIndex - 1].character) {
-            startIndex -= 1
-        }
-
-        var endIndex = selectedIndex
-        while endIndex + 1 < rowCharacters.count, isTerminalWordCharacter(rowCharacters[endIndex + 1].character) {
-            endIndex += 1
-        }
-
-        let startColumn = rowCharacters[startIndex].startColumn
-        let endColumn = max(rowCharacters[endIndex].endColumn - 1, startColumn)
-        return TerminalSelectionRange(
-            anchor: TerminalSelectionCell(column: min(startColumn, metrics.columns - 1), row: cell.row),
-            focus: TerminalSelectionCell(column: min(endColumn, metrics.columns - 1), row: cell.row)
-        )
-    }
-
-    private func terminalRowCharacters(for line: String, maxColumns: Int) -> [TerminalRowCharacter] {
-        var rowCharacters: [TerminalRowCharacter] = []
-        var column = 0
-
-        for character in line {
-            let width = terminalDisplayWidth(of: character)
-            guard width > 0 else { continue }
-
-            let startColumn = column
-            let endColumn = min(column + width, maxColumns)
-            guard startColumn < maxColumns, endColumn > startColumn else { break }
-
-            rowCharacters.append(
-                TerminalRowCharacter(
-                    character: character,
-                    startColumn: startColumn,
-                    endColumn: endColumn
-                )
-            )
-            column += width
-        }
-
-        return rowCharacters
-    }
-
-    private func isTerminalWordCharacter(_ character: Character) -> Bool {
-        for scalar in character.unicodeScalars {
-            if CharacterSet.whitespacesAndNewlines.contains(scalar)
-                || CharacterSet.controlCharacters.contains(scalar) {
-                return false
-            }
-        }
-        return true
-    }
-
-    private func terminalDisplayWidth(of character: Character) -> Int {
-        var hasVisibleScalar = false
-        var hasWideScalar = false
-
-        for scalar in character.unicodeScalars {
-            if isZeroWidthTerminalScalar(scalar) || CharacterSet.controlCharacters.contains(scalar) {
-                continue
-            }
-
-            hasVisibleScalar = true
-            if isWideTerminalScalar(scalar) {
-                hasWideScalar = true
-            }
-        }
-
-        guard hasVisibleScalar else { return 0 }
-        return hasWideScalar ? 2 : 1
-    }
-
-    private func isZeroWidthTerminalScalar(_ scalar: Unicode.Scalar) -> Bool {
-        let value = scalar.value
-        return CharacterSet.nonBaseCharacters.contains(scalar)
-            || value == 0x200C
-            || value == 0x200D
-            || (0xFE00...0xFE0F).contains(value)
-            || (0xE0100...0xE01EF).contains(value)
-    }
-
-    private func isWideTerminalScalar(_ scalar: Unicode.Scalar) -> Bool {
-        let value = scalar.value
-        return (0x1100...0x115F).contains(value)
-            || value == 0x2329
-            || value == 0x232A
-            || (0x2E80...0xA4CF).contains(value)
-            || (0xAC00...0xD7A3).contains(value)
-            || (0xF900...0xFAFF).contains(value)
-            || (0xFE10...0xFE19).contains(value)
-            || (0xFE30...0xFE6F).contains(value)
-            || (0xFF00...0xFF60).contains(value)
-            || (0xFFE0...0xFFE6).contains(value)
-            || (0x1F1E6...0x1F1FF).contains(value)
-            || (0x1F300...0x1FAFF).contains(value)
-    }
-
-    private func readTextForCurrentSelection() -> String? {
-        guard let selectionRange,
-              let metrics = currentSelectionMetrics(),
-              let rows = visibleTerminalRows(metrics: metrics) else { return nil }
-        return selectedText(for: selectionRange, rows: rows, metrics: metrics)
-    }
-
-    private func visibleTerminalLine(at row: Int, metrics: TerminalSelectionMetrics) -> String? {
-        guard let rows = visibleTerminalRows(metrics: metrics), row >= 0, row < rows.count else { return nil }
-        return rows[row].text
-    }
-
-    private func selectedText(
-        for selectionRange: TerminalSelectionRange,
-        rows: [TerminalVisualRow],
-        metrics: TerminalSelectionMetrics
-    ) -> String {
-        let normalizedRange = selectionRange.normalized
-        let start = normalizedRange.start
-        let end = normalizedRange.end
-        guard start.row <= end.row else { return "" }
-
-        let rowRange = Array(start.row...end.row)
-        var output = ""
-        for (index, row) in rowRange.enumerated() {
-            let visualRow = row >= 0 && row < rows.count ? rows[row] : TerminalVisualRow(text: "", hasHardLineBreakAfter: false)
-            let firstColumn = row == start.row ? start.column : 0
-            let lastColumn = row == end.row ? end.column : metrics.columns - 1
-            output += terminalLineText(
-                visualRow.text,
-                from: firstColumn,
-                through: lastColumn,
-                maxColumns: metrics.columns,
-                includeTrailingBlankCells: row == end.row
-            )
-            if index < rowRange.count - 1, visualRow.hasHardLineBreakAfter {
-                output += "\n"
-            }
-        }
-        return output
-    }
-
-    private func terminalLineText(
-        _ line: String,
-        from firstColumn: Int,
-        through lastColumn: Int,
-        maxColumns: Int,
-        includeTrailingBlankCells: Bool
-    ) -> String {
-        guard lastColumn >= firstColumn else { return "" }
-        let selectedStart = min(max(firstColumn, 0), maxColumns - 1)
-        let selectedEnd = min(max(lastColumn, selectedStart), maxColumns - 1)
-        let rowCharacters = terminalRowCharacters(for: line, maxColumns: maxColumns)
-        var output = ""
-        var cursorColumn = selectedStart
-
-        for rowCharacter in rowCharacters where rowCharacter.endColumn > selectedStart && rowCharacter.startColumn <= selectedEnd {
-            if rowCharacter.startColumn > cursorColumn {
-                output += String(repeating: " ", count: rowCharacter.startColumn - cursorColumn)
-            }
-            output.append(rowCharacter.character)
-            cursorColumn = max(cursorColumn, rowCharacter.endColumn)
-        }
-
-        if includeTrailingBlankCells, cursorColumn <= selectedEnd {
-            output += String(repeating: " ", count: selectedEnd - cursorColumn + 1)
-        }
-
-        return output
-    }
-
-    private func visibleTerminalRows(metrics: TerminalSelectionMetrics) -> [TerminalVisualRow]? {
-        guard let visibleText = readVisibleTerminalText() else { return nil }
-        let hardLines = visibleText
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\r")) }
-        return visualTerminalRows(from: hardLines, metrics: metrics)
-    }
-
-    private func visualTerminalRows(from hardLines: [String], metrics: TerminalSelectionMetrics) -> [TerminalVisualRow] {
-        var rows: [TerminalVisualRow] = []
-
-        for (hardLineIndex, hardLine) in hardLines.enumerated() {
-            let wrappedRows = wrapTerminalLine(hardLine, maxColumns: metrics.columns)
-            for (wrappedRowIndex, wrappedRow) in wrappedRows.enumerated() {
-                rows.append(
-                    TerminalVisualRow(
-                        text: wrappedRow,
-                        hasHardLineBreakAfter: hardLineIndex < hardLines.count - 1 && wrappedRowIndex == wrappedRows.count - 1
-                    )
-                )
-            }
-            if rows.count >= metrics.rows {
-                return Array(rows.prefix(metrics.rows))
-            }
-        }
-
-        if rows.count < metrics.rows {
-            rows.append(
-                contentsOf: Array(
-                    repeating: TerminalVisualRow(text: "", hasHardLineBreakAfter: false),
-                    count: metrics.rows - rows.count
-                )
-            )
-        }
-        return rows
-    }
-
-    private func wrapTerminalLine(_ line: String, maxColumns: Int) -> [String] {
-        guard maxColumns > 0 else { return [line] }
-        var rows: [String] = []
-        var currentRow = ""
-        var currentWidth = 0
-
-        for character in line {
-            let width = max(terminalDisplayWidth(of: character), 0)
-            if width > 0, currentWidth + width > maxColumns {
-                rows.append(currentRow)
-                currentRow = ""
-                currentWidth = 0
-            }
-            currentRow.append(character)
-            currentWidth += width
-        }
-
-        rows.append(currentRow)
-        return rows
-    }
-
-    private func readVisibleTerminalText() -> String? {
-        guard let metrics = currentSelectionMetrics() else { return nil }
-        return readText(
-            for: TerminalSelectionRange(
-                anchor: TerminalSelectionCell(column: 0, row: 0),
-                focus: TerminalSelectionCell(column: metrics.columns - 1, row: metrics.rows - 1)
-            )
-        )
-    }
-
-    private func readText(for selectionRange: TerminalSelectionRange) -> String? {
-        guard let surface else { return nil }
-        let normalizedRange = selectionRange.normalized
-        var selection = ghostty_selection_s()
-        selection.top_left = ghostty_point_s(
-            tag: GHOSTTY_POINT_VIEWPORT,
-            coord: GHOSTTY_POINT_COORD_TOP_LEFT,
-            x: UInt32(normalizedRange.start.column),
-            y: UInt32(normalizedRange.start.row)
-        )
-        selection.bottom_right = ghostty_point_s(
-            tag: GHOSTTY_POINT_VIEWPORT,
-            coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
-            x: UInt32(normalizedRange.end.column),
-            y: UInt32(normalizedRange.end.row)
-        )
-        selection.rectangle = false
-
-        var text = ghostty_text_s(
-            tl_px_x: 0,
-            tl_px_y: 0,
-            offset_start: 0,
-            offset_len: 0,
-            text: nil,
-            text_len: 0
-        )
-
-        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let pointer = text.text, text.text_len > 0 else { return nil }
-
-        let bytes = UnsafeBufferPointer(
-            start: UnsafeRawPointer(pointer).assumingMemoryBound(to: UInt8.self),
-            count: Int(text.text_len)
-        )
-        return String(decoding: bytes, as: UTF8.self)
-    }
-
-    // Clipboard callbacks let Ghostty's own copy/paste actions bridge to the iOS pasteboard.
-    private func completeClipboardRead(state: UnsafeMutableRawPointer?) -> Bool {
-        guard let surface else { return false }
-
-        let text = readSystemPasteboardString()
-        text.withCString { cString in
-            ghostty_surface_complete_clipboard_request(surface, cString, state, !text.isEmpty)
-        }
-        return true
-    }
-
-    // Chooses plain text when Ghostty provides multiple clipboard representations.
-    private func writeClipboard(contents: UnsafePointer<ghostty_clipboard_content_s>?, count: Int) {
-        guard let contents, count > 0 else { return }
-
-        var fallbackText: String?
-        for index in 0..<count {
-            let item = contents[index]
-            guard let data = item.data else { continue }
-            let text = String(cString: data)
-            let mime = item.mime.map { String(cString: $0) } ?? ""
-
-            if mime == "text/plain" || mime.hasPrefix("text/") {
-                writeSystemPasteboardString(text)
-                return
-            }
-            fallbackText = fallbackText ?? text
-        }
-
-        if let fallbackText {
-            writeSystemPasteboardString(fallbackText)
-        }
-    }
-
-    private func readSystemPasteboardString() -> String {
-        if Thread.isMainThread {
-            return UIPasteboard.general.string ?? ""
-        }
-
-        var value = ""
-        DispatchQueue.main.sync {
-            value = UIPasteboard.general.string ?? ""
-        }
-        return value
-    }
-
-    private func writeSystemPasteboardString(_ text: String) {
-        if Thread.isMainThread {
-            UIPasteboard.general.string = text
-        } else {
-            DispatchQueue.main.async {
-                UIPasteboard.general.string = text
-            }
-        }
-    }
-
     // MARK: - Ghostty Surface
 
     private func createSurfaceIfPossible() {
         guard surface == nil, app == nil, !isCreatingSurface, !surfaceCreationFailed else { return }
-        guard Self.isDrawableViewportSize(terminalViewport.bounds.size) else {
-            scheduleLayoutRetryIfNeeded()
-            return
-        }
-        guard canRenderSurface else { return }
+        guard terminalViewport.bounds.width > 0, terminalViewport.bounds.height > 0 else { return }
         guard GhosttyRuntime.ensureInitialized() else {
             markSurfaceCreationFailed()
             return
@@ -1305,23 +328,13 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         defer { isCreatingSurface = false }
 
         var runtimeConfig = ghostty_runtime_config_s(
-            userdata: Unmanaged.passUnretained(callbackState).toOpaque(),
+            userdata: Unmanaged.passUnretained(self).toOpaque(),
             supports_selection_clipboard: false,
             wakeup_cb: { _ in },
             action_cb: { _, _, _ in false },
-            read_clipboard_cb: { userdata, _, state in
-                guard let userdata else { return false }
-                let callbackState = Unmanaged<GhosttyTerminalCallbackState>.fromOpaque(userdata).takeUnretainedValue()
-                guard let view = callbackState.view else { return false }
-                return view.completeClipboardRead(state: state)
-            },
+            read_clipboard_cb: { _, _, _ in false },
             confirm_read_clipboard_cb: { _, _, _, _ in },
-            write_clipboard_cb: { userdata, _, contents, count, _ in
-                guard let userdata else { return }
-                let callbackState = Unmanaged<GhosttyTerminalCallbackState>.fromOpaque(userdata).takeUnretainedValue()
-                guard let view = callbackState.view else { return }
-                view.writeClipboard(contents: contents, count: count)
-            },
+            write_clipboard_cb: { _, _, _, _, _ in },
             close_surface_cb: { _, _ in }
         )
 
@@ -1341,7 +354,7 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         var surfaceConfig = ghostty_surface_config_new()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_IOS
         surfaceConfig.platform.ios.uiview = Unmanaged.passUnretained(terminalViewport).toOpaque()
-        surfaceConfig.userdata = Unmanaged.passUnretained(callbackState).toOpaque()
+        surfaceConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
         surfaceConfig.scale_factor = Double(contentScaleFactor)
         surfaceConfig.font_size = Float(fontSize)
         surfaceConfig.context = GHOSTTY_SURFACE_CONTEXT_WINDOW
@@ -1355,53 +368,27 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
 
         app = createdApp
         surface = createdSurface
-        emitNativeAvailabilityChanged(true)
+        onNativeAvailabilityChanged?(true)
         ghostty_app_set_color_scheme(createdApp, appearance.ghosttyColorScheme)
         ghostty_surface_set_color_scheme(createdSurface, appearance.ghosttyColorScheme)
         setupWriteCallback()
-        updateSurfaceRuntimeVisibility()
         resizeSurface()
         feedBuffer(initialBuffer)
     }
 
     private func resetSurface() {
         destroySurface()
-        resetSurfaceStateAfterTeardown()
-        surfaceCreationFailed = false
-        setNeedsLayout()
-    }
-
-    private func resetSurfaceStateAfterTeardown() {
         lastAppliedBuffer = Data()
         lastViewportSize = .zero
         lastContentScale = 0
         lastReportedGrid = nil
+        surfaceCreationFailed = false
+        setNeedsLayout()
     }
 
     private func markSurfaceCreationFailed() {
         surfaceCreationFailed = true
-        emitNativeAvailabilityChanged(false)
-    }
-
-    // SwiftUI may set these props from updateUIView; defer heavy surface churn
-    // so callbacks cannot mutate SwiftUI state during a view update.
-    private func scheduleSurfaceRefresh() {
-        guard !isSurfaceRefreshScheduled else { return }
-        isSurfaceRefreshScheduled = true
-        let generation = surfaceLifecycleGeneration
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard self.surfaceLifecycleGeneration == generation else {
-                self.isSurfaceRefreshScheduled = false
-                return
-            }
-            self.isSurfaceRefreshScheduled = false
-            guard self.canRenderSurface else {
-                self.needsSurfaceRefreshAfterResume = true
-                return
-            }
-            self.refreshSurface()
-        }
+        onNativeAvailabilityChanged?(false)
     }
 
     private func refreshSurface() {
@@ -1410,7 +397,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
     }
 
     private func destroySurface() {
-        clearAppSelection()
         if let surface {
             ghostty_surface_set_write_callback(surface, nil, nil)
             ghostty_surface_free(surface)
@@ -1420,11 +406,9 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         }
         surface = nil
         app = nil
-        purgeTerminalViewportSurfaceLayers()
     }
 
     private func applyRemoteBuffer(_ buffer: Data) {
-        guard canRenderSurface else { return }
         guard surface != nil else {
             createSurfaceIfPossible()
             return
@@ -1437,43 +421,18 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
             return
         }
 
-        replaceRenderedBuffer(with: buffer)
+        resetSurface()
+        createSurfaceIfPossible()
     }
 
     private func feedBuffer(_ buffer: Data) {
-        guard canRenderSurface, !buffer.isEmpty else { return }
+        guard !buffer.isEmpty else { return }
         feedData(buffer)
         lastAppliedBuffer = buffer
     }
 
-    private func replaceRenderedBuffer(with buffer: Data) {
-        guard canRenderSurface else { return }
-        guard surface != nil else {
-            lastAppliedBuffer = Data()
-            createSurfaceIfPossible()
-            feedBuffer(buffer)
-            return
-        }
-
-        feedData(Self.terminalResetSequence)
-        lastAppliedBuffer = Data()
-        feedBuffer(buffer)
-    }
-
-    // IOSurface contents can be discarded while the app is suspended. On
-    // foreground, redraw is not enough; replay the SSH snapshot into Ghostty.
-    private func replayRemoteBufferAfterForegroundTransition() {
-        guard canRenderSurface else { return }
-        guard !initialBuffer.isEmpty else {
-            redrawSurface()
-            return
-        }
-        lastAppliedBuffer = Data()
-        replaceRenderedBuffer(with: initialBuffer)
-    }
-
     private func feedData(_ data: Data) {
-        guard canRenderSurface, let surface, !data.isEmpty else { return }
+        guard let surface, !data.isEmpty else { return }
 
         data.withUnsafeBytes { buffer in
             guard let pointer = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
@@ -1488,24 +447,19 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
     private func setupWriteCallback() {
         guard let surface else { return }
 
-        let userdata = Unmanaged.passUnretained(callbackState).toOpaque()
+        let userdata = Unmanaged.passUnretained(self).toOpaque()
         ghostty_surface_set_write_callback(surface, { userdata, data, len in
             guard let userdata, let data, len > 0 else { return }
-            let callbackState = Unmanaged<GhosttyTerminalCallbackState>.fromOpaque(userdata).takeUnretainedValue()
-            guard let view = callbackState.view else { return }
+            let view = Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
             let bytes = Data(bytes: data, count: len)
 
-            DispatchQueue.main.async { [weak view] in
-                view?.onInput?(bytes)
+            DispatchQueue.main.async {
+                view.onInput?(bytes)
             }
         }, userdata)
     }
 
     private func resizeSurface() {
-        guard Self.isDrawableViewportSize(terminalViewport.bounds.size) else {
-            scheduleLayoutRetryIfNeeded()
-            return
-        }
         guard let surface else {
             emitEstimatedResize()
             return
@@ -1518,50 +472,14 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         terminalViewport.contentScaleFactor = scale
         ghostty_surface_set_content_scale(surface, Double(scale), Double(scale))
         ghostty_surface_set_size(surface, width, height)
-        updateSurfaceRuntimeVisibility()
-        guard canRenderSurface else { return }
+        ghostty_surface_set_occlusion(surface, window != nil)
         configureIOSurfaceLayers()
         redrawSurface()
         emitGhosttyResize()
-        updateSelectionOverlay()
-    }
-
-    // Treat only truly tiny/zero bounds as not drawable; compact terminals still need to render.
-    static func isDrawableViewportSize(_ size: CGSize) -> Bool {
-        size.width >= Self.minimumDrawableViewportSize.width
-            && size.height >= Self.minimumDrawableViewportSize.height
-    }
-
-    private func scheduleLayoutRetryIfNeeded() {
-        guard window != nil,
-              !isRendererSuspended,
-              !isLayoutRetryScheduled,
-              layoutRetryCount < Self.maximumLayoutRetryCount else {
-            return
-        }
-        isLayoutRetryScheduled = true
-        layoutRetryCount += 1
-        let generation = surfaceLifecycleGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self else { return }
-            guard self.surfaceLifecycleGeneration == generation else {
-                self.isLayoutRetryScheduled = false
-                return
-            }
-            self.isLayoutRetryScheduled = false
-            self.setNeedsLayout()
-            guard Self.isDrawableViewportSize(self.terminalViewport.bounds.size) else {
-                self.scheduleLayoutRetryIfNeeded()
-                return
-            }
-            self.layoutRetryCount = 0
-            self.resumeSurfaceAfterForegroundTransition()
-        }
     }
 
     private func redrawSurface() {
         guard let surface else { return }
-        guard canRenderSurface else { return }
         ghostty_surface_refresh(surface)
         ghostty_surface_draw(surface)
         markIOSurfaceLayersForDisplay()
@@ -1595,17 +513,7 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         }
 
         lastReportedGrid = (cols, rows)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.onResize?(cols, rows)
-        }
-    }
-
-    private func emitNativeAvailabilityChanged(_ isAvailable: Bool) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.onNativeAvailabilityChanged?(isAvailable)
-        }
+        onResize?(cols, rows)
     }
 
     private func updateContentScale() {
@@ -1622,15 +530,6 @@ final class GhosttyTerminalView: UIView, UITextFieldDelegate, UIGestureRecognize
         terminalViewport.layer.sublayers?.forEach { sublayer in
             sublayer.frame = targetBounds
             sublayer.contentsScale = contentScaleFactor
-        }
-        CATransaction.commit()
-    }
-
-    private func purgeTerminalViewportSurfaceLayers() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        terminalViewport.layer.sublayers?.forEach { layer in
-            layer.removeFromSuperlayer()
         }
         CATransaction.commit()
     }

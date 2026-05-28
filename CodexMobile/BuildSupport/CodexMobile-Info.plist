@@ -49,7 +49,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>CodexMobile needs local network access to connect to your Codex app-server running on your Mac.</string>
+	<string>Remodex needs local network access to connect to your Mac over SSH and the local relay.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Remodex needs microphone access to record voice notes for ChatGPT transcription.</string>
 	<key>NSBonjourServices</key>
