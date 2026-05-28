@@ -690,7 +690,8 @@ private struct ComposerPreviewContent: View {
                 agentMenuDisabled: true,
                 isAgentListLoading: false,
                 agentsErrorMessage: nil,
-                isOpenCodeThread: false,
+                isOpenCodeBridgeConnected: false,
+                supportsVariants: false,
                 orderedVariantOptions: [],
                 selectedVariantID: nil,
                 variantMenuDisabled: true

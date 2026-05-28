@@ -63,7 +63,7 @@ struct TurnComposerHostView: View {
                     isPlanModeArmed: viewModel.isPlanModeArmed
                 )
                     && !availableForkDestinations.isEmpty,
-                hidesStatusCommand: codex.isOpenCodeRuntimeConnected
+                hidesStatusCommand: codex.isOpenCodeBridgeConnected
             ),
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
             isFileAutocompleteVisible: viewModel.isFileAutocompleteVisible,

@@ -2343,7 +2343,7 @@ extension CodexService {
         ) {
             params["collaborationMode"] = collaborationModePayload
         }
-        if isOpenCodeRuntimeConnected {
+        if isOpenCodeBridgeConnected {
             if let agent = resolvedAgentId(for: threadId, collaborationMode: collaborationMode) {
                 params["agent"] = .string(agent)
             }

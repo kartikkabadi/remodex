@@ -1,24 +1,32 @@
-# WORKTREE_HANDOFF — wt-sim-infra (WT-6)
+# WORKTREE_HANDOFF — wt-ios-runtime (WT-4)
 
 | Field | Value |
 |-------|-------|
-| Branch | `opencode/wt-sim-infra` |
-| Base | `opencode/integration` (post WT-3) |
-| Scope | WT-6 simulator infra only |
+| Branch | `opencode/wt-ios-runtime` |
+| Base | `opencode/integration` @ `00181bfe` |
+| Scope | WT-4 iOS AgentRuntime contract only |
 
 ## Deliverables
 
 | Item | Path |
 |------|------|
-| DEBUG RMX1 hook | `RemodexDebugPairing.swift`, `ContentViewModel`, `ContentView` |
-| Emit RMX1 | `scripts/opencode-emit-pairing-rmx1.sh` |
-| Preflight + row 9 | `scripts/opencode-sim-preflight.sh` (`codex-smoke` records row 9, restores OpenCode launcher) |
-| Screenshot validator | `scripts/validate-qa-screenshot.sh` |
-| Matrix recorder | `scripts/opencode-sim-record-row.sh` → `.qa-screenshots/opencode-sim/opencode-sim-matrix.json` |
-| XcodeBuildMCP | `.xcodebuildmcp/config.yaml` |
-| Gitignore | `.qa-screenshots/opencode-sim/` |
-| Runbook | `Docs/plans/opencode-sim-qa-runbook.md` |
+| `AgentRuntime` enum + `normalize` | `CodexMobile/CodexMobile/Models/AgentRuntime.swift` |
+| Thread decode trusts `agent_runtime` only | `CodexThread.swift` (removed `modelProvider` heuristic) |
+| Bridge capabilities typed runtime | `CodexBridgeRuntimeCapabilities.swift`, `CodexService+Connection.swift` |
+| Composer connection rename + variant gate | `TurnComposerRuntimeState.swift`, `TurnComposerRuntimeUIKitMenu.swift` |
+| Service rename | `CodexService.isOpenCodeBridgeConnected` (was `isOpenCodeRuntimeConnected`) |
+
+## Tests run
+
+```bash
+cd CodexMobile && xcodebuild test -scheme CodexMobile \
+  -only-testing:CodexMobileTests/CodexThreadRuntimeOverrideTests \
+  -only-testing:CodexMobileTests/TurnComposerReviewModeTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+
+Result: **TEST SUCCEEDED** (48 tests, 0 failures).
 
 ## Integrator
 
-Rebase onto latest `opencode/integration`, merge, gate with `./scripts/opencode-sim-preflight.sh --check-only`.
+Rebase onto latest `opencode/integration`, merge, then Phase 2 gate (npm relay, OPENCODE_E2E if available, filtered xcodebuild, `opencode-sim-preflight.sh --check-only`).

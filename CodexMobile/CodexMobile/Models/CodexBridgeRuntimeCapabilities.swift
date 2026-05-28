@@ -8,18 +8,18 @@ import Foundation
 
 struct CodexBridgeRuntimeCapabilities: Equatable, Sendable {
     static let codexDefault = CodexBridgeRuntimeCapabilities(
-        agentRuntime: "codex",
+        agentRuntime: .codex,
         supportsAgents: false,
         supportsVariants: false,
         requiresOpenaiAuth: true
     )
 
-    let agentRuntime: String
+    let agentRuntime: AgentRuntime
     let supportsAgents: Bool
     let supportsVariants: Bool
     let requiresOpenaiAuth: Bool
 
     var isOpenCodeConnected: Bool {
-        agentRuntime == "opencode"
+        agentRuntime.isOpenCode
     }
 }

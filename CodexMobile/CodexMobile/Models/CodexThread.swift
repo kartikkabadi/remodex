@@ -83,8 +83,8 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
     var agentRole: String?
     var model: String?
     var modelProvider: String?
-    /// Which agent runtime created this thread (`codex` or `opencode`). Display-only for sidebar branding.
-    var agentRuntime: String
+    /// Which agent runtime created this thread. Display-only for sidebar branding.
+    var agentRuntime: AgentRuntime
     var syncState: CodexThreadSyncState
 
     // --- Public initializer ---------------------------------------------------
@@ -105,7 +105,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         agentRole: String? = nil,
         model: String? = nil,
         modelProvider: String? = nil,
-        agentRuntime: String = "codex",
+        agentRuntime: AgentRuntime = .codex,
         syncState: CodexThreadSyncState = .live
     ) {
         self.id = id
@@ -123,7 +123,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
         self.agentRole = Self.normalizeIdentifier(agentRole)
         self.model = Self.normalizeIdentifier(model)
         self.modelProvider = Self.normalizeIdentifier(modelProvider)
-        self.agentRuntime = Self.normalizeAgentRuntime(agentRuntime)
+        self.agentRuntime = agentRuntime
         self.syncState = syncState
     }
 
@@ -250,7 +250,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
     }
 
     var isOpenCodeAgentRuntime: Bool {
-        agentRuntime.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "opencode"
+        agentRuntime.isOpenCode
     }
 }
 
@@ -563,40 +563,23 @@ extension CodexThread {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func normalizeAgentRuntime(_ value: String?) -> String {
-        guard let value else {
-            return "codex"
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return trimmed.isEmpty ? "codex" : trimmed
-    }
-
     private static func decodeAgentRuntime(
         from container: KeyedDecodingContainer<CodingKeys>,
         metadata: [String: JSONValue]?
-    ) -> String {
+    ) -> AgentRuntime {
         for key in [CodingKeys.agentRuntime, .agentRuntimeSnake] {
             if let value = try? container.decodeIfPresent(String.self, forKey: key) {
-                return normalizeAgentRuntime(value)
+                return AgentRuntime.normalize(value)
             }
         }
 
         for metadataKey in ["agentRuntime", "agent_runtime"] {
             if let value = metadata?[metadataKey]?.stringValue {
-                return normalizeAgentRuntime(value)
+                return AgentRuntime.normalize(value)
             }
         }
 
-        if let provider = decodeThreadIdentity(
-            from: container,
-            metadata: metadata,
-            keys: [.modelProvider, .modelProviderSnake],
-            metadataKeys: ["modelProvider", "model_provider", "provider"]
-        ), provider.lowercased() == "opencode" {
-            return "opencode"
-        }
-
-        return "codex"
+        return .codex
     }
 
     private static func normalizeProjectPath(_ value: String?) -> String? {

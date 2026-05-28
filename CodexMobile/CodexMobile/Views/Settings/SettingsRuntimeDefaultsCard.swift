@@ -68,7 +68,7 @@ struct SettingsRuntimeDefaultsCard: View {
     }
 
     private var showsCodexComposerDefaults: Bool {
-        !codex.isOpenCodeRuntimeConnected
+        !codex.isOpenCodeBridgeConnected
     }
 
     private var composerDefaultsFooter: String {
@@ -76,7 +76,7 @@ struct SettingsRuntimeDefaultsCard: View {
         if let mismatchHint = codex.preferredRuntimeMismatchHint {
             parts.append(mismatchHint)
         }
-        if codex.isOpenCodeRuntimeConnected {
+        if codex.isOpenCodeBridgeConnected {
             parts.append("Model defaults for new OpenCode chats. Agent and variant choices live in the composer.")
         } else {
             parts.append("Used for new chats. Git writer model applies to commit messages and PR drafts.")

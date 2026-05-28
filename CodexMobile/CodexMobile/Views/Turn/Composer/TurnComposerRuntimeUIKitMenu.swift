@@ -19,7 +19,7 @@
 //   menu stays glanceable. The "Other models" action opens the existing
 //   SwiftUI sheet via an injected callback.
 // * The Agent submenu is visible only for OpenCode threads
-//   (isOpenCodeThread == true). For Codex/standard threads it returns nil.
+//   (isOpenCodeBridgeConnected == true). For Codex/standard threads it returns nil.
 // * The Intelligence menu adapts to the runtime: variant selection for OpenCode,
 //   reasoning effort for Codex.
 // * The Speed menu adapts to the runtime: fast model selection for OpenCode,
@@ -178,13 +178,14 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Intelligence
 
     private static func intelligenceMenu(_ input: Input) -> UIMenu? {
-        if input.runtimeState.isOpenCodeThread {
+        if input.runtimeState.isOpenCodeBridgeConnected {
             return openCodeIntelligenceMenu(input)
         }
         return codexIntelligenceMenu(input)
     }
 
     private static func openCodeIntelligenceMenu(_ input: Input) -> UIMenu? {
+        guard input.runtimeState.supportsVariants else { return nil }
         let variants = input.runtimeState.orderedVariantOptions
         guard !variants.isEmpty else { return nil }
 
@@ -241,7 +242,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Speed
 
     private static func speedMenu(_ input: Input) -> UIMenu? {
-        if input.runtimeState.isOpenCodeThread {
+        if input.runtimeState.isOpenCodeBridgeConnected {
             return openCodeSpeedMenu(input)
         }
         return codexSpeedMenu(input)
@@ -323,7 +324,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Agent
 
     private static func agentMenu(_ input: Input) -> UIMenu? {
-        guard input.runtimeState.isOpenCodeThread else { return nil }
+        guard input.runtimeState.isOpenCodeBridgeConnected else { return nil }
         let agents = input.runtimeState.orderedAgentOptions
         guard !agents.isEmpty else {
             if let errorMessage = input.runtimeState.agentsErrorMessage?

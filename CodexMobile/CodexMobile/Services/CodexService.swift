@@ -658,7 +658,7 @@ final class CodexService {
     // Connected agent runtime from initialize capabilities (ADR-001: not transport mode).
     var bridgeRuntimeCapabilities: CodexBridgeRuntimeCapabilities = .codexDefault
     var connectedBridgeProvider: String {
-        bridgeRuntimeCapabilities.agentRuntime
+        bridgeRuntimeCapabilities.agentRuntime.rawValue
     }
     var requiresOpenaiAuth: Bool {
         bridgeRuntimeCapabilities.requiresOpenaiAuth
@@ -669,7 +669,7 @@ final class CodexService {
     var supportsVariants: Bool {
         bridgeRuntimeCapabilities.supportsVariants
     }
-    var isOpenCodeRuntimeConnected: Bool {
+    var isOpenCodeBridgeConnected: Bool {
         bridgeRuntimeCapabilities.isOpenCodeConnected
     }
 

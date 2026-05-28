@@ -19,7 +19,8 @@ struct TurnComposerRuntimeState: Equatable {
     let agentMenuDisabled: Bool
     let isAgentListLoading: Bool
     let agentsErrorMessage: String?
-    let isOpenCodeThread: Bool
+    let isOpenCodeBridgeConnected: Bool
+    let supportsVariants: Bool
 
     let orderedVariantOptions: [VariantOption]
     let selectedVariantID: String?
@@ -70,25 +71,28 @@ struct TurnComposerRuntimeState: Equatable {
     ) -> TurnComposerRuntimeState {
         let selectedModel = codex.selectedModelOption()
         let variants = selectedModel?.supportedVariants ?? []
-        let isOpenCodeThread = codex.isOpenCodeRuntimeConnected
-        let showsAgentMenu = isOpenCodeThread && codex.supportsAgents
+        let isOpenCodeBridgeConnected = codex.isOpenCodeBridgeConnected
+        let supportsVariants = codex.supportsVariants
+        let showsAgentMenu = isOpenCodeBridgeConnected && codex.supportsAgents
+        let showsVariantMenu = isOpenCodeBridgeConnected && supportsVariants
 
         return TurnComposerRuntimeState(
             reasoningDisplayOptions: reasoningDisplayOptions,
             effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(threadId: threadId),
             selectedReasoningEffort: codex.selectedReasoningEffort,
-            reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || selectedModel == nil || isOpenCodeThread,
+            reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || selectedModel == nil || isOpenCodeBridgeConnected,
             selectedServiceTier: codex.effectiveServiceTier(for: threadId),
-            supportsFastMode: codex.selectedModelSupportsServiceTier(.fast) && !isOpenCodeThread,
+            supportsFastMode: codex.selectedModelSupportsServiceTier(.fast) && !isOpenCodeBridgeConnected,
             orderedAgentOptions: codex.availableAgents,
             selectedAgentID: codex.resolvedAgentId(for: threadId, collaborationMode: collaborationMode),
             agentMenuDisabled: !showsAgentMenu || codex.availableAgents.isEmpty,
             isAgentListLoading: codex.isAgentListLoading,
             agentsErrorMessage: codex.agentsErrorMessage,
-            isOpenCodeThread: isOpenCodeThread,
+            isOpenCodeBridgeConnected: isOpenCodeBridgeConnected,
+            supportsVariants: supportsVariants,
             orderedVariantOptions: variants,
             selectedVariantID: codex.resolvedVariantId(for: threadId),
-            variantMenuDisabled: variants.isEmpty || !isOpenCodeThread
+            variantMenuDisabled: variants.isEmpty || !showsVariantMenu
         )
     }
 }

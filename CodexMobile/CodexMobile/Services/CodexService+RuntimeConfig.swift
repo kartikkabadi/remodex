@@ -36,8 +36,7 @@ private enum OpenCodeRuntimeSelectionDefaults {
 
 extension CodexService {
     static func normalizedPreferredAgentRuntime(_ value: String?) -> String {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        return trimmed == "opencode" ? "opencode" : "codex"
+        AgentRuntime.normalize(value).rawValue
     }
 
     func setPreferredAgentRuntime(_ runtime: String) {

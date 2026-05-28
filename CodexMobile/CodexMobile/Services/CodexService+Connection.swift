@@ -1343,14 +1343,9 @@ extension CodexService {
             return
         }
 
-        let agentRuntime = capabilitiesObject["agentRuntime"]?.stringValue?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedRuntime: String
-        if let agentRuntime, !agentRuntime.isEmpty {
-            normalizedRuntime = agentRuntime
-        } else {
-            normalizedRuntime = "codex"
-        }
+        let normalizedRuntime = AgentRuntime.normalize(
+            capabilitiesObject["agentRuntime"]?.stringValue
+        )
 
         bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
             agentRuntime: normalizedRuntime,

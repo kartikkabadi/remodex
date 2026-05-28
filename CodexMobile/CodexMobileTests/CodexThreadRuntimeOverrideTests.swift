@@ -264,7 +264,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         service.learnBridgeRuntimeCapabilitiesFromInitializeResponse(response)
 
         XCTAssertEqual(service.connectedBridgeProvider, "opencode")
-        XCTAssertTrue(service.isOpenCodeRuntimeConnected)
+        XCTAssertTrue(service.isOpenCodeBridgeConnected)
         XCTAssertTrue(service.supportsAgents)
         XCTAssertFalse(service.requiresOpenaiAuth)
     }
@@ -280,7 +280,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         service.learnBridgeRuntimeCapabilitiesFromInitializeResponse(response)
 
         XCTAssertEqual(service.connectedBridgeProvider, "codex")
-        XCTAssertFalse(service.isOpenCodeRuntimeConnected)
+        XCTAssertFalse(service.isOpenCodeBridgeConnected)
         XCTAssertTrue(service.requiresOpenaiAuth)
     }
 
@@ -314,7 +314,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         let service = makeService()
         service.isConnected = true
         service.bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
-            agentRuntime: "opencode",
+            agentRuntime: .opencode,
             supportsAgents: true,
             supportsVariants: true,
             requiresOpenaiAuth: false
@@ -538,7 +538,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         let data = try JSONEncoder().encode(payload)
         let thread = try JSONDecoder().decode(CodexThread.self, from: data)
 
-        XCTAssertEqual(thread.agentRuntime, "opencode")
+        XCTAssertEqual(thread.agentRuntime, .opencode)
         XCTAssertTrue(thread.isOpenCodeAgentRuntime)
     }
 
@@ -549,8 +549,73 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         let data = try JSONEncoder().encode(payload)
         let thread = try JSONDecoder().decode(CodexThread.self, from: data)
 
-        XCTAssertEqual(thread.agentRuntime, "codex")
+        XCTAssertEqual(thread.agentRuntime, .codex)
         XCTAssertFalse(thread.isOpenCodeAgentRuntime)
+    }
+
+    func testAgentRuntimeNormalizeMapsWireValues() {
+        let cases: [(String?, AgentRuntime)] = [
+            (nil, .codex),
+            ("", .codex),
+            ("  ", .codex),
+            ("codex", .codex),
+            ("CODEX", .codex),
+            ("opencode", .opencode),
+            ("OpenCode", .opencode),
+            ("unknown-provider", .codex),
+        ]
+
+        for (raw, expected) in cases {
+            XCTAssertEqual(AgentRuntime.normalize(raw), expected, "raw=\(raw ?? "nil")")
+        }
+    }
+
+    func testCodexThreadDoesNotInferOpenCodeFromModelProvider() throws {
+        let payload: JSONValue = .object([
+            "id": .string("thread-model-provider-only"),
+            "modelProvider": .string("opencode"),
+        ])
+        let data = try JSONEncoder().encode(payload)
+        let thread = try JSONDecoder().decode(CodexThread.self, from: data)
+
+        XCTAssertEqual(thread.agentRuntime, .codex)
+        XCTAssertFalse(thread.isOpenCodeAgentRuntime)
+    }
+
+    func testTurnComposerRuntimeStateGatesVariantsOnBridgeCapabilities() {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+        service.bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
+            agentRuntime: .opencode,
+            supportsAgents: true,
+            supportsVariants: false,
+            requiresOpenaiAuth: false
+        )
+        service.availableModels = [
+            CodexModelOption(
+                id: "gpt-5.4",
+                model: "gpt-5.4",
+                displayName: "GPT-5.4",
+                description: "Test model",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: nil,
+                supportedVariants: [
+                    VariantOption(id: "high", displayName: "High"),
+                ]
+            ),
+        ]
+        service.setSelectedModelId("gpt-5.4")
+
+        let runtimeState = TurnComposerRuntimeState.resolve(
+            codex: service,
+            reasoningDisplayOptions: []
+        )
+
+        XCTAssertTrue(runtimeState.isOpenCodeBridgeConnected)
+        XCTAssertFalse(runtimeState.supportsVariants)
+        XCTAssertTrue(runtimeState.variantMenuDisabled)
     }
 
     func testPreferredAgentRuntimePersistsAcrossServiceInstances() {
@@ -598,7 +663,7 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         service.isConnected = true
         service.isInitialized = true
         service.bridgeRuntimeCapabilities = CodexBridgeRuntimeCapabilities(
-            agentRuntime: "opencode",
+            agentRuntime: .opencode,
             supportsAgents: true,
             supportsVariants: true,
             requiresOpenaiAuth: false
