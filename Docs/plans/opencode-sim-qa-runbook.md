@@ -42,6 +42,16 @@ Wave 1a pushes simulator automation to `multi-agents/opencode` (fork) before Wav
 - [ ] `PrivateOverrides.xcconfig` with `ws://127.0.0.1:9000/relay`
 - [ ] One successful `./scripts/opencode-sim-preflight.sh` (or `--check-only` after manual launcher)
 
+## Fresh manual onboarding (reset sim + pairing)
+
+Full clean reset (stop stack, `resetBridgeDeviceState`, uninstall sim app, loopback overrides, optional build):
+
+```sh
+./scripts/opencode-fresh-onboarding.sh --build-sim --start-launcher
+```
+
+Then paste the **short pairing code** from the launcher log or `~/.remodex/pairing-session.json` (`pairingCode`). Do **not** use `-RemodexDebugPairingRMX1` for this flow.
+
 ## DEBUG simulator pairing (Wave 2A)
 
 **DEBUG builds only** (`#if DEBUG`). Supply the full paste token from the Mac bridge:

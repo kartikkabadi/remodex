@@ -22,6 +22,12 @@ PHODEX_DEFAULT_RELAY_URL = ws://127.0.0.1:9000/relay
 
 (`PrivateOverrides.xcconfig` is gitignored.)
 
+Fresh simulator onboarding (stop stack, full `~/.remodex` identity reset, uninstall sim app):
+
+```sh
+./scripts/opencode-fresh-onboarding.sh --build-sim --start-launcher
+```
+
 ## Relay profiles
 
 ### 1. Mac-only / simulator (default)
