@@ -131,6 +131,33 @@ function evictOldestEntries(map, maxSize) {
   }
 }
 
+const CODEX_BRIDGE_MANAGED_ACCOUNT_METHODS = new Set([
+  "account/status/read", "getAuthStatus", "voice/resolveAuth",
+]);
+const OPENCODE_BRIDGE_MANAGED_ACCOUNT_METHODS = new Set([
+  ...CODEX_BRIDGE_MANAGED_ACCOUNT_METHODS,
+  "account/login/openOnMac", "account/login/start", "account/login/cancel",
+  "account/login/complete", "account/logout", "account/rateLimits/read",
+]);
+
+function isBridgeManagedAccountMethod(method, isOpenCodeActive) {
+  return (isOpenCodeActive ? OPENCODE_BRIDGE_MANAGED_ACCOUNT_METHODS : CODEX_BRIDGE_MANAGED_ACCOUNT_METHODS)
+    .has(method);
+}
+
+function shouldInvokeGitHandler(rawMessage) {
+  let method = "";
+  try {
+    method = (JSON.parse(rawMessage)?.method || "").trim();
+  } catch {
+    return false;
+  }
+  if (!method.startsWith("git/") && method !== "thread/generateTitle" && method !== "thread/name/set") {
+    return false;
+  }
+  return !(isOpenCodeRuntime() && method === "thread/name/set");
+}
+
 function startBridge({
   config: explicitConfig = null,
   printPairingQr = true,
@@ -637,10 +664,11 @@ function startBridge({
     })) {
       return;
     }
-    if (!isOpenCodeRuntimeActive && handleGitRequest(rawMessage, sendApplicationResponse, {
-      codexAppPath: config.codexAppPath,
-      onThreadNameSet: sendThreadNameUpdatedNotification,
-    })) {
+    if (shouldInvokeGitHandler(rawMessage)
+      && handleGitRequest(rawMessage, sendApplicationResponse, {
+        codexAppPath: config.codexAppPath,
+        onThreadNameSet: sendThreadNameUpdatedNotification,
+      })) {
       return;
     }
     desktopRefresher.handleInbound(rawMessage);
@@ -831,15 +859,7 @@ function startBridge({
     }
 
     const method = typeof parsed?.method === "string" ? parsed.method.trim() : "";
-    if (method !== "account/status/read"
-      && method !== "getAuthStatus"
-      && method !== "account/login/openOnMac"
-      && method !== "account/login/start"
-      && method !== "account/login/cancel"
-      && method !== "account/login/complete"
-      && method !== "account/logout"
-      && method !== "voice/resolveAuth"
-      && method !== "account/rateLimits/read") {
+    if (!isBridgeManagedAccountMethod(method, isOpenCodeRuntimeActive)) {
       return false;
     }
 
@@ -3664,19 +3684,23 @@ function persistBridgePreferences(
 module.exports = {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
+  CODEX_BRIDGE_MANAGED_ACCOUNT_METHODS,
   createMacOSBridgeWakeAssertion,
   createOpenCodeDesktopRefusalResponse,
   createOpenCodeRefusalResponse,
   disableUnsupportedReasoningSummaryForTurnStart,
   fetchAdaptiveThreadTurnsListForRelay,
   hasRelayConnectionGoneStale,
+  isBridgeManagedAccountMethod,
   isCodexOnlyBridgeMethod,
   isOpenCodeBlockedDesktopMethod,
   normalizeRelayBoundJsonRpcMessage,
+  OPENCODE_BRIDGE_MANAGED_ACCOUNT_METHODS,
   persistBridgePreferences,
   resolveJsonlTurnsListRolloutPathForFallback,
   sanitizeLiveGeneratedImageMessageForRelay,
   sanitizeThreadHistoryImagesForRelay,
   resolveRuntimeTransportFactory,
+  shouldInvokeGitHandler,
   startBridge,
 };
