@@ -143,7 +143,6 @@ final class TurnComposerReviewModeTests: XCTestCase {
             TurnComposerSlashCommand.filtered(
                 matching: "",
                 within: TurnComposerSlashCommand.availableCommands(
-                    supportsThreadFork: true,
                     allowsForkCommand: true
                 )
             ).map(\.commandToken),
@@ -154,7 +153,6 @@ final class TurnComposerReviewModeTests: XCTestCase {
     func testForkCommandDisappearsWhenDraftAlreadyContainsText() {
         XCTAssertEqual(
             TurnComposerSlashCommand.availableCommands(
-                supportsThreadFork: true,
                 allowsForkCommand: false
             ).map(\.commandToken),
             ["/review", "/compact", "/feedback", "/status", "/subagents"]

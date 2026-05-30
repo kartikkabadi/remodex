@@ -116,7 +116,7 @@ struct ComposerBottomBar: View {
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
             .capabilityGreyOut(
                 isEnabled: runtimeState.capabilities.supportsVoice,
-                reason: TurnComposerMetaMapper.capabilityReason(for: .voice, capabilities: runtimeState.capabilities)
+                reason: ComposerCapabilityCopy.capabilityReason(for: .voice)
             )
 
             if isThreadRunning && isSending && activeTurnID == nil {
@@ -269,7 +269,7 @@ struct ComposerBottomBar: View {
             }
             .capabilityGreyOut(
                 isEnabled: runtimeState.capabilities.supportsPlanMode,
-                reason: TurnComposerMetaMapper.capabilityReason(for: .planMode, capabilities: runtimeState.capabilities)
+                reason: ComposerCapabilityCopy.capabilityReason(for: .planMode)
             )
 
             Button {
@@ -282,7 +282,7 @@ struct ComposerBottomBar: View {
             }
             .capabilityGreyOut(
                 isEnabled: runtimeState.capabilities.supportsFastMode,
-                reason: TurnComposerMetaMapper.capabilityReason(for: .fastMode, capabilities: runtimeState.capabilities)
+                reason: ComposerCapabilityCopy.capabilityReason(for: .fastMode)
             )
 
             Section {
@@ -401,7 +401,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     // Split label parts so the model name and effort can carry different foreground styles.
     private var modelLabelPart: String {
         if !runtimeState.isRuntimeEnabled {
-            let message = TurnComposerMetaMapper.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            let message = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
             return message.title
         }
         if selectedModelID == nil {
@@ -466,8 +466,8 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         HStack(spacing: 6) {
             RuntimeProviderLogoView(provider: selectedModelProvider, size: 14)
 
-            if runtimeState.showsOpenCodeBeta {
-                SidebarOpenCodeBetaCapsule()
+            if runtimeState.showsBetaLabel {
+                OpenCodeBetaCapsule()
             }
 
             if let leadingImageName {

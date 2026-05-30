@@ -115,7 +115,7 @@ struct TurnComposerHostView: View {
         // When the runtime provider is explicitly disabled, replace the entire composer
         // with an unavailable notice so users see why the controls are missing.
         if !runtimeState.isRuntimeEnabled {
-            let unavailable = TurnComposerMetaMapper.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")

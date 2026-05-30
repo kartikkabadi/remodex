@@ -18,6 +18,7 @@ struct SidebarThreadRowView: View {
     let isSubagentExpanded: Bool
     let onToggleSubagents: (() -> Void)?
     let onTap: () -> Void
+    let showsBetaLabel: Bool
     var onRename: ((String) -> Void)? = nil
     var onPinToggle: (() -> Void)? = nil
     var onArchiveToggle: (() -> Void)? = nil
@@ -118,14 +119,10 @@ struct SidebarThreadRowView: View {
         )
     }
 
-    private var showsOpenCodeBetaBadge: Bool {
-        CodexModelOption.normalizedProvider(thread.modelProvider) == "opencode"
-    }
-
     private var parentTrailingMeta: some View {
         HStack(spacing: 6) {
-            if showsOpenCodeBetaBadge {
-                SidebarOpenCodeBetaCapsule()
+            if showsBetaLabel {
+                OpenCodeBetaCapsule()
             }
 
             if thread.syncState == .archivedLocal {

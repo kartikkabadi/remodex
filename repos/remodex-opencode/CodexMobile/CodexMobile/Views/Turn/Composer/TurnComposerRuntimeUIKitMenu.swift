@@ -5,18 +5,7 @@
 // Exports: TurnComposerRuntimeUIKitMenuBuilder
 // Depends on: UIKit, TurnComposerRuntimeState, TurnComposerRuntimeActions,
 //             TurnComposerMetaMapper, CodexModelOption, CodexServiceTier,
-//             HapticFeedback
-//
-// Design notes
-// ------------
-// * Top-level menu has three submenus: Model, Intelligence, Speed. Each parent
-//   carries `subtitle:` (current selection) so the row renders as the
-//   "Label / Value / >" pill you see in the screenshot.
-// * Submenus use `UIMenu.Options.singleSelection` so UIKit draws/clears the
-//   checkmarks for us. We pass `.on` for the active item as a hint; UIKit
-//   reconciles state when singleSelection is set.
-// * Model options are grouped by runtime provider so Codex/OpenCode/etc. can
-//   share one picker without colliding on ids or display labels.
+//             HapticFeedback, ComposerCapabilityCopy
 
 import UIKit
 
@@ -30,11 +19,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let selectedModelTitle: String
         let isLoadingModels: Bool
         let isRuntimeSelectionLoading: Bool
-    }
-
-    private static func runtimeInfo(for provider: String, in runtimes: [RuntimeInfo]) -> RuntimeInfo? {
-        let normalized = CodexModelOption.normalizedProvider(provider)
-        return runtimes.first { CodexModelOption.normalizedProvider($0.id) == normalized }
     }
 
     static func makeMenu(_ input: Input) -> UIMenu {
@@ -82,7 +66,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             return providerMenus(input)
         }()
 
-        // singleSelection paints the checkmark on the `.on` child for us.
         return UIMenu(
             title: "Model",
             subtitle: subtitle,
@@ -122,11 +105,11 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         return providers.compactMap { provider in
             guard let models = grouped[provider], !models.isEmpty else { return nil }
             let providerTitle = TurnComposerMetaMapper.providerTitle(for: provider)
-            let catalogEntry = runtimeInfo(for: provider, in: input.runtimeState.availableRuntimes)
-            let isProviderEnabled = catalogEntry?.enabled ?? true
+            let normalizedProvider = CodexModelOption.normalizedProvider(provider)
 
-            if !isProviderEnabled {
-                let unavailable = TurnComposerMetaMapper.runtimeUnavailableMessage(catalogEntry?.unavailableReason)
+            if input.runtimeState.disabledProviderIDs.contains(normalizedProvider) {
+                let rawReason = input.runtimeState.unavailableReasonByProviderID[normalizedProvider]
+                let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason)
                 return UIMenu(
                     title: providerTitle,
                     image: RuntimeProviderLogo.menuUIImage(provider: provider),
@@ -165,18 +148,17 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let agents = input.runtimeState.availableAgents
         guard !agents.isEmpty else { return nil }
 
+        let selectedId = input.runtimeState.selectedAgent ?? agents.first?.id
         let actions: [UIMenuElement] = agents.map { agent in
-            let isSelected = agent.id == (input.runtimeState.selectedAgent ?? "build")
-            return UIAction(
+            UIAction(
                 title: agent.displayName,
-                state: isSelected ? .on : .off
+                state: agent.id == selectedId ? .on : .off
             ) { _ in
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
                 input.runtimeActions.selectAgent(agent.id)
             }
         }
 
-        let selectedId = input.runtimeState.selectedAgent ?? "build"
         let subtitle = agents.first(where: { $0.id == selectedId })?.displayName
             ?? agents.first?.displayName
 
@@ -193,18 +175,11 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let options = input.runtimeState.reasoningDisplayOptions
         if options.isEmpty {
             if input.runtimeState.capabilities.supportsReasoningEffort {
-                let reason = TurnComposerMetaMapper.capabilityReason(
-                    for: .reasoningEffort,
-                    capabilities: input.runtimeState.capabilities
-                )
-                let action = UIAction(title: reason) { _ in }
-                action.attributes.insert(.disabled)
-                return UIMenu(
+                return disabledSubmenu(
                     title: "Intelligence",
                     subtitle: "Unavailable",
                     image: RemodexIcon.menuUIImage(systemName: "brain"),
-                    options: [],
-                    children: [action]
+                    reason: ComposerCapabilityCopy.capabilityReason(for: .reasoningEffort)
                 )
             }
             return nil
@@ -238,31 +213,19 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     private static func speedMenu(_ input: Input) -> UIMenu? {
         let selectedModelCapabilities = modelCapabilitiesForSelectedModel(input)
         guard input.runtimeState.capabilities.supportsFastMode else {
-            let reason = TurnComposerMetaMapper.capabilityReason(
-                for: .fastMode,
-                capabilities: input.runtimeState.capabilities
-            )
-            let action = disabledInfoAction(title: reason)
-            return UIMenu(
+            return disabledSubmenu(
                 title: "Speed",
                 subtitle: "Unavailable",
                 image: UIImage(systemName: "bolt.fill"),
-                options: [],
-                children: [action]
+                reason: ComposerCapabilityCopy.capabilityReason(for: .fastMode)
             )
         }
         guard selectedModelCapabilities?.supportsFastMode ?? true else {
-            let reason = TurnComposerMetaMapper.capabilityReason(
-                for: .fastMode,
-                capabilities: selectedModelCapabilities ?? input.runtimeState.capabilities
-            )
-            let action = disabledInfoAction(title: reason)
-            return UIMenu(
+            return disabledSubmenu(
                 title: "Speed",
                 subtitle: "Unavailable",
                 image: UIImage(systemName: "bolt.fill"),
-                options: [],
-                children: [action]
+                reason: ComposerCapabilityCopy.capabilityReason(for: .fastMode)
             )
         }
 
@@ -277,8 +240,6 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let tierActions: [UIMenuElement] = CodexServiceTier.allCases.map { tier in
             UIAction(
                 title: tier.displayName,
-                // Keep the Fast tier on the native SF bolt to match the speed
-                // badge in the composer; other tiers can use Central artwork.
                 image: tier == .fast
                     ? UIImage(systemName: tier.iconName)
                     : RemodexIcon.menuUIImage(systemName: tier.iconName),
@@ -313,6 +274,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         return input.orderedModelOptions.first(where: { option in
             option.modelProvider == provider && option.id == (modelId ?? option.id)
         })?.capabilities
+    }
+
+    private static func disabledSubmenu(
+        title: String,
+        subtitle: String,
+        image: UIImage?,
+        reason: String
+    ) -> UIMenu {
+        let action = disabledInfoAction(title: reason)
+        return UIMenu(
+            title: title,
+            subtitle: subtitle,
+            image: image,
+            options: [],
+            children: [action]
+        )
     }
 
     private static func disabledInfoAction(title: String) -> UIAction {

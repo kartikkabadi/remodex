@@ -48,7 +48,7 @@ extension View {
         Button("Voice") {}
             .capabilityGreyOut(
                 isEnabled: false,
-                reason: TurnComposerMetaMapper.capabilityReason(for: .voice)
+                reason: ComposerCapabilityCopy.capabilityReason(for: .voice)
             )
     }
     .padding()
