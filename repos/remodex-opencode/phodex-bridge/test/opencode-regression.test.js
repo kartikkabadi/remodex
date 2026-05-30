@@ -42,6 +42,41 @@ test("runtime catalog excludes opencode when flag is off", async () => {
   delete process.env.REMODEX_ENABLE_OPENCODE;
 });
 
+test("runtime catalog exposes showsBetaLabel on opencode runtime", async () => {
+  const responses = [];
+  const mockOpenCodeProvider = {
+    id: "opencode",
+    listAgents: async () => [{ id: "build", label: "Build" }],
+  };
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse: (msg) => responses.push(JSON.parse(msg)),
+    sendRuntimeMessage: () => {},
+    providers: [mockOpenCodeProvider],
+    logPrefix: "[test]",
+  });
+
+  const previousFlag = process.env.REMODEX_ENABLE_OPENCODE;
+  process.env.REMODEX_ENABLE_OPENCODE = "1";
+
+  router.handleApplicationMessage(
+    JSON.stringify({ id: 2, method: "runtime/catalog" }),
+  );
+  await waitOneTick();
+
+  const catalog = responses.find((r) => r.id === 2)?.result;
+  const codexRuntime = catalog.runtimes.find((runtime) => runtime.id === "codex");
+  const opencodeRuntime = catalog.runtimes.find((runtime) => runtime.id === "opencode");
+  assert.equal(codexRuntime.showsBetaLabel, false);
+  assert.equal(opencodeRuntime.showsBetaLabel, true);
+
+  if (previousFlag === undefined) {
+    delete process.env.REMODEX_ENABLE_OPENCODE;
+  } else {
+    process.env.REMODEX_ENABLE_OPENCODE = previousFlag;
+  }
+});
+
 test("provider is not created when flag is off", () => {
   // The resolveProviders function in runtime-provider-router checks
   // REMODEX_ENABLE_OPENCODE env var. When NOT "1", it returns [].
