@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remodex architecture review — 2026-05-29</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 p-8">
+  <h1 class="text-3xl font-semibold mb-2">Remodex multi-agent — deepening candidates</h1>
+  <p class="text-slate-400 mb-8">Generated from investigation of <code>codex/add-opencode-provider</code> vs <code>main</code>.</p>
+
+  <section class="mb-10 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-xl font-medium mb-2">1. ThreadOwnershipStore (seam)</h2>
+    <p class="text-slate-300 mb-4"><strong>Files:</strong> <code>opencode-provider.js</code>, <code>runtime-provider-router.js</code>, new <code>thread-ownership-store.js</code></p>
+    <p class="text-slate-300 mb-4"><strong>Problem:</strong> OpenCode harness keeps threads in class Maps. Restart loses routing. Router cannot reason about ownership without reaching into provider internals.</p>
+    <p class="text-slate-300 mb-4"><strong>Solution:</strong> One module owns durable <code>ThreadOwnership</code> records. Harnesses report facts; router queries store.</p>
+    <p class="text-slate-300 mb-4"><strong>Benefits:</strong> High leverage interface (lookup by id). Locality for resume bugs. Tests target store file I/O only.</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <pre class="bg-slate-900 p-4 rounded text-xs overflow-auto">Before:
+Router ──► OpenCodeProvider.threads (Map)
+         ──► Codex (implicit)</pre>
+      <pre class="bg-slate-900 p-4 rounded text-xs overflow-auto">After:
+Router ──► ThreadOwnershipStore
+OpenCodeHarness ──► store.upsert()
+CodexHarness ──► store.upsert()</pre>
+    </div>
+    <span class="inline-block px-3 py-1 rounded-full bg-emerald-900 text-emerald-200 text-sm">Strong</span>
+  </section>
+
+  <section class="mb-10 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-xl font-medium mb-2">2. ProviderHarness registry</h2>
+    <p class="text-slate-300 mb-4"><strong>Problem:</strong> Router hard-codes <code>createOpenCodeProvider</code>. Adding Cursor means editing router conditionals.</p>
+    <p class="text-slate-300 mb-4"><strong>Solution:</strong> <code>Map&lt;RuntimeProviderId, ProviderHarness&gt;</code> registered at bridge boot from env flags.</p>
+    <div class="mermaid bg-slate-900 p-4 rounded mb-4">
+flowchart LR
+  R[runtime-provider-router]
+  R --> C[CodexHarness]
+  R --> O[OpenCodeHarness]
+  R --> X[future Harness]
+    </div>
+    <span class="inline-block px-3 py-1 rounded-full bg-amber-900 text-amber-200 text-sm">Worth exploring</span>
+  </section>
+
+  <section class="mb-10 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-xl font-medium mb-2">3. Transport adapter split (CLI vs ACP)</h2>
+    <p class="text-slate-300 mb-4"><strong>Problem:</strong> <code>runTurn</code> mixes spawn logic with Codex-shaped event emission. Swapping to ACP rewrites the class.</p>
+    <p class="text-slate-300 mb-4"><strong>Solution:</strong> <code>OpenCodeTransport</code> interface with <code>CliRunTransport</code> and <code>AcpSessionTransport</code> implementations behind factory.</p>
+    <span class="inline-block px-3 py-1 rounded-full bg-slate-700 text-slate-200 text-sm">Speculative</span>
+  </section>
+
+  <section class="border border-emerald-800 rounded-xl p-6 bg-emerald-950/30">
+    <h2 class="text-xl font-medium mb-2">Top recommendation</h2>
+    <p class="text-slate-200">Land <strong>ThreadOwnershipStore</strong> in PR #5 right after the CLI harness works. It is small, testable, and prevents the largest user-visible bug (lost threads on bridge restart) without waiting for ACP.</p>
+  </section>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+</body>
+</html>
