@@ -27,6 +27,7 @@ struct TurnComposerRuntimeState: Equatable {
     let selectedAgent: String?
     let isRuntimeEnabled: Bool
     let runtimeUnavailableReason: String?
+    let availableRuntimes: [RuntimeInfo]
 
     var selectedReasoningTitle: String {
         effectiveReasoningEffort.map(TurnComposerMetaMapper.reasoningTitle(for:)) ?? "Select reasoning"
@@ -34,6 +35,10 @@ struct TurnComposerRuntimeState: Equatable {
 
     var showsSpeedBadgeInModelMenu: Bool {
         capabilities.supportsFastMode && selectedServiceTier != nil
+    }
+
+    var showsOpenCodeBeta: Bool {
+        TurnComposerMetaMapper.showsOpenCodeBeta(capabilities: capabilities)
     }
 
     func isSelectedReasoning(_ effort: String) -> Bool {
@@ -70,7 +75,8 @@ struct TurnComposerRuntimeState: Equatable {
             availableAgents: codex.availableAgents,
             selectedAgent: agentOverride,
             isRuntimeEnabled: isRuntimeEnabled,
-            runtimeUnavailableReason: runtimeUnavailableReason
+            runtimeUnavailableReason: runtimeUnavailableReason,
+            availableRuntimes: codex.availableRuntimes
         )
     }
 }

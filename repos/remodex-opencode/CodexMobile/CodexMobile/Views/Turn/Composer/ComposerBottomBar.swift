@@ -65,13 +65,17 @@ struct ComposerBottomBar: View {
     }
 
     private var sendButtonIconColor: Color {
-        if isSendDisabled { return Color(.systemGray2) }
-        return sendButtonPaletteColor.bubbleForeground(for: colorScheme)
+        ComposerDisabledAppearance.sendForeground(
+            isDisabled: isSendDisabled,
+            enabled: sendButtonPaletteColor.bubbleForeground(for: colorScheme)
+        )
     }
 
     private var sendButtonBackgroundColor: Color {
-        if isSendDisabled { return Color(.systemGray5) }
-        return sendButtonPaletteColor.bubbleBackground(for: colorScheme)
+        ComposerDisabledAppearance.sendBackground(
+            isDisabled: isSendDisabled,
+            enabled: sendButtonPaletteColor.bubbleBackground(for: colorScheme)
+        )
     }
 
     // MARK: - Body
@@ -93,8 +97,8 @@ struct ComposerBottomBar: View {
                 } label: {
                     RemodexCircleBadge(
                         systemName: "arrow.clockwise",
-                        foreground: Color(.systemBackground),
-                        background: Color(.systemGray2),
+                        foreground: ComposerDisabledAppearance.queueBadgeForeground(isPaused: true),
+                        background: ComposerDisabledAppearance.queueBadgeBackground(isPaused: true),
                         diameter: 28
                     )
                 }
@@ -110,7 +114,10 @@ struct ComposerBottomBar: View {
             }
             .disabled(voiceButtonPresentation.isDisabled || !runtimeState.capabilities.supportsVoice)
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
-            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsVoice, reason: "Voice not supported by this runtime")
+            .capabilityGreyOut(
+                isEnabled: runtimeState.capabilities.supportsVoice,
+                reason: TurnComposerMetaMapper.capabilityReason(for: .voice, capabilities: runtimeState.capabilities)
+            )
 
             if isThreadRunning && isSending && activeTurnID == nil {
                 ProgressView()
@@ -260,7 +267,10 @@ struct ComposerBottomBar: View {
             )) {
                 RemodexIcon.menuLabel("Plan mode", systemName: "remodex.plan-mode")
             }
-            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsPlanMode, reason: "Plan mode not supported by this runtime")
+            .capabilityGreyOut(
+                isEnabled: runtimeState.capabilities.supportsPlanMode,
+                reason: TurnComposerMetaMapper.capabilityReason(for: .planMode, capabilities: runtimeState.capabilities)
+            )
 
             Button {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
@@ -270,7 +280,10 @@ struct ComposerBottomBar: View {
                 // speed badge / Speed submenu icon used elsewhere.
                 Label("Fast Mode", systemImage: fastModePlusMenuIconName)
             }
-            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsFastMode, reason: "Fast mode not supported by this model")
+            .capabilityGreyOut(
+                isEnabled: runtimeState.capabilities.supportsFastMode,
+                reason: TurnComposerMetaMapper.capabilityReason(for: .fastMode, capabilities: runtimeState.capabilities)
+            )
 
             Section {
                 Button {
@@ -323,7 +336,7 @@ struct ComposerBottomBar: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(
-            Capsule().fill(isQueuePaused ? Color(.systemGray3) : Color(.systemGray4))
+            Capsule().fill(ComposerDisabledAppearance.queueBadgeBackground(isPaused: isQueuePaused))
         )
     }
 }
@@ -380,12 +393,17 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             )
         }
         .layoutPriority(-1)
+        .opacity(runtimeState.isRuntimeEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
         .tint(metaLabelColor)
         .accessibilityLabel(runtimeAccessibilityLabel)
     }
 
     // Split label parts so the model name and effort can carry different foreground styles.
     private var modelLabelPart: String {
+        if !runtimeState.isRuntimeEnabled {
+            let message = TurnComposerMetaMapper.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            return message.title
+        }
         if selectedModelID == nil {
             return isRuntimeSelectionLoading ? "Loading..." : "Select model"
         }
@@ -447,6 +465,10 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     ) -> some View {
         HStack(spacing: 6) {
             RuntimeProviderLogoView(provider: selectedModelProvider, size: 14)
+
+            if runtimeState.showsOpenCodeBeta {
+                SidebarOpenCodeBetaCapsule()
+            }
 
             if let leadingImageName {
                 // Native SF Symbol on purpose: the Central lightning artwork

@@ -49,5 +49,25 @@
 | Steer/queue | enabled | greyed | Not yet implemented for OpenCode |
 | Pairing/E2EE | enabled | enabled | Unchanged from Codex |
 | Thread history | enabled | enabled | SDK session.messages for OpenCode |
+| Composer capability grey-out | enabled | enabled | iOS 2026-05-30: shared `ComposerDisabledAppearance` + mapper copy; simulator build verified |
+| Runtime unavailable banner | enabled | enabled | iOS 2026-05-30: glass banner + bridge reason mapping; simulator build verified |
+| Sidebar provider badge | enabled | enabled | iOS 2026-05-30: `SidebarProviderBadge` on thread rows; simulator build verified |
+| OpenCode beta label | n/a | enabled | iOS 2026-05-30: sidebar + composer pill; device taste review pending |
+| Settings default OpenCode agent | n/a | enabled | iOS 2026-05-30: `SettingsRuntimeDefaultsCard` picker + UserDefaults; device proof pending |
 
 *Cells are `enabled` | `greyed` (+ reason) | `n/a`. Only mark `enabled` with device proof.*
+
+## Device E2E checklist (iPhone + Mac)
+
+Run before parity sign-off. Bridge: `cd phodex-bridge && REMODEX_ENABLE_OPENCODE=1 npm start`. Pair via QR in CodexMobile.
+
+1. Model picker shows Codex and OpenCode groups with provider logos.
+2. OpenCode thread: agent submenu, greyed voice/plan/fast where capabilities false.
+3. Send a turn on OpenCode; streaming text and tool cards render.
+4. Stop button works mid-turn.
+5. Fork and desktop handoff hidden on OpenCode threads.
+6. Disable OpenCode on Mac; composer shows unavailable banner with mapped copy.
+7. Bridge restart; OpenCode thread still routes correctly (thread ownership).
+8. Codex regression: bridge without `REMODEX_ENABLE_OPENCODE` — composer unchanged.
+9. Settings: default OpenCode agent persists across relaunch.
+10. Sidebar: provider badge and Beta capsule on OpenCode threads.

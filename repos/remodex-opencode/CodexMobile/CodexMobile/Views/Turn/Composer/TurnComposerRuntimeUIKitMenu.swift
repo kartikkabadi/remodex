@@ -32,6 +32,11 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let isRuntimeSelectionLoading: Bool
     }
 
+    private static func runtimeInfo(for provider: String, in runtimes: [RuntimeInfo]) -> RuntimeInfo? {
+        let normalized = CodexModelOption.normalizedProvider(provider)
+        return runtimes.first { CodexModelOption.normalizedProvider($0.id) == normalized }
+    }
+
     static func makeMenu(_ input: Input) -> UIMenu {
         var children: [UIMenuElement] = []
 
@@ -116,8 +121,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         return providers.compactMap { provider in
             guard let models = grouped[provider], !models.isEmpty else { return nil }
+            let providerTitle = TurnComposerMetaMapper.providerTitle(for: provider)
+            let catalogEntry = runtimeInfo(for: provider, in: input.runtimeState.availableRuntimes)
+            let isProviderEnabled = catalogEntry?.enabled ?? true
+
+            if !isProviderEnabled {
+                let unavailable = TurnComposerMetaMapper.runtimeUnavailableMessage(catalogEntry?.unavailableReason)
+                return UIMenu(
+                    title: providerTitle,
+                    image: RuntimeProviderLogo.menuUIImage(provider: provider),
+                    options: [],
+                    children: [disabledInfoAction(title: unavailable.title)]
+                )
+            }
+
             return UIMenu(
-                title: TurnComposerMetaMapper.providerTitle(for: provider),
+                title: providerTitle,
                 image: RuntimeProviderLogo.menuUIImage(provider: provider),
                 options: [.singleSelection],
                 children: models.map { model in
@@ -174,7 +193,10 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let options = input.runtimeState.reasoningDisplayOptions
         if options.isEmpty {
             if input.runtimeState.capabilities.supportsReasoningEffort {
-                let reason = "This model does not support reasoning effort levels"
+                let reason = TurnComposerMetaMapper.capabilityReason(
+                    for: .reasoningEffort,
+                    capabilities: input.runtimeState.capabilities
+                )
                 let action = UIAction(title: reason) { _ in }
                 action.attributes.insert(.disabled)
                 return UIMenu(
@@ -215,8 +237,34 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
     private static func speedMenu(_ input: Input) -> UIMenu? {
         let selectedModelCapabilities = modelCapabilitiesForSelectedModel(input)
-        guard input.runtimeState.capabilities.supportsFastMode
-              && (selectedModelCapabilities?.supportsFastMode ?? true) else { return nil }
+        guard input.runtimeState.capabilities.supportsFastMode else {
+            let reason = TurnComposerMetaMapper.capabilityReason(
+                for: .fastMode,
+                capabilities: input.runtimeState.capabilities
+            )
+            let action = disabledInfoAction(title: reason)
+            return UIMenu(
+                title: "Speed",
+                subtitle: "Unavailable",
+                image: UIImage(systemName: "bolt.fill"),
+                options: [],
+                children: [action]
+            )
+        }
+        guard selectedModelCapabilities?.supportsFastMode ?? true else {
+            let reason = TurnComposerMetaMapper.capabilityReason(
+                for: .fastMode,
+                capabilities: selectedModelCapabilities ?? input.runtimeState.capabilities
+            )
+            let action = disabledInfoAction(title: reason)
+            return UIMenu(
+                title: "Speed",
+                subtitle: "Unavailable",
+                image: UIImage(systemName: "bolt.fill"),
+                options: [],
+                children: [action]
+            )
+        }
 
         let normalAction = UIAction(
             title: "Normal",

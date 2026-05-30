@@ -18,12 +18,27 @@ struct SettingsRuntimeDefaultsCard: View {
             Picker("Model", selection: runtimeModelSelection) {
                 Text("Auto").tag(runtimeAutoValue)
                 ForEach(runtimeModelOptions, id: \.selectionKey) { model in
-                    Text(TurnComposerMetaMapper.modelTitle(for: model))
+                    Text(TurnComposerMetaMapper.settingsModelLabel(for: model))
                         .tag(model.selectionKey)
                 }
             }
             .pickerStyle(.menu)
             .tint(settingsAccentColor)
+
+            if showsOpenCodeAgentPicker {
+                Picker("OpenCode agent", selection: defaultOpenCodeAgentSelection) {
+                    ForEach(codex.availableAgents, id: \.id) { agent in
+                        Text(TurnComposerMetaMapper.agentTitle(for: agent.id))
+                            .tag(agent.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(settingsAccentColor)
+
+                Text("Used for new OpenCode chats when no per-thread agent is set.")
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
 
             Picker("Reasoning", selection: runtimeReasoningSelection) {
                 Text("Auto").tag(runtimeAutoValue)
@@ -70,6 +85,15 @@ struct SettingsRuntimeDefaultsCard: View {
         }
     }
 
+    private var showsOpenCodeAgentPicker: Bool {
+        guard let opencodeRuntime = codex.availableRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == "opencode"
+        }) else {
+            return false
+        }
+        return opencodeRuntime.enabled && !codex.availableAgents.isEmpty
+    }
+
     private var runtimeModelOptions: [CodexModelOption] {
         TurnComposerMetaMapper.orderedModels(from: codex.availableModels)
     }
@@ -86,6 +110,17 @@ struct SettingsRuntimeDefaultsCard: View {
             set: { selection in
                 codex.setSelectedModelId(selection == runtimeAutoValue ? nil : selection)
             }
+        )
+    }
+
+    private var defaultOpenCodeAgentSelection: Binding<String> {
+        Binding(
+            get: {
+                codex.defaultOpenCodeAgentId
+                    ?? codex.availableAgents.first?.id
+                    ?? "build"
+            },
+            set: { codex.setDefaultOpenCodeAgent($0) }
         )
     }
 

@@ -243,8 +243,15 @@ extension CodexService {
         persistRuntimeSelections()
     }
 
-    func setSelectedAgentOverride(_ agent: String?, for threadId: String?) {
+    func setSelectedAgentOverride(_ agent: String?, for _: String?) {
         opencodeAgentOverride = agent
+    }
+
+    func setDefaultOpenCodeAgent(_ agent: String?) {
+        let normalized = agent?.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaultOpenCodeAgentId = (normalized?.isEmpty == false) ? normalized : nil
+        opencodeAgentOverride = defaultOpenCodeAgentId
+        persistRuntimeSelections()
     }
 
     func fetchRuntimeCatalog() async throws {
@@ -311,6 +318,10 @@ extension CodexService {
             )
             availableRuntimes.append(runtimeInfo)
             availableAgents.append(contentsOf: agents)
+        }
+
+        if opencodeAgentOverride == nil, let defaultOpenCodeAgentId {
+            opencodeAgentOverride = defaultOpenCodeAgentId
         }
     }
 
@@ -851,6 +862,13 @@ private extension CodexService {
         }
 
         defaults.set(selectedAccessMode.rawValue, forKey: Self.selectedAccessModeDefaultsKey)
+
+        if let defaultOpenCodeAgentId, !defaultOpenCodeAgentId.isEmpty {
+            defaults.set(defaultOpenCodeAgentId, forKey: Self.defaultOpenCodeAgentDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.defaultOpenCodeAgentDefaultsKey)
+        }
+
         persistThreadRuntimeOverrides()
     }
 

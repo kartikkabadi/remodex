@@ -83,7 +83,7 @@ struct SlashCommandAutocompletePanel: View {
                         ForEach(items) { item in
                             let isEnabled = isCommandEnabled(item) && supportsSlashCommands
                             let disabledReason: String? = !supportsSlashCommands
-                                ? "Slash commands not supported by this runtime"
+                                ? TurnComposerMetaMapper.capabilityReason(for: .slashCommands)
                                 : (!isCommandEnabled(item) ? commandSubtitle(for: item) : nil)
                             Button {
                                 HapticFeedback.shared.triggerImpactFeedback(style: .light)

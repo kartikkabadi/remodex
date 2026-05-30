@@ -3,7 +3,7 @@
 //          (enabled / greyed / hidden) for composer controls.
 // Layer: View Helper
 // Exports: CapabilityGreyOutModifier, View.capabilityGreyOut(isEnabled:reason:)
-// Depends on: SwiftUI
+// Depends on: SwiftUI, ComposerDisabledAppearance, AppFont
 
 import SwiftUI
 
@@ -15,14 +15,21 @@ struct CapabilityGreyOutModifier: ViewModifier {
         VStack(alignment: .leading, spacing: 4) {
             content
                 .disabled(!isEnabled)
-                .opacity(isEnabled ? 1.0 : 0.5)
+                .opacity(isEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
+                .accessibilityHint(accessibilityHint)
 
             if let reason, !isEnabled {
                 Text(reason)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(ComposerDisabledAppearance.captionFont)
+                    .foregroundStyle(ComposerDisabledAppearance.captionColor)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var accessibilityHint: String {
+        guard !isEnabled, let reason, !reason.isEmpty else { return "" }
+        return reason
     }
 }
 
@@ -31,3 +38,20 @@ extension View {
         modifier(CapabilityGreyOutModifier(isEnabled: isEnabled, reason: reason))
     }
 }
+
+#if DEBUG
+#Preview("Capability grey-out") {
+    VStack(alignment: .leading, spacing: 16) {
+        Button("Voice") {}
+            .capabilityGreyOut(isEnabled: true, reason: nil)
+
+        Button("Voice") {}
+            .capabilityGreyOut(
+                isEnabled: false,
+                reason: TurnComposerMetaMapper.capabilityReason(for: .voice)
+            )
+    }
+    .padding()
+    .background(Color.black)
+}
+#endif

@@ -81,13 +81,9 @@ struct SidebarThreadRowView: View {
                 // Keep trailing metadata inside the main stack so long titles truncate before it.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        // Pinned glyph hidden on the row itself: pinned threads already
-                        // live under the "Pinned" section header, so the per-row badge
-                        // was redundant. Kept the `isPinned` plumbing for the context
-                        // menu / accessibility / future use.
-                        // if isPinned && !thread.isSubagent {
-                        //     SidebarPinIcon(style: .rowBadge)
-                        // }
+                        if !thread.isSubagent {
+                            SidebarProviderBadge(provider: thread.modelProvider)
+                        }
 
                         Text(thread.displayTitle)
                             .font(AppFont.body())
@@ -115,10 +111,23 @@ struct SidebarThreadRowView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
+        .accessibilityLabel(
+            thread.displayTitle
+                + ", "
+                + TurnComposerMetaMapper.threadProviderAccessibilityLabel(for: thread.modelProvider)
+        )
+    }
+
+    private var showsOpenCodeBetaBadge: Bool {
+        CodexModelOption.normalizedProvider(thread.modelProvider) == "opencode"
     }
 
     private var parentTrailingMeta: some View {
         HStack(spacing: 6) {
+            if showsOpenCodeBetaBadge {
+                SidebarOpenCodeBetaCapsule()
+            }
+
             if thread.syncState == .archivedLocal {
                 Text("Archived")
                     .font(AppFont.caption2())

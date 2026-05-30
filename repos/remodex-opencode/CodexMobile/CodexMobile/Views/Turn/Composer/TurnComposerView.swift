@@ -671,7 +671,8 @@ private struct ComposerPreviewContent: View {
                 availableAgents: [],
                 selectedAgent: nil,
                 isRuntimeEnabled: true,
-                runtimeUnavailableReason: nil
+                runtimeUnavailableReason: nil,
+                availableRuntimes: []
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },

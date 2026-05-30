@@ -440,6 +440,7 @@ final class CodexService {
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var selectedAccessMode: CodexAccessMode = .onRequest
     var opencodeAgentOverride: String?
+    var defaultOpenCodeAgentId: String?
     var availableAgents: [AgentOption] = []
     var availableRuntimes: [RuntimeInfo] = []
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
@@ -739,6 +740,7 @@ final class CodexService {
     static let threadRuntimeOverridesDefaultsKey = "codex.threadRuntimeOverrides"
     static let planSessionSourcesDefaultsKey = "codex.planSessionSources"
     static let selectedAccessModeDefaultsKey = "codex.selectedAccessMode"
+    static let defaultOpenCodeAgentDefaultsKey = "codex.defaultOpenCodeAgent"
     static let locallyArchivedThreadIDsKey = "codex.locallyArchivedThreadIDs"
     static let locallyDeletedThreadIDsKey = "codex.locallyDeletedThreadIDs"
     static let forkedThreadOriginsDefaultsKey = "codex.forkedThreadOrigins"
@@ -826,6 +828,11 @@ final class CodexService {
         } else {
             self.selectedAccessMode = .onRequest
         }
+
+        let savedDefaultAgent = defaults.string(forKey: Self.defaultOpenCodeAgentDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        self.defaultOpenCodeAgentId = (savedDefaultAgent?.isEmpty == false) ? savedDefaultAgent : nil
+        self.opencodeAgentOverride = self.defaultOpenCodeAgentId
 
         self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()
 

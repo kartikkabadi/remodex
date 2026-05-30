@@ -114,24 +114,34 @@ struct TurnComposerHostView: View {
 
         // When the runtime provider is explicitly disabled, replace the entire composer
         // with an unavailable notice so users see why the controls are missing.
-        if !runtimeState.isRuntimeEnabled, let reason = runtimeState.runtimeUnavailableReason {
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.subheadline)
+        if !runtimeState.isRuntimeEnabled {
+            let unavailable = TurnComposerMetaMapper.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(AppFont.subheadline(weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Text(reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(unavailable.title)
+                            .font(AppFont.subheadline(weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if let hint = unavailable.hint {
+                            Text(hint)
+                                .font(AppFont.caption())
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
                 .padding(.vertical, 12)
                 .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 26))
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
             .padding(.bottom, 4)
+            .accessibilityElement(children: .combine)
         } else {
         TurnComposerView(
             input: $viewModel.input,

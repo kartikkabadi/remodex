@@ -6,8 +6,74 @@
 
 import Foundation
 
+enum ComposerCapability {
+    case voice
+    case planMode
+    case fastMode
+    case slashCommands
+    case reasoningEffort
+    case agentSelection
+}
+
 // Keeps TurnView lightweight by isolating menu formatting/sorting rules.
 enum TurnComposerMetaMapper {
+    // MARK: - Capability copy
+
+    static func capabilityReason(
+        for capability: ComposerCapability,
+        capabilities: ProviderCapabilities = .defaultCodex
+    ) -> String {
+        switch capability {
+        case .voice:
+            return "Voice not supported by this runtime"
+        case .planMode:
+            return "Plan mode not supported by this runtime"
+        case .fastMode:
+            return "Fast mode not supported by this model"
+        case .slashCommands:
+            return "Slash commands not supported by this runtime"
+        case .reasoningEffort:
+            return "This model does not support reasoning effort levels"
+        case .agentSelection:
+            return capabilities.supportsAgentSelection
+                ? "No agents available for this runtime"
+                : "Agent selection not supported by this runtime"
+        }
+    }
+
+    static func runtimeUnavailableMessage(_ rawReason: String?) -> (title: String, hint: String?) {
+        let trimmed = rawReason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else {
+            return ("Runtime unavailable", nil)
+        }
+
+        let normalized = trimmed.lowercased()
+        if normalized.contains("not enabled") {
+            return (trimmed, "Enable OpenCode on your Mac bridge to use this runtime.")
+        }
+        if normalized.contains("not installed") {
+            return ("OpenCode isn't installed on your Mac", "Install OpenCode on the paired Mac, then reconnect.")
+        }
+        if normalized.contains("agents could not be listed") {
+            return (trimmed, "Check OpenCode on your Mac, then refresh the connection.")
+        }
+        return (trimmed, nil)
+    }
+
+    static func settingsModelLabel(for model: CodexModelOption) -> String {
+        let provider = providerTitle(for: model.modelProvider)
+        return "\(provider) · \(modelTitle(for: model))"
+    }
+
+    static func showsOpenCodeBeta(capabilities: ProviderCapabilities) -> Bool {
+        capabilities.supportsAgentSelection
+    }
+
+    static func threadProviderAccessibilityLabel(for provider: String?) -> String {
+        let normalized = CodexModelOption.normalizedProvider(provider ?? "codex")
+        return "\(providerTitle(for: normalized)) thread"
+    }
+
     // MARK: - Provider Mapping
 
     static func providerTitle(for provider: String) -> String {
