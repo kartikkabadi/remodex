@@ -155,26 +155,32 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     var modelProvider: String?
     var reasoningEffort: String?
     var serviceTierRawValue: String?
+    var opencodeAgentId: String?
     var overridesModel: Bool
     var overridesReasoning: Bool
     var overridesServiceTier: Bool
+    var overridesAgent: Bool
 
     init(
         modelId: String? = nil,
         modelProvider: String? = nil,
         reasoningEffort: String? = nil,
         serviceTierRawValue: String? = nil,
+        opencodeAgentId: String? = nil,
         overridesModel: Bool = false,
         overridesReasoning: Bool = false,
-        overridesServiceTier: Bool = false
+        overridesServiceTier: Bool = false,
+        overridesAgent: Bool = false
     ) {
         self.modelId = modelId
         self.modelProvider = modelProvider
         self.reasoningEffort = reasoningEffort
         self.serviceTierRawValue = serviceTierRawValue
+        self.opencodeAgentId = opencodeAgentId
         self.overridesModel = overridesModel
         self.overridesReasoning = overridesReasoning
         self.overridesServiceTier = overridesServiceTier
+        self.overridesAgent = overridesAgent
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -182,9 +188,11 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
         case modelProvider
         case reasoningEffort
         case serviceTierRawValue
+        case opencodeAgentId
         case overridesModel
         case overridesReasoning
         case overridesServiceTier
+        case overridesAgent
     }
 
     init(from decoder: Decoder) throws {
@@ -193,9 +201,24 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
         modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
         serviceTierRawValue = try container.decodeIfPresent(String.self, forKey: .serviceTierRawValue)
+        opencodeAgentId = try container.decodeIfPresent(String.self, forKey: .opencodeAgentId)
         overridesModel = try container.decodeIfPresent(Bool.self, forKey: .overridesModel) ?? false
         overridesReasoning = try container.decodeIfPresent(Bool.self, forKey: .overridesReasoning) ?? false
         overridesServiceTier = try container.decodeIfPresent(Bool.self, forKey: .overridesServiceTier) ?? false
+        overridesAgent = try container.decodeIfPresent(Bool.self, forKey: .overridesAgent) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(modelId, forKey: .modelId)
+        try container.encodeIfPresent(modelProvider, forKey: .modelProvider)
+        try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
+        try container.encodeIfPresent(serviceTierRawValue, forKey: .serviceTierRawValue)
+        try container.encodeIfPresent(opencodeAgentId, forKey: .opencodeAgentId)
+        try container.encode(overridesModel, forKey: .overridesModel)
+        try container.encode(overridesReasoning, forKey: .overridesReasoning)
+        try container.encode(overridesServiceTier, forKey: .overridesServiceTier)
+        try container.encode(overridesAgent, forKey: .overridesAgent)
     }
 
     var serviceTier: CodexServiceTier? {
@@ -206,7 +229,7 @@ struct CodexThreadRuntimeOverride: Codable, Equatable, Sendable {
     }
 
     var isEmpty: Bool {
-        !overridesModel && !overridesReasoning && !overridesServiceTier
+        !overridesModel && !overridesReasoning && !overridesServiceTier && !overridesAgent
     }
 }
 
@@ -439,7 +462,6 @@ final class CodexService {
     // Per-chat runtime overrides let the composer diverge from app-wide defaults.
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var selectedAccessMode: CodexAccessMode = .onRequest
-    var opencodeAgentOverride: String?
     var defaultOpenCodeAgentId: String?
     var availableAgents: [AgentOption] = []
     var availableRuntimes: [RuntimeInfo] = []
@@ -832,7 +854,6 @@ final class CodexService {
         let savedDefaultAgent = defaults.string(forKey: Self.defaultOpenCodeAgentDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         self.defaultOpenCodeAgentId = (savedDefaultAgent?.isEmpty == false) ? savedDefaultAgent : nil
-        self.opencodeAgentOverride = self.defaultOpenCodeAgentId
 
         self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()
 

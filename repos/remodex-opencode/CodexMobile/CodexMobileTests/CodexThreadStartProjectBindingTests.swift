@@ -34,6 +34,30 @@ final class CodexThreadStartProjectBindingTests: XCTestCase {
         XCTAssertEqual(params["modelProvider"]?.stringValue, "opencode")
     }
 
+    func testMakeThreadStartParamsIncludesAgentForOpenCodeProvider() {
+        let params = CodexThreadStartProjectBinding.makeThreadStartParams(
+            modelIdentifier: "opencode/gpt-5.5",
+            modelProvider: "opencode",
+            preferredProjectPath: nil,
+            serviceTier: nil,
+            agent: "plan"
+        )
+
+        XCTAssertEqual(params["agent"]?.stringValue, "plan")
+    }
+
+    func testMakeThreadStartParamsOmitsAgentForCodexProvider() {
+        let params = CodexThreadStartProjectBinding.makeThreadStartParams(
+            modelIdentifier: "gpt-5",
+            modelProvider: "codex",
+            preferredProjectPath: nil,
+            serviceTier: nil,
+            agent: "plan"
+        )
+
+        XCTAssertNil(params["agent"])
+    }
+
     func testMakeThreadStartParamsSkipsEmptyCwd() {
         let normalized = CodexThreadStartProjectBinding.normalizedProjectPath("   ")
         let params = CodexThreadStartProjectBinding.makeThreadStartParams(

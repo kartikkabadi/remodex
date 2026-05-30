@@ -169,13 +169,26 @@ extension CodexService {
             return normalizedServiceTierForSelectedModel(serviceTier)?.rawValue
         }()
         var includesServiceTier = explicitServiceTier != nil
+        let explicitOpenCodeAgent: String? = {
+            let normalizedProvider = CodexModelOption.normalizedProvider(explicitModelProvider ?? "codex")
+            guard normalizedProvider != "codex" else {
+                return nil
+            }
+            if runtimeOverride?.overridesAgent == true,
+               let overrideAgent = runtimeOverride?.opencodeAgentId?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !overrideAgent.isEmpty {
+                return overrideAgent
+            }
+            return effectiveOpenCodeAgent(threadId: nil)
+        }()
 
         while true {
             let params = CodexThreadStartProjectBinding.makeThreadStartParams(
                 modelIdentifier: explicitModelIdentifier,
                 modelProvider: explicitModelProvider,
                 preferredProjectPath: normalizedPreferredProjectPath,
-                serviceTier: includesServiceTier ? explicitServiceTier : nil
+                serviceTier: includesServiceTier ? explicitServiceTier : nil,
+                agent: explicitOpenCodeAgent
             )
 
             do {
@@ -1001,15 +1014,20 @@ enum CodexThreadStartProjectBinding {
         modelIdentifier: String?,
         modelProvider: String?,
         preferredProjectPath: String?,
-        serviceTier: String?
+        serviceTier: String?,
+        agent: String? = nil
     ) -> RPCObject {
         var params: RPCObject = [:]
 
         if let modelIdentifier {
             params["model"] = .string(modelIdentifier)
         }
-        if let modelProvider {
-            params["modelProvider"] = .string(CodexModelOption.normalizedProvider(modelProvider))
+        let normalizedProvider = modelProvider.map { CodexModelOption.normalizedProvider($0) }
+        if let normalizedProvider {
+            params["modelProvider"] = .string(normalizedProvider)
+            if normalizedProvider != "codex", let agent {
+                params["agent"] = .string(agent)
+            }
         }
 
         if let preferredProjectPath {
@@ -2275,6 +2293,9 @@ extension CodexService {
             threadId: threadId
         ) {
             params["collaborationMode"] = collaborationModePayload
+        }
+        if modelProvider != "codex" {
+            params["agent"] = .string(effectiveOpenCodeAgent(threadId: threadId))
         }
         return params
     }

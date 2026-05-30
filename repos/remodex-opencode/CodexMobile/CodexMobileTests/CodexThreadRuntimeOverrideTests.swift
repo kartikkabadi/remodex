@@ -23,8 +23,9 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
 
         var capturedTurnStartParams: [JSONValue] = []
         service.requestTransportOverride = { method, params in
-            XCTAssertEqual(method, "turn/start")
-            capturedTurnStartParams.append(params ?? .null)
+            if method == "turn/start" {
+                capturedTurnStartParams.append(params ?? .null)
+            }
             return RPCMessage(
                 id: .string(UUID().uuidString),
                 result: .object(["turnId": .string("turn-override")]),
@@ -301,6 +302,136 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         XCTAssertEqual(service.selectedReasoningEffortForSelectedModel(threadId: "thread-old"), "low")
     }
 
+    func testPerThreadAgentOverrideDoesNotAffectOtherThreads() {
+        let service = makeService()
+        service.availableAgents = [
+            AgentOption(id: "build", displayName: "Build"),
+            AgentOption(id: "plan", displayName: "Plan"),
+        ]
+        service.setDefaultOpenCodeAgent("build")
+        service.setThreadOpenCodeAgentOverride("plan", for: "thread-a")
+
+        XCTAssertEqual(service.effectiveOpenCodeAgent(threadId: "thread-a"), "plan")
+        XCTAssertEqual(service.effectiveOpenCodeAgent(threadId: "thread-b"), "build")
+    }
+
+    func testSetDefaultOpenCodeAgentDoesNotAlterThreadAgentOverride() {
+        let service = makeService()
+        service.availableAgents = [
+            AgentOption(id: "build", displayName: "Build"),
+            AgentOption(id: "plan", displayName: "Plan"),
+        ]
+        service.setThreadOpenCodeAgentOverride("plan", for: "thread-locked")
+        service.setDefaultOpenCodeAgent("build")
+
+        XCTAssertEqual(service.effectiveOpenCodeAgent(threadId: "thread-locked"), "plan")
+        XCTAssertEqual(service.defaultOpenCodeAgentId, "build")
+    }
+
+    func testThreadAgentOverridePersistsAcrossServiceRelaunch() {
+        let suiteName = "CodexThreadRuntimeOverrideTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let firstService = CodexService(defaults: defaults)
+        Self.retainedServices.append(firstService)
+        firstService.availableAgents = [AgentOption(id: "plan", displayName: "Plan")]
+        firstService.setThreadOpenCodeAgentOverride("plan", for: "thread-agent")
+
+        let secondService = CodexService(defaults: defaults)
+        Self.retainedServices.append(secondService)
+        secondService.availableAgents = [AgentOption(id: "plan", displayName: "Plan")]
+
+        XCTAssertEqual(secondService.effectiveOpenCodeAgent(threadId: "thread-agent"), "plan")
+    }
+
+    func testTurnStartIncludesAgentForOpenCodeThread() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.availableModels = [makeOpenCodeModel()]
+        service.availableAgents = [AgentOption(id: "plan", displayName: "Plan")]
+        service.setSelectedModelId("opencode:gpt-5.5")
+        service.setThreadOpenCodeAgentOverride("plan", for: "thread-opencode")
+
+        var capturedTurnStartParams: [JSONValue] = []
+        service.requestTransportOverride = { method, params in
+            if method == "turn/start" {
+                capturedTurnStartParams.append(params ?? .null)
+            }
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["turnId": .string("turn-opencode")]),
+                includeJSONRPC: false
+            )
+        }
+
+        try await service.sendTurnStart("Ship it", to: "thread-opencode")
+
+        XCTAssertEqual(capturedTurnStartParams.count, 1)
+        XCTAssertEqual(capturedTurnStartParams[0].objectValue?["agent"]?.stringValue, "plan")
+    }
+
+    func testTurnStartOmitsAgentForCodexThread() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.availableModels = [makeModel()]
+        service.setSelectedModelId("gpt-5.4")
+
+        var capturedTurnStartParams: [JSONValue] = []
+        service.requestTransportOverride = { method, params in
+            if method == "turn/start" {
+                capturedTurnStartParams.append(params ?? .null)
+            }
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["turnId": .string("turn-codex")]),
+                includeJSONRPC: false
+            )
+        }
+
+        try await service.sendTurnStart("Ship it", to: "thread-codex")
+
+        XCTAssertEqual(capturedTurnStartParams.count, 1)
+        XCTAssertNil(capturedTurnStartParams[0].objectValue?["agent"])
+    }
+
+    func testStartThreadIncludesAgentForOpenCodeProvider() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.availableModels = [makeOpenCodeModel()]
+        service.availableAgents = [
+            AgentOption(id: "build", displayName: "Build"),
+            AgentOption(id: "plan", displayName: "Plan"),
+        ]
+        service.setSelectedModelId("opencode:gpt-5.5")
+
+        var capturedThreadStartParams: [JSONValue] = []
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "thread/start")
+            capturedThreadStartParams.append(params ?? .null)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "thread": .object([
+                        "id": .string("thread-opencode-new"),
+                        "cwd": .string("/tmp/project"),
+                        "modelProvider": .string("opencode"),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let override = CodexThreadRuntimeOverride(
+            opencodeAgentId: "plan",
+            overridesAgent: true
+        )
+        _ = try await service.startThread(runtimeOverride: override)
+
+        XCTAssertEqual(capturedThreadStartParams.first?.objectValue?["agent"]?.stringValue, "plan")
+        XCTAssertEqual(capturedThreadStartParams.first?.objectValue?["modelProvider"]?.stringValue, "opencode")
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "CodexThreadRuntimeOverrideTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
@@ -353,6 +484,34 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
                 CodexReasoningEffortOption(reasoningEffort: "low", description: "Low"),
             ],
             defaultReasoningEffort: "low"
+        )
+    }
+
+    private func makeOpenCodeModel() -> CodexModelOption {
+        CodexModelOption(
+            id: "gpt-5.5",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode",
+            displayName: "GPT-5.5",
+            description: "OpenCode model",
+            isDefault: true,
+            supportsFastMode: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: nil,
+            capabilities: ProviderCapabilities(
+                supportsAgentSelection: true,
+                supportsReasoningEffort: false,
+                supportsFastMode: false,
+                supportsPlanMode: false,
+                supportsStreamingTools: true,
+                supportsApprovals: true,
+                supportsFork: false,
+                supportsVoice: false,
+                supportsDesktopHandoff: false,
+                supportsSlashCommands: true,
+                supportsMCP: true,
+                supportsWorktree: true
+            )
         )
     }
 }

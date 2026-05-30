@@ -35,7 +35,7 @@ struct SettingsRuntimeDefaultsCard: View {
                 .pickerStyle(.menu)
                 .tint(settingsAccentColor)
 
-                Text("Used for new OpenCode chats when no per-thread agent is set.")
+                Text("Default OpenCode agent for new chats.")
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }

@@ -243,15 +243,111 @@ extension CodexService {
         persistRuntimeSelections()
     }
 
-    func setSelectedAgentOverride(_ agent: String?, for _: String?) {
-        opencodeAgentOverride = agent
+    func setSelectedAgentOverride(_ agent: String?, for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        let normalized = agent?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized, !normalized.isEmpty else {
+            clearThreadOpenCodeAgentOverride(for: normalizedThreadID)
+            return
+        }
+
+        setThreadOpenCodeAgentOverride(normalized, for: normalizedThreadID)
+    }
+
+    func setThreadOpenCodeAgentOverride(_ agentId: String, for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        let normalized = agentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            clearThreadOpenCodeAgentOverride(for: normalizedThreadID)
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.opencodeAgentId = validatedOpenCodeAgentId(normalized) ?? normalized
+            override.overridesAgent = true
+        }
+    }
+
+    func clearThreadOpenCodeAgentOverride(for threadId: String?) {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
+            return
+        }
+
+        mutateThreadRuntimeOverride(for: normalizedThreadID) { override in
+            override.opencodeAgentId = nil
+            override.overridesAgent = false
+        }
     }
 
     func setDefaultOpenCodeAgent(_ agent: String?) {
         let normalized = agent?.trimmingCharacters(in: .whitespacesAndNewlines)
         defaultOpenCodeAgentId = (normalized?.isEmpty == false) ? normalized : nil
-        opencodeAgentOverride = defaultOpenCodeAgentId
         persistRuntimeSelections()
+    }
+
+    func effectiveOpenCodeAgent(threadId: String?) -> String {
+        if let normalizedThreadID = normalizedInterruptIdentifier(threadId),
+           let override = threadRuntimeOverridesByThreadID[normalizedThreadID],
+           override.overridesAgent,
+           let overrideAgent = override.opencodeAgentId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !overrideAgent.isEmpty,
+           let validated = validatedOpenCodeAgentId(overrideAgent) {
+            return validated
+        }
+
+        if let normalizedThreadID = normalizedInterruptIdentifier(threadId),
+           let threadAgent = thread(for: normalizedThreadID)?.opencodeAgent?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !threadAgent.isEmpty,
+           let validated = validatedOpenCodeAgentId(threadAgent) {
+            return validated
+        }
+
+        if let defaultAgent = defaultOpenCodeAgentId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !defaultAgent.isEmpty,
+           let validated = validatedOpenCodeAgentId(defaultAgent) {
+            return validated
+        }
+
+        if let firstCatalogAgent = availableAgents.first?.id,
+           let validated = validatedOpenCodeAgentId(firstCatalogAgent) {
+            return validated
+        }
+
+        return "build"
+    }
+
+    func showsBetaLabel(forProvider provider: String) -> Bool {
+        let normalized = CodexModelOption.normalizedProvider(provider)
+        return availableRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == normalized
+        })?.showsBetaLabel ?? false
+    }
+
+    func catalogUnavailableReason(forProvider provider: String) -> String? {
+        let normalized = CodexModelOption.normalizedProvider(provider)
+        return availableRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == normalized
+        })?.unavailableReason
+    }
+
+    private func validatedOpenCodeAgentId(_ agentId: String) -> String? {
+        let normalized = agentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            return nil
+        }
+        guard !availableAgents.isEmpty else {
+            return normalized
+        }
+        if availableAgents.contains(where: { $0.id == normalized }) {
+            return normalized
+        }
+        return availableAgents.first?.id
     }
 
     func fetchRuntimeCatalog() async throws {
@@ -308,20 +404,19 @@ extension CodexService {
                 return AgentOption(id: agentId, displayName: agentLabel)
             }
 
+            let showsBetaLabel = runtimeObj["showsBetaLabel"]?.boolValue ?? false
+
             let runtimeInfo = RuntimeInfo(
                 id: runtimeId,
                 label: label,
                 enabled: enabled,
                 unavailableReason: unavailableReason,
+                showsBetaLabel: showsBetaLabel,
                 capabilities: capabilities,
                 agents: agents
             )
             availableRuntimes.append(runtimeInfo)
             availableAgents.append(contentsOf: agents)
-        }
-
-        if opencodeAgentOverride == nil, let defaultOpenCodeAgentId {
-            opencodeAgentOverride = defaultOpenCodeAgentId
         }
     }
 
@@ -691,9 +786,11 @@ private extension CodexService {
             modelProvider: nil,
             reasoningEffort: nil,
             serviceTierRawValue: nil,
+            opencodeAgentId: nil,
             overridesModel: false,
             overridesReasoning: false,
-            overridesServiceTier: false
+            overridesServiceTier: false,
+            overridesAgent: false
         )
 
         mutate(&currentOverride)
