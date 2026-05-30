@@ -29,7 +29,7 @@
 | Feature | Codex | OpenCode | Notes |
 |---------|-------|----------|-------|
 | Agent/picker | enabled | enabled | Unified model picker groups by provider |
-| OpenCode agent row | n/a | enabled | build, plan, custom from catalog |
+| OpenCode agent row | n/a | partial | Per-thread override + `thread/start`/`turn/start` `agent` param; device E2E required |
 | Provider display | n/a (flat models) | enabled | upstream provider name as subtitle |
 | Model list | enabled | enabled | Merged in model/list |
 | Reasoning/effort | enabled per model | enabled/greyed per model | Greyed if no effort levels |
@@ -49,20 +49,20 @@
 | Steer/queue | enabled | greyed | Not yet implemented for OpenCode |
 | Pairing/E2EE | enabled | enabled | Unchanged from Codex |
 | Thread history | enabled | enabled | SDK session.messages for OpenCode |
-| Composer capability grey-out | enabled | enabled | iOS 2026-05-30: shared `ComposerDisabledAppearance` + mapper copy; simulator build verified |
-| Runtime unavailable banner | enabled | enabled | iOS 2026-05-30: glass banner + bridge reason mapping; simulator build verified |
-| Sidebar provider badge | enabled | enabled | iOS 2026-05-30: `SidebarProviderBadge` on thread rows; simulator build verified |
-| OpenCode beta label | n/a | enabled | iOS 2026-05-30: sidebar + composer pill; device taste review pending |
-| Settings default OpenCode agent | n/a | enabled | iOS 2026-05-30: `SettingsRuntimeDefaultsCard` picker + UserDefaults; device proof pending |
+| Composer capability grey-out | enabled | simulator-only | `ComposerDisabledAppearance` + `ComposerCapabilityCopy`; simulator build verified |
+| Runtime unavailable banner | enabled | simulator-only | Catalog-driven disabled providers; device proof pending |
+| Sidebar provider badge | enabled | simulator-only | `SidebarProviderBadge`; device proof pending |
+| OpenCode beta label | n/a | simulator-only | `RuntimeInfo.showsBetaLabel` from catalog; `OpenCodeBetaCapsule` in Shared |
+| Settings default OpenCode agent | n/a | simulator-only | Default for new chats only; per-thread override on composer |
 
-*Cells are `enabled` | `greyed` (+ reason) | `n/a`. Only mark `enabled` with device proof.*
+*Cells are `enabled` | `greyed` | `partial` | `simulator-only` | `n/a`. Only mark `enabled` after the device E2E checklist below passes.*
 
 ## Device E2E checklist (iPhone + Mac)
 
 Run before parity sign-off. Bridge: `cd phodex-bridge && REMODEX_ENABLE_OPENCODE=1 npm start`. Pair via QR in CodexMobile.
 
 1. Model picker shows Codex and OpenCode groups with provider logos.
-2. OpenCode thread: agent submenu, greyed voice/plan/fast where capabilities false.
+2. OpenCode thread: agent submenu changes agent; turn sends with selected agent; greyed voice/plan where capabilities false.
 3. Send a turn on OpenCode; streaming text and tool cards render.
 4. Stop button works mid-turn.
 5. Fork and desktop handoff hidden on OpenCode threads.

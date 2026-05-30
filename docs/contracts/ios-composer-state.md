@@ -83,8 +83,14 @@ Each row in the composer has three visibility states:
 - **Hidden when:** `selectedModel.capabilities.supportsAgentSelection == false`
 - **Hidden when:** Codex model selected (Codex has no agent concept)
 - Agents from `runtime/catalog → runtimes.find("opencode").agents`
-- Default agent: "build" (always first in list)
-- On thread resume: restore agent from `CodexThread.opencodeAgent`
+- **Effective agent resolution** (`CodexService.effectiveOpenCodeAgent(threadId:)`), in order:
+  1. Per-thread override: `CodexThreadRuntimeOverride.opencodeAgentId` when `overridesAgent == true`
+  2. Thread metadata: `CodexThread.opencodeAgent` from bridge
+  3. Settings default: `defaultOpenCodeAgentId` (UserDefaults)
+  4. First catalog agent id, else `"build"`
+- Settings picker sets **default only**; it does not mutate existing thread overrides.
+- `thread/start` and `turn/start` include `params.agent` when `modelProvider != "codex"`.
+- User-facing grey-out copy lives in `ComposerCapabilityCopy` (not `TurnComposerMetaMapper`).
 
 ### Intelligence (Reasoning Effort) Row
 
@@ -170,9 +176,15 @@ struct CapabilityGreyOutModifier: ViewModifier {
 ## Persistence
 
 - **Last model per provider:** `UserDefaults` stores the last selected model for Codex and OpenCode separately.
-- **Last agent:** `UserDefaults` stores the last selected OpenCode agent.
+- **Default OpenCode agent:** `defaultOpenCodeAgentId` in UserDefaults (Settings → Runtime defaults).
+- **Per-thread runtime overrides:** `CodexThreadRuntimeOverride` persisted in `codex.threadRuntimeOverrides` (model, reasoning, service tier, **opencode agent** with `overridesAgent`).
 - **Thread-specific state:** `CodexThread.modelProvider` and `CodexThread.opencodeAgent` are stored in the thread model for resume.
 - **On bridge reconnect:** `runtime/catalog` and `model/list` are re-fetched. Capabilities may have changed (OpenCode update added voice support). UI updates accordingly.
+
+## Runtime catalog metadata (not capability flags)
+
+- `RuntimeInfo.showsBetaLabel` — bridge `runtime/catalog` boolean per runtime (OpenCode `true`, Codex `false`). Composer and sidebar Beta UI read `CodexService.showsBetaLabel(forProvider:)`; views must not compare `modelProvider == "opencode"` for Beta.
+- `TurnComposerRuntimeState` carries `disabledProviderIDs` and `unavailableReasonByProviderID` for the UIKit model submenu (not the full `availableRuntimes` array).
 
 ## Multi-Thread State
 
