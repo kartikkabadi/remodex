@@ -449,10 +449,10 @@ async function buildRuntimeCatalog(providers, env) {
     const enabled = readString(env.REMODEX_ENABLE_OPENCODE) === "1" && Boolean(hasCommand);
     let agents = [];
     try {
-      const raw = await opencodeProvider.getAgentList();
+      const raw = await opencodeProvider.listAgents();
       agents = (raw || []).map((a) => ({
         id: readString(a?.id || a),
-        label: readString(a?.name || a?.displayName || a?.id || a),
+        label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
       }));
     } catch {
       /* catalog not available */
@@ -477,8 +477,7 @@ async function buildRuntimeCatalog(providers, env) {
         supportsStreamingTools: true,
         supportsSlashCommands: true,
         supportsMCP: true,
-        transport: "acp",
-        transportFallback: "cli",
+        transport: "http",
       },
     });
   }
