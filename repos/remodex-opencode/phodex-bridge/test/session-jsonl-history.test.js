@@ -110,7 +110,7 @@ test("readThreadTurnsListPageFromSessionJsonl builds a recent turns page from ro
     [
       ["user_message", "user", "please fix this"],
       ["message", "assistant", "fixed"],
-    ]
+    ],
   );
 });
 
@@ -186,7 +186,7 @@ test("readThreadTurnsListPageFromSessionJsonl caps fallback pages to five turns"
   assert.equal(page.data.length, 5);
   assert.deepEqual(
     page.data.map((turn) => turn.id),
-    ["turn-8", "turn-7", "turn-6", "turn-5", "turn-4"]
+    ["turn-8", "turn-7", "turn-6", "turn-5", "turn-4"],
   );
   assert.equal(page.nextCursor, "remodex-jsonl-fallback-older-unavailable");
 });
@@ -248,8 +248,8 @@ test("parseSessionJsonlTurns restores desktop custom apply_patch as fileChange",
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    "-let title = \"Old\"",
-    "+let title = \"New\"",
+    '-let title = "Old"',
+    '+let title = "New"',
     "*** End Patch",
     "",
   ].join("\n");
@@ -281,17 +281,22 @@ test("parseSessionJsonlTurns restores desktop custom apply_patch as fileChange",
   assert.equal(turns[0].items.length, 1);
   assert.equal(turns[0].items[0].type, "fileChange");
   assert.equal(turns[0].items[0].id, "call-patch");
-  assert.deepEqual(turns[0].items[0].changes.map((change) => ({
-    path: change.path,
-    kind: change.kind,
-    additions: change.additions,
-    deletions: change.deletions,
-  })), [{
-    path: "Sources/App.swift",
-    kind: "update",
-    additions: 1,
-    deletions: 1,
-  }]);
+  assert.deepEqual(
+    turns[0].items[0].changes.map((change) => ({
+      path: change.path,
+      kind: change.kind,
+      additions: change.additions,
+      deletions: change.deletions,
+    })),
+    [
+      {
+        path: "Sources/App.swift",
+        kind: "update",
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  );
 });
 
 test("parseSessionJsonlTurns restores update_plan calls as progress plan items", () => {
@@ -420,25 +425,28 @@ test("parseSessionJsonlTurns adds readable messages for generic tool calls", () 
   const turns = parseSessionJsonlTurns(content, { threadId: "thread-tools" });
 
   assert.equal(turns.length, 1);
-  assert.deepEqual(turns[0].items.map((item) => ({
-    id: item.id,
-    type: item.type,
-    message: item.message,
-    toolName: item.tool_name,
-  })), [
-    {
-      id: "call-stdin",
-      type: "tool_call",
-      message: "Write to terminal",
-      toolName: "write_stdin",
-    },
-    {
-      id: "call-image",
-      type: "tool_call",
-      message: "Open image …/screenshots/detail.png",
-      toolName: "view_image",
-    },
-  ]);
+  assert.deepEqual(
+    turns[0].items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      message: item.message,
+      toolName: item.tool_name,
+    })),
+    [
+      {
+        id: "call-stdin",
+        type: "tool_call",
+        message: "Write to terminal",
+        toolName: "write_stdin",
+      },
+      {
+        id: "call-image",
+        type: "tool_call",
+        message: "Open image …/screenshots/detail.png",
+        toolName: "view_image",
+      },
+    ],
+  );
 });
 
 test("parseSessionJsonlTurns restores completed desktop Plan items without duplicating proposed_plan messages", () => {
@@ -477,10 +485,12 @@ test("parseSessionJsonlTurns restores completed desktop Plan items without dupli
       payload: {
         type: "message",
         role: "assistant",
-        content: [{
-          type: "output_text",
-          text: "<proposed_plan>\n# Improve Dashboard\n\n- Tighten validation\n</proposed_plan>",
-        }],
+        content: [
+          {
+            type: "output_text",
+            text: "<proposed_plan>\n# Improve Dashboard\n\n- Tighten validation\n</proposed_plan>",
+          },
+        ],
       },
     }),
     JSON.stringify({
@@ -547,10 +557,12 @@ test("parseSessionJsonlTurns hides subagent orchestration transcript internals",
       payload: {
         type: "message",
         role: "user",
-        content: [{
-          type: "input_text",
-          text: "<subagent_notification>\n{\"status\":{\"completed\":\"done\"}}",
-        }],
+        content: [
+          {
+            type: "input_text",
+            text: '<subagent_notification>\n{"status":{"completed":"done"}}',
+          },
+        ],
       },
     }),
     JSON.stringify({
@@ -576,10 +588,15 @@ test("parseSessionJsonlTurns hides subagent orchestration transcript internals",
 
   assert.equal(turns.length, 1);
   assert.deepEqual(
-    turns[0].items.map((item) => [item.type, item.role, item.name, item.text || item.content?.[0]?.text]),
+    turns[0].items.map((item) => [
+      item.type,
+      item.role,
+      item.name,
+      item.text || item.content?.[0]?.text,
+    ]),
     [
       ["user_message", "user", undefined, "Compare these codebases"],
       ["message", "assistant", undefined, "Final synthesis"],
-    ]
+    ],
   );
 });

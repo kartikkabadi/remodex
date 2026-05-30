@@ -8,6 +8,8 @@ import SwiftUI
 
 struct TurnComposerAutocompleteState {
     let availableSlashCommands: [TurnComposerSlashCommand]
+    let supportsSlashCommands: Bool
+    let supportsThreadFork: Bool
     let fileAutocompleteItems: [CodexFuzzyFileMatch]
     let isFileAutocompleteVisible: Bool
     let isFileAutocompleteLoading: Bool

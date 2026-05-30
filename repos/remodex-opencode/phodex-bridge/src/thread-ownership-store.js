@@ -8,6 +8,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { readString } = require("./normalize");
 
 function createThreadOwnershipStore({
   storagePath = "",
@@ -130,18 +131,15 @@ function writeOwnershipState(filePath, state, fsImpl) {
 
 function normalizeOwnershipState(state) {
   return {
-    ownership: state.ownership && typeof state.ownership === "object" && !Array.isArray(state.ownership)
-      ? state.ownership
-      : {},
+    ownership:
+      state.ownership && typeof state.ownership === "object" && !Array.isArray(state.ownership)
+        ? state.ownership
+        : {},
   };
 }
 
 function emptyOwnershipState() {
   return { ownership: {} };
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = { createThreadOwnershipStore };

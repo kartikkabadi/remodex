@@ -6,15 +6,35 @@
 // Exports: createOpenCodeProvider
 // Depends on: ./opencode-server, ./opencode-client, ./opencode-models, ./provider-capabilities, ./thread-ownership-store
 
+const { readString } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
 const { createOpenCodeClient } = require("./opencode-client");
 const {
   DEFAULT_OPENCODE_MODEL,
   OPENCODE_PROVIDER_ID,
-  normalizeOpenCodeModelReference,
+  appendNonEmpty,
+  boundedPositiveInteger,
+  buildPromptFromTurnInput,
+  compareThreadsByUpdatedAt,
+  messagesToTurns,
+  normalizeOpenCodeModel,
+  publicThread,
+  readThreadId,
+  removeUndefinedValues,
+  textContent,
 } = require("./opencode-models");
-const { resolveModelCapabilities } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
+const { createOpenCodeSessionStore } = require("./opencode-session-store");
+
+const ERROR_CODES = {
+  OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
+  OPENCODE_SERVER_UNREACHABLE: { errorCode: "opencode_server_unreachable", action: "show_retry" },
+  OPENCODE_MODEL_UNAVAILABLE: { errorCode: "opencode_model_unavailable", action: "pick_different_model" },
+  OPENCODE_AGENT_UNAVAILABLE: { errorCode: "opencode_agent_unavailable", action: "pick_different_agent" },
+  OPENCODE_SESSION_EXPIRED: { errorCode: "opencode_session_expired", action: "restart_thread" },
+  OPENCODE_TURN_FAILED: { errorCode: "opencode_turn_failed", action: "show_retry" },
+  OPENCODE_PERMISSION_TIMEOUT: { errorCode: "opencode_permission_timeout", action: "show_timeout" },
+};
 
 const HEALTH_RESTART_WINDOW_MS = 5 * 60 * 1000;
 const HEALTH_MAX_RESTARTS = 3;
@@ -25,6 +45,7 @@ function createOpenCodeProvider({
   env = process.env,
   projectRegistry = null,
   ownershipStore = null,
+  sessionStore = null,
   logPrefix = "[remodex]",
   serverFactory = null,
   clientFactory = null,
@@ -33,10 +54,10 @@ function createOpenCodeProvider({
     ? serverFactory({ env, logPrefix: `${logPrefix}:server` })
     : createOpenCodeServer({ env, logPrefix: `${logPrefix}:server` });
   const ownership = ownershipStore || createThreadOwnershipStore();
+  const sessions = sessionStore || createOpenCodeSessionStore();
 
   let client = null;
   let healthy = false;
-  let healthReason = "";
   let restartCount = 0;
   let restartWindowStart = 0;
   let lastActivityAt = 0;
@@ -54,6 +75,7 @@ function createOpenCodeProvider({
         ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
         : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
       healthy = true;
+      restoreSessions();
       return;
     }
 
@@ -61,8 +83,10 @@ function createOpenCodeProvider({
       try {
         await startServer();
       } catch (error) {
-        healthReason = error.message;
-        throw error;
+        const enriched = new Error("OpenCode is not available on this Mac.");
+        enriched.errorCode = ERROR_CODES.OPENCODE_NOT_INSTALLED.errorCode;
+        enriched.action = ERROR_CODES.OPENCODE_NOT_INSTALLED.action;
+        throw enriched;
       }
     }
   }
@@ -78,21 +102,23 @@ function createOpenCodeProvider({
     }
 
     restartCount++;
-    console.log(`${logPrefix} Starting OpenCode server (attempt ${restartCount}/${HEALTH_MAX_RESTARTS})...`);
+    console.log(
+      `${logPrefix} Starting OpenCode server (attempt ${restartCount}/${HEALTH_MAX_RESTARTS})...`,
+    );
 
     await server.start();
     client = clientFactory
       ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
       : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
     healthy = true;
-    healthReason = "";
+    restoreSessions();
+
     resetIdleTimer();
   }
 
   function ownsThread(threadId) {
     const normalized = readString(threadId);
-    return ownership.ownsThread(normalized, OPENCODE_PROVIDER_ID)
-      || threads.has(normalized);
+    return ownership.ownsThread(normalized, OPENCODE_PROVIDER_ID) || threads.has(normalized);
   }
 
   async function listModels() {
@@ -145,7 +171,7 @@ function createOpenCodeProvider({
         seen.add(thread.id);
         return true;
       })
-      .sort(compareThreadsByUpdatedAt)
+      .toSorted(compareThreadsByUpdatedAt)
       .slice(0, limit);
 
     return { data, nextCursor: null };
@@ -154,15 +180,25 @@ function createOpenCodeProvider({
   async function handleRequest(request) {
     const method = readString(request?.method);
     switch (method) {
-      case "thread/start": return threadStart(request);
+      case "thread/start":
+        return threadStart(request);
       case "thread/resume":
-      case "thread/read": return threadRead(request);
-      case "thread/turns/list": return threadTurnsList(request);
-      case "thread/name/set": return threadNameSet(request);
-      case "thread/archive": return threadArchive(request, true);
-      case "thread/unarchive": return threadArchive(request, false);
-      case "turn/start": return turnStart(request);
-      case "turn/interrupt": return turnInterrupt(request);
+      case "thread/read":
+        return threadRead(request);
+      case "thread/turns/list":
+        return threadTurnsList(request);
+      case "thread/name/set":
+        return threadNameSet(request);
+      case "thread/archive":
+        return threadArchive(request, true);
+      case "thread/unarchive":
+        return threadArchive(request, false);
+      case "turn/start":
+        return turnStart(request);
+      case "turn/interrupt":
+        return turnInterrupt(request);
+      case "permission/reply":
+        return permissionReply(request);
       default:
         throw unsupportedMethodError(method);
     }
@@ -174,7 +210,7 @@ function createOpenCodeProvider({
 
   async function shutdown() {
     stopIdleTimer();
-    for (const [turnId, unsubscribe] of eventUnsubscribers) {
+    for (const [, unsubscribe] of eventUnsubscribers) {
       unsubscribe();
     }
     eventUnsubscribers.clear();
@@ -186,7 +222,9 @@ function createOpenCodeProvider({
   async function threadStart(request) {
     const params = request.params || {};
     const now = new Date().toISOString();
-    const requestedCwd = readString(params.cwd || params.current_working_directory || params.working_directory);
+    const requestedCwd = readString(
+      params.cwd || params.current_working_directory || params.working_directory,
+    );
     const threadId = `${OPENCODE_PROVIDER_ID}-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const thread = {
       id: threadId,
@@ -307,7 +345,6 @@ function createOpenCodeProvider({
     const active = {
       agent: thread.agent,
       assistantItemId,
-      assistantText: "",
       effort,
       sessionId: "",
       thread,
@@ -332,6 +369,7 @@ function createOpenCodeProvider({
         const sessionId = await client.createSession({ cwd });
         active.sessionId = sessionId;
         active.thread.sessionId = sessionId;
+        sessions.set(active.thread.id, sessionId);
       } else {
         active.sessionId = active.thread.sessionId;
       }
@@ -345,7 +383,10 @@ function createOpenCodeProvider({
         };
 
         if (method === "item/agentMessage/delta") {
-          active.assistantText += readString(params.delta || "");
+          const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
+          if (assistantItem) {
+            assistantItem.text += readString(params.delta || "");
+          }
         }
 
         if (method === "turn/completed") {
@@ -364,17 +405,18 @@ function createOpenCodeProvider({
 
       await client.prompt({ sessionID: active.sessionId, prompt, cwd });
       active.started = true;
-
     } catch (error) {
       completeTurn({
         errorMessage: error?.message || "OpenCode SDK turn failed.",
+        errorCode: error?.errorCode || ERROR_CODES.OPENCODE_TURN_FAILED.errorCode,
+        action: error?.action || ERROR_CODES.OPENCODE_TURN_FAILED.action,
         status: "failed",
         active,
       });
     }
   }
 
-  function completeTurn({ errorMessage = "", status, active }) {
+  function completeTurn({ errorMessage = "", errorCode = "", action = "", status, active }) {
     const turnId = active.turn.id;
     if (active.completed) return false;
     active.completed = true;
@@ -391,7 +433,7 @@ function createOpenCodeProvider({
     active.turn.completedAt = active.thread.updatedAt;
 
     if (errorMessage) {
-      active.turn.error = { message: errorMessage };
+      active.turn.error = { message: errorMessage, errorCode: errorCode || null, action: action || null };
     }
 
     const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
@@ -402,7 +444,13 @@ function createOpenCodeProvider({
         itemId: assistantItem.id,
         message: assistantItem.text,
         assistantPhase: "final_answer",
-        item: { id: assistantItem.id, turnId, type: "agentMessage", phase: "final", text: assistantItem.text },
+        item: {
+          id: assistantItem.id,
+          turnId,
+          type: "agentMessage",
+          phase: "final",
+          text: assistantItem.text,
+        },
       });
     }
 
@@ -416,6 +464,24 @@ function createOpenCodeProvider({
 
     resetIdleTimer();
     return true;
+  }
+
+  async function permissionReply(request) {
+    const params = request.params || {};
+    const permissionId = readString(
+      params.permissionId || params.permission_id || params.requestId,
+    );
+    const allow = params.allow === true || params.approved === true || params.accept === true;
+    if (!permissionId) {
+      return { success: false, reason: "Missing permission ID" };
+    }
+    try {
+      await ensureStarted();
+      await client.replyToPermission(permissionId, allow);
+      return { success: true, permissionId, allow };
+    } catch (error) {
+      return { success: false, reason: error.message };
+    }
   }
 
   async function turnInterrupt(request) {
@@ -472,14 +538,14 @@ function createOpenCodeProvider({
     return { thread: publicThread(thread) };
   }
 
-  function markActivity() { lastActivityAt = Date.now(); }
-
   function resetIdleTimer() {
     stopIdleTimer();
     idleTimer = setTimeout(() => {
       const idleDuration = Date.now() - lastActivityAt;
       if (idleDuration >= HEALTH_IDLE_SHUTDOWN_MS && activeTurns.size === 0) {
-        console.log(`${logPrefix} OpenCode server idle for ${Math.round(idleDuration / 60000)}min, shutting down.`);
+        console.log(
+          `${logPrefix} OpenCode server idle for ${Math.round(idleDuration / 60000)}min, shutting down.`,
+        );
         server.stop().then(() => {
           client = null;
           healthy = false;
@@ -489,18 +555,36 @@ function createOpenCodeProvider({
   }
 
   function stopIdleTimer() {
-    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function restoreSessions() {
+    for (const [threadId, sessionId] of sessions.entries()) {
+      const thread = threads.get(threadId);
+      if (thread) {
+        thread.sessionId = sessionId;
+      }
+    }
   }
 
   function rememberThreadProject(thread, source) {
     if (!projectRegistry || !thread?.hasProjectCwd) return;
     try {
-      projectRegistry.rememberProjectPath(thread.cwd, { source, provider: OPENCODE_PROVIDER_ID, lastSeenAt: thread.updatedAt || thread.createdAt });
+      projectRegistry.rememberProjectPath(thread.cwd, {
+        source,
+        provider: OPENCODE_PROVIDER_ID,
+        lastSeenAt: thread.updatedAt || thread.createdAt,
+      });
     } catch {}
   }
 
   function emit(method, params) {
-    sendApplicationMessage?.(JSON.stringify({ method, params: removeUndefinedValues(params || {}) }));
+    sendApplicationMessage?.(
+      JSON.stringify({ method, params: removeUndefinedValues(params || {}) }),
+    );
   }
 
   return {
@@ -513,122 +597,6 @@ function createOpenCodeProvider({
     handleApplicationResponse,
     shutdown,
   };
-}
-
-function normalizeOpenCodeModel(value) {
-  return normalizeOpenCodeModelReference(value) || DEFAULT_OPENCODE_MODEL;
-}
-
-function publicThread(thread) {
-  return {
-    id: thread.id,
-    title: thread.title,
-    name: thread.title,
-    cwd: thread.hasProjectCwd !== false ? thread.cwd : null,
-    model: thread.model || DEFAULT_OPENCODE_MODEL,
-    modelProvider: OPENCODE_PROVIDER_ID,
-    provider: OPENCODE_PROVIDER_ID,
-    agent: thread.agent || "",
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
-    metadata: { provider: OPENCODE_PROVIDER_ID },
-  };
-}
-
-function buildPromptFromTurnInput(input) {
-  if (typeof input === "string") return { inputText: input.trim(), prompt: input.trim() };
-  if (!Array.isArray(input)) return { inputText: "", prompt: "" };
-
-  const textParts = [];
-  for (const item of input) {
-    if (typeof item === "string") { appendNonEmpty(textParts, item); continue; }
-    if (!item || typeof item !== "object") continue;
-    const type = readString(item.type).toLowerCase();
-    if (type.includes("image")) {
-      const imagePath = readString(item.path || item.url || item.image_url || item.dataURL);
-      appendNonEmpty(textParts, imagePath ? `[image attached: ${imagePath}]` : "[image attached]");
-      continue;
-    }
-    appendNonEmpty(textParts, item.text || item.content || item.message);
-  }
-  const prompt = textParts.join("\n\n").trim();
-  return { inputText: prompt, prompt };
-}
-
-function messagesToTurns(messages, threadId) {
-  const turns = [];
-  let currentTurn = null;
-  for (const msg of messages) {
-    if (!msg) continue;
-    const role = readString(msg.role);
-    if (role === "user") {
-      currentTurn = {
-        id: `turn-${turns.length}`,
-        model: "",
-        status: "completed",
-        createdAt: msg.createdAt || new Date().toISOString(),
-        items: [{
-          id: `user-${turns.length}`,
-          type: "userMessage",
-          role: "user",
-          text: readString(msg.content || msg.text),
-          content: textContent(readString(msg.content || msg.text)),
-          createdAt: msg.createdAt || new Date().toISOString(),
-        }],
-        metadata: { threadId, provider: OPENCODE_PROVIDER_ID },
-      };
-      turns.push(currentTurn);
-    } else if (role === "assistant" && currentTurn) {
-      currentTurn.items.push({
-        id: `assistant-${turns.length}`,
-        type: "agentMessage",
-        role: "assistant",
-        phase: "final",
-        text: readString(msg.content || msg.text),
-        content: textContent(readString(msg.content || msg.text)),
-        createdAt: msg.createdAt || new Date().toISOString(),
-      });
-    }
-  }
-  return turns;
-}
-
-function textContent(text) {
-  return [{ type: "text", text: text || "" }];
-}
-
-function compareThreadsByUpdatedAt(lhs, rhs) {
-  const lhsTime = Date.parse(lhs?.updatedAt || lhs?.updated_at || lhs?.createdAt || lhs?.created_at || 0) || 0;
-  const rhsTime = Date.parse(rhs?.updatedAt || rhs?.updated_at || rhs?.createdAt || rhs?.created_at || 0) || 0;
-  return rhsTime - lhsTime;
-}
-
-function boundedPositiveInteger(value, fallback) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
-  return Math.min(Math.floor(numeric), 200);
-}
-
-function removeUndefinedValues(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const result = {};
-  for (const [key, child] of Object.entries(value)) {
-    if (child !== undefined) result[key] = removeUndefinedValues(child);
-  }
-  return result;
-}
-
-function appendNonEmpty(target, value) {
-  const text = readString(value);
-  if (text) target.push(text);
-}
-
-function readThreadId(params = {}) {
-  return readString(params.threadId || params.thread_id || params.id);
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function unsupportedMethodError(method) {

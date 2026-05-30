@@ -54,7 +54,12 @@ test("workspace/readFile can return metadata without file content", async () => 
 
 test("workspace/readFile resolves a unique bare filename inside the workspace", async () => {
   const tempDir = makeGitWorkspace();
-  const filePath = path.join(tempDir, "phodex-bridge", "test", "bridge-desktop-ipc-integration.test.js");
+  const filePath = path.join(
+    tempDir,
+    "phodex-bridge",
+    "test",
+    "bridge-desktop-ipc-integration.test.js",
+  );
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, "test('demo', () => {})\n", "utf8");
 
@@ -77,11 +82,12 @@ test("workspace/readFile rejects ambiguous bare filename matches", async () => {
   fs.writeFileSync(secondPath, "let second = true\n", "utf8");
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readFile", {
-      cwd: tempDir,
-      path: "App.swift",
-    }),
-    /Multiple files named "App.swift"/
+    () =>
+      handleWorkspaceMethod("workspace/readFile", {
+        cwd: tempDir,
+        path: "App.swift",
+      }),
+    /Multiple files named "App.swift"/,
   );
 });
 
@@ -112,11 +118,12 @@ test("workspace/readFile rejects files outside the selected workspace", async ()
   fs.writeFileSync(outsidePath, "nope", "utf8");
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readFile", {
-      cwd: tempDir,
-      path: outsidePath,
-    }),
-    /Only files in the current workspace/
+    () =>
+      handleWorkspaceMethod("workspace/readFile", {
+        cwd: tempDir,
+        path: outsidePath,
+      }),
+    /Only files in the current workspace/,
   );
 });
 
@@ -126,10 +133,11 @@ test("workspace/readFile rejects binary files", async () => {
   fs.writeFileSync(filePath, Buffer.from([0x00, 0x01, 0x02, 0x03]));
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readFile", {
-      cwd: tempDir,
-      path: filePath,
-    }),
-    /looks binary/
+    () =>
+      handleWorkspaceMethod("workspace/readFile", {
+        cwd: tempDir,
+        path: filePath,
+      }),
+    /looks binary/,
   );
 });

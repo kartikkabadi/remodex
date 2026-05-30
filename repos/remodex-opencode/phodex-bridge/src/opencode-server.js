@@ -5,6 +5,7 @@
 // Exports: createOpenCodeServer
 // Depends on: child_process, http
 
+const { readString } = require("./normalize");
 const { spawn } = require("child_process");
 const http = require("http");
 
@@ -12,7 +13,6 @@ const START_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const HEALTH_TIMEOUT_MS = 5_000;
 const PORT_RANGE_START = 4200;
-const PORT_RANGE_END = 4300;
 
 function createOpenCodeServer({
   env = process.env,
@@ -72,14 +72,16 @@ function createOpenCodeServer({
         if (match && match[1]) {
           baseUrl = match[1].replace(/\/+$/, "");
           clearTimeout(timeout);
-          waitForHealthy().then(() => {
-            started = true;
-            console.log(`${logPrefix} OpenCode serve ready at ${baseUrl}`);
-            resolve();
-          }).catch((err) => {
-            cleanup();
-            reject(err);
-          });
+          waitForHealthy()
+            .then(() => {
+              started = true;
+              console.log(`${logPrefix} OpenCode serve ready at ${baseUrl}`);
+              resolve();
+            })
+            .catch((err) => {
+              cleanup();
+              reject(err);
+            });
         }
       });
 
@@ -139,7 +141,9 @@ function createOpenCodeServer({
 
         const req = http.get(`${baseUrl}/health`, { timeout: HEALTH_TIMEOUT_MS }, (res) => {
           let body = "";
-          res.on("data", (chunk) => { body += chunk; });
+          res.on("data", (chunk) => {
+            body += chunk;
+          });
           res.on("end", () => {
             try {
               const parsed = JSON.parse(body);
@@ -188,7 +192,9 @@ function createOpenCodeServer({
     return new Promise((resolve) => {
       const killed = setTimeout(() => {
         if (child && !child.killed) {
-          try { child.kill("SIGKILL"); } catch {}
+          try {
+            child.kill("SIGKILL");
+          } catch {}
         }
         child = null;
         started = false;
@@ -219,7 +225,9 @@ function createOpenCodeServer({
   function cleanup() {
     stopping = true;
     if (child) {
-      try { child.kill("SIGTERM"); } catch {}
+      try {
+        child.kill("SIGTERM");
+      } catch {}
       child = null;
     }
     started = false;
@@ -227,16 +235,18 @@ function createOpenCodeServer({
   }
 
   return {
-    get baseUrl() { return baseUrl; },
-    get version() { return version; },
-    get isRunning() { return started && child !== null; },
+    get baseUrl() {
+      return baseUrl;
+    },
+    get version() {
+      return version;
+    },
+    get isRunning() {
+      return started && child !== null;
+    },
     start,
     stop,
   };
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = { createOpenCodeServer };

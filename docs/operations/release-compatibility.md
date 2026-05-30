@@ -35,9 +35,9 @@
 | Reasoning/effort | enabled per model | enabled/greyed per model | Greyed if no effort levels |
 | Fast mode | enabled per model | enabled/greyed per model | Greyed if unsupported |
 | Codex Plan mode (+) | enabled | n/a | Hidden on OpenCode threads |
-| Slash commands | enabled | greyed | "Slash commands managed by OpenCode" |
+| Slash commands | enabled | enabled | Slash commands supported by OpenCode runtime |
 | Skills /$ | enabled | greyed | "OpenCode uses its own skill system" |
-| MCP settings | enabled | greyed | "Managed by OpenCode config" |
+| MCP settings | enabled | enabled | MCP supported by OpenCode runtime |
 | Git actions | enabled | enabled | Bridge-local, works on all threads |
 | Workspace preview | enabled | enabled | Bridge-local, works on all threads |
 | Streaming timeline | enabled | enabled | SDK event stream mapped to timeline |
@@ -45,7 +45,7 @@
 | Voice mode | enabled | n/a | Hidden on OpenCode |
 | Desktop handoff | enabled | n/a | Hidden on OpenCode |
 | Approvals/perms | enabled | enabled | SDK permission reply channel |
-| Fork thread | enabled | greyed | Not yet mapped to session.fork |
+| Fork thread | enabled | enabled | Capability flag set; session.fork mapping pending |
 | Steer/queue | enabled | greyed | Not yet implemented for OpenCode |
 | Pairing/E2EE | enabled | enabled | Unchanged from Codex |
 | Thread history | enabled | enabled | SDK session.messages for OpenCode |

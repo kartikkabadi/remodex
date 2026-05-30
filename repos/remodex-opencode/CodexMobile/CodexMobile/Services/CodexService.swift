@@ -441,6 +441,7 @@ final class CodexService {
     var selectedAccessMode: CodexAccessMode = .onRequest
     var opencodeAgentOverride: String?
     var availableAgents: [AgentOption] = []
+    var availableRuntimes: [RuntimeInfo] = []
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
     var gptAccountSnapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot() {
         didSet {

@@ -22,7 +22,20 @@ const CAPABILITIES = [
   "supportsMCP",
 ];
 
-const CODEX_CAPABILITIES = Object.fromEntries(CAPABILITIES.map((key) => [key, true]));
+const CODEX_CAPABILITIES = {
+  supportsAgentSelection: false,
+  supportsReasoningEffort: true,
+  supportsFastMode: true,
+  supportsPlanMode: true,
+  supportsVoice: true,
+  supportsDesktopHandoff: true,
+  supportsWorktree: true,
+  supportsFork: true,
+  supportsApprovals: true,
+  supportsStreamingTools: true,
+  supportsSlashCommands: true,
+  supportsMCP: true,
+};
 
 const OPENCODE_CAPABILITIES = {
   supportsAgentSelection: true,
@@ -40,16 +53,25 @@ const OPENCODE_CAPABILITIES = {
 };
 
 function resolveModelCapabilities(providerId, modelData = {}) {
-  const base = providerId === CODEX_PROVIDER_ID
-    ? { ...CODEX_CAPABILITIES }
-    : providerId === OPENCODE_PROVIDER_ID
-      ? { ...OPENCODE_CAPABILITIES }
-      : {};
+  modelData = modelData || {};
+  const base =
+    providerId === CODEX_PROVIDER_ID
+      ? { ...CODEX_CAPABILITIES }
+      : providerId === OPENCODE_PROVIDER_ID
+        ? { ...OPENCODE_CAPABILITIES }
+        : { ...CODEX_CAPABILITIES };
 
   const reasoningEfforts = Array.isArray(modelData.supportedReasoningEfforts)
     ? modelData.supportedReasoningEfforts
     : [];
   if (reasoningEfforts.length > 0) {
+    base.supportsReasoningEffort = true;
+  }
+
+  const reasoningEffortsAlt = Array.isArray(modelData.reasoningEfforts)
+    ? modelData.reasoningEfforts
+    : [];
+  if (reasoningEffortsAlt.length > 0) {
     base.supportsReasoningEffort = true;
   }
 
@@ -59,6 +81,10 @@ function resolveModelCapabilities(providerId, modelData = {}) {
 
   if (modelData.supportsReasoning !== undefined) {
     base.supportsReasoningEffort = Boolean(modelData.supportsReasoning);
+  }
+
+  if (modelData.hasReasoning !== undefined) {
+    base.supportsReasoningEffort = Boolean(modelData.hasReasoning);
   }
 
   return base;

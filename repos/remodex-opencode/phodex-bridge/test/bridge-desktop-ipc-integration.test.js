@@ -97,17 +97,19 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
   });
 
   await waitFor(() => relaySocket && relaySocket.readyState === WebSocket.OPEN);
-  relaySocket.send(JSON.stringify({
-    id: "resume-from-phone",
-    method: "thread/resume",
-    params: { threadId: "thread-ipc" },
-  }));
+  relaySocket.send(
+    JSON.stringify({
+      id: "resume-from-phone",
+      method: "thread/resume",
+      params: { threadId: "thread-ipc" },
+    }),
+  );
 
   await waitFor(() => ipcServerSocket, 2_000);
   await wait(25);
   assert.equal(
     fakeCodex.sent.some((message) => message.method === "thread/read"),
-    false
+    false,
   );
 
   writeFrame(ipcServerSocket, {
@@ -120,16 +122,18 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
       change: {
         type: "snapshot",
         conversationState: {
-          requests: [{
-            id: "req-ipc",
-            method: "item/tool/requestUserInput",
-            params: {
-              threadId: "thread-ipc",
-              turnId: "turn-ipc",
-              itemId: "item-ipc",
-              questions: [{ id: "q1", question: "Continue?" }],
+          requests: [
+            {
+              id: "req-ipc",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "thread-ipc",
+                turnId: "turn-ipc",
+                itemId: "item-ipc",
+                questions: [{ id: "q1", question: "Continue?" }],
+              },
             },
-          }],
+          ],
         },
       },
     },
@@ -138,18 +142,20 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
   const actionMessage = await waitForMessage(relayMessages, (message) => message.id === "req-ipc");
   assert.equal(actionMessage.method, "item/tool/requestUserInput");
 
-  relaySocket.send(JSON.stringify({
-    id: "req-ipc",
-    result: {
-      answers: {
-        q1: { answers: ["Yes"] },
+  relaySocket.send(
+    JSON.stringify({
+      id: "req-ipc",
+      result: {
+        answers: {
+          q1: { answers: ["Yes"] },
+        },
       },
-    },
-  }));
+    }),
+  );
 
   const ipcReply = await waitForMessage(
     ipcFrames,
-    (frame) => frame.method === "thread-follower-submit-user-input"
+    (frame) => frame.method === "thread-follower-submit-user-input",
   );
   assert.deepEqual(ipcReply.params, {
     conversationId: "thread-ipc",
@@ -160,18 +166,23 @@ test("bridge forwards desktop IPC actions to the phone and routes replies back t
       },
     },
   });
-  assert.equal(fakeCodex.sent.some((message) => message.id === "req-ipc"), false);
+  assert.equal(
+    fakeCodex.sent.some((message) => message.id === "req-ipc"),
+    false,
+  );
 
   const resolvedMessage = await waitForMessage(
     relayMessages,
-    (message) => message.method === "serverRequest/resolved"
-      && message.params?.requestId === "req-ipc"
+    (message) =>
+      message.method === "serverRequest/resolved" && message.params?.requestId === "req-ipc",
   );
   assert.equal(resolvedMessage.params.threadId, "thread-ipc");
 });
 
 test("bridge recovers desktop IPC state when the first live update is patch-only", async (t) => {
-  const { tempDir, socketPath: ipcSocketPath } = createIpcTestSocket("remodex-bridge-ipc-recovery-");
+  const { tempDir, socketPath: ipcSocketPath } = createIpcTestSocket(
+    "remodex-bridge-ipc-recovery-",
+  );
   const relayServer = new WebSocket.Server({ port: 0 });
   const relayMessages = [];
   let relaySocket = null;
@@ -213,17 +224,19 @@ test("bridge recovers desktop IPC state when the first live update is patch-only
         threadReadResult: {
           conversationState: {
             turns: [],
-            requests: [{
-              id: "req-recovered",
-              method: "item/tool/requestUserInput",
-              completed: true,
-              params: {
-                threadId: "thread-ipc-recovery",
-                turnId: "turn-ipc-recovery",
-                itemId: "item-ipc-recovery",
-                questions: [{ id: "q1", question: "Continue?" }],
+            requests: [
+              {
+                id: "req-recovered",
+                method: "item/tool/requestUserInput",
+                completed: true,
+                params: {
+                  threadId: "thread-ipc-recovery",
+                  turnId: "turn-ipc-recovery",
+                  itemId: "item-ipc-recovery",
+                  questions: [{ id: "q1", question: "Continue?" }],
+                },
               },
-            }],
+            ],
           },
         },
       });
@@ -258,11 +271,13 @@ test("bridge recovers desktop IPC state when the first live update is patch-only
   });
 
   await waitFor(() => relaySocket && relaySocket.readyState === WebSocket.OPEN);
-  relaySocket.send(JSON.stringify({
-    id: "resume-for-recovery",
-    method: "thread/resume",
-    params: { threadId: "thread-ipc-recovery" },
-  }));
+  relaySocket.send(
+    JSON.stringify({
+      id: "resume-for-recovery",
+      method: "thread/resume",
+      params: { threadId: "thread-ipc-recovery" },
+    }),
+  );
 
   await waitFor(() => ipcServerSocket, 2_000);
   writeFrame(ipcServerSocket, {
@@ -274,23 +289,25 @@ test("bridge recovers desktop IPC state when the first live update is patch-only
       conversationId: "thread-ipc-recovery",
       change: {
         type: "patches",
-        patches: [{
-          op: "replace",
-          path: ["requests", 0, "completed"],
-          value: false,
-        }],
+        patches: [
+          {
+            op: "replace",
+            path: ["requests", 0, "completed"],
+            value: false,
+          },
+        ],
       },
     },
   });
 
   const recoveredRequest = await waitForMessage(
     relayMessages,
-    (message) => message.id === "req-recovered"
+    (message) => message.id === "req-recovered",
   );
   assert.equal(recoveredRequest.method, "item/tool/requestUserInput");
   assert.equal(
     fakeCodex.sent.some((message) => message.method === "thread/read"),
-    true
+    true,
   );
 });
 
@@ -365,11 +382,13 @@ test("bridge forwards live desktop assistant deltas to the phone", async (t) => 
   });
 
   await waitFor(() => relaySocket && relaySocket.readyState === WebSocket.OPEN);
-  relaySocket.send(JSON.stringify({
-    id: "resume-from-phone-delta",
-    method: "thread/resume",
-    params: { threadId: "thread-ipc-delta" },
-  }));
+  relaySocket.send(
+    JSON.stringify({
+      id: "resume-from-phone-delta",
+      method: "thread/resume",
+      params: { threadId: "thread-ipc-delta" },
+    }),
+  );
 
   await waitFor(() => ipcServerSocket, 2_000);
   writeFrame(ipcServerSocket, {
@@ -382,14 +401,18 @@ test("bridge forwards live desktop assistant deltas to the phone", async (t) => 
       change: {
         type: "snapshot",
         conversationState: {
-          turns: [{
-            id: "turn-ipc-delta",
-            items: [{
-              id: "assistant-ipc-delta",
-              type: "assistant_message",
-              text: "Hello",
-            }],
-          }],
+          turns: [
+            {
+              id: "turn-ipc-delta",
+              items: [
+                {
+                  id: "assistant-ipc-delta",
+                  type: "assistant_message",
+                  text: "Hello",
+                },
+              ],
+            },
+          ],
         },
       },
     },
@@ -403,18 +426,20 @@ test("bridge forwards live desktop assistant deltas to the phone", async (t) => 
       conversationId: "thread-ipc-delta",
       change: {
         type: "patches",
-        patches: [{
-          op: "replace",
-          path: ["turns", 0, "items", 0, "text"],
-          value: "Hello world",
-        }],
+        patches: [
+          {
+            op: "replace",
+            path: ["turns", 0, "items", 0, "text"],
+            value: "Hello world",
+          },
+        ],
       },
     },
   });
 
   const deltaMessage = await waitForMessage(
     relayMessages,
-    (message) => message.method === "item/agentMessage/delta"
+    (message) => message.method === "item/agentMessage/delta",
   );
   assert.deepEqual(deltaMessage.params, {
     threadId: "thread-ipc-delta",
@@ -507,10 +532,12 @@ function createFakeCodexTransport({
       const parsed = JSON.parse(message);
       sent.push(parsed);
       if (parsed.method === "thread/read") {
-        listeners.message?.(JSON.stringify({
-          id: parsed.id,
-          result: threadReadResult,
-        }));
+        listeners.message?.(
+          JSON.stringify({
+            id: parsed.id,
+            result: threadReadResult,
+          }),
+        );
       }
     },
     onMessage(handler) {
@@ -584,8 +611,9 @@ function safeParseJSON(value) {
 
 function createIpcTestSocket(prefix) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const socketPath = process.platform === "win32"
-    ? `\\\\.\\pipe\\${path.basename(tempDir)}-ipc`
-    : path.join(tempDir, "ipc.sock");
+  const socketPath =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\${path.basename(tempDir)}-ipc`
+      : path.join(tempDir, "ipc.sock");
   return { tempDir, socketPath };
 }

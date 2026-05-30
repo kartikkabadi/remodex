@@ -1,5 +1,7 @@
 # Remodex multi-agent + OpenCode + composer picker — gap checklist
 
+> **OBSOLETE (2026-05-30):** This document predates ADR-004, which pivoted transport from ACP stdio to `opencode serve` HTTP + `@opencode-ai/sdk/v2`. All ACP references below are superseded. See `docs/architecture/004-transport-decision.md` for the current transport design. This file is retained in archive as a historical planning artifact; do not use it to guide implementation.
+
 > **Plan reset (2026-05-29):** Gaps close via **full-integration milestones M1–M5** on branch-as-base (`codex/add-opencode-provider` + fix forward + ACP primary) — **not** by cherry-pick slices or tiny upstream PRs. Each gap resolves to **enabled**, **greyed (+ reason)**, or **n/a** in the parity matrix (`PLAN-SUMMARY.md`). Until a milestone lands, treat open gaps as blocking **enabled** claims in UI.
 
 Verified 2026-05-29 against `repos/remodex` **main** (`28f7d3c`), reference branch `repos/remodex-opencode` (`origin/codex/add-opencode-provider`), scratch specs, and `repos/opencode` ACP docs.

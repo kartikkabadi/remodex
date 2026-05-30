@@ -4,13 +4,10 @@
 const fs = require("fs");
 const { buildApplyPatchFileChangeItem } = require("./apply-patch-changes");
 
-function readThreadTurnsListPageFromSessionJsonl(filePath, {
-  threadId = "",
-  limit = 5,
-  maxLimit = 5,
-  cursor = null,
-  fsModule = fs,
-} = {}) {
+function readThreadTurnsListPageFromSessionJsonl(
+  filePath,
+  { threadId = "", limit = 5, maxLimit = 5, cursor = null, fsModule = fs } = {},
+) {
   if (!filePath || cursor != null) {
     return null;
   }
@@ -24,7 +21,7 @@ function readThreadTurnsListPageFromSessionJsonl(filePath, {
   const requestedLimit = Number.isInteger(limit) && limit > 0 ? limit : 5;
   const requestedMaxLimit = Number.isInteger(maxLimit) && maxLimit > 0 ? maxLimit : 5;
   const safeLimit = Math.min(requestedLimit, requestedMaxLimit, 5);
-  const pageTurns = turns.slice(-safeLimit).reverse();
+  const pageTurns = turns.slice(-safeLimit).toReversed();
   return {
     data: pageTurns,
     nextCursor: turns.length > pageTurns.length ? "remodex-jsonl-fallback-older-unavailable" : null,
@@ -56,12 +53,14 @@ function parseSessionJsonlMetadata(content) {
     }
 
     const payload = objectValue(entry.payload);
-    threadId ||= normalizeString(payload?.id)
-      || normalizeString(payload?.thread_id)
-      || normalizeString(payload?.threadId);
-    cwd ||= normalizeString(payload?.cwd)
-      || normalizeString(payload?.current_working_directory)
-      || normalizeString(payload?.working_directory);
+    threadId ||=
+      normalizeString(payload?.id) ||
+      normalizeString(payload?.thread_id) ||
+      normalizeString(payload?.threadId);
+    cwd ||=
+      normalizeString(payload?.cwd) ||
+      normalizeString(payload?.current_working_directory) ||
+      normalizeString(payload?.working_directory);
 
     if (threadId && cwd) {
       break;
@@ -96,9 +95,10 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
 
     if (entry?.type === "session_meta") {
       const payload = objectValue(entry.payload);
-      sessionThreadId ||= normalizeString(payload?.id)
-        || normalizeString(payload?.thread_id)
-        || normalizeString(payload?.threadId);
+      sessionThreadId ||=
+        normalizeString(payload?.id) ||
+        normalizeString(payload?.thread_id) ||
+        normalizeString(payload?.threadId);
       sessionCwd ||= normalizeString(payload?.cwd);
       continue;
     }
@@ -107,10 +107,11 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
       const payload = objectValue(entry.payload);
       const eventType = normalizeString(payload?.type);
       if (eventType === "task_started") {
-        activeTurnId = normalizeString(payload?.turn_id)
-          || normalizeString(payload?.turnId)
-          || activeTurnId
-          || `turn-line-${index + 1}`;
+        activeTurnId =
+          normalizeString(payload?.turn_id) ||
+          normalizeString(payload?.turnId) ||
+          activeTurnId ||
+          `turn-line-${index + 1}`;
         const turn = ensureTurn(turns, turnsById, activeTurnId, sessionThreadId, entry.timestamp);
         flushPendingUserMessagesToTurn(turn, pendingUserMessages);
         continue;
@@ -120,9 +121,12 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
         const turn = ensureTurn(
           turns,
           turnsById,
-          normalizeString(payload?.turn_id) || normalizeString(payload?.turnId) || activeTurnId || `turn-line-${index + 1}`,
+          normalizeString(payload?.turn_id) ||
+            normalizeString(payload?.turnId) ||
+            activeTurnId ||
+            `turn-line-${index + 1}`,
           sessionThreadId,
-          entry.timestamp
+          entry.timestamp,
         );
         turn.status = "completed";
         activeTurnId = "";
@@ -138,9 +142,12 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
         const turn = ensureTurn(
           turns,
           turnsById,
-          normalizeString(payload?.turn_id) || normalizeString(payload?.turnId) || activeTurnId || `turn-line-${index + 1}`,
+          normalizeString(payload?.turn_id) ||
+            normalizeString(payload?.turnId) ||
+            activeTurnId ||
+            `turn-line-${index + 1}`,
           sessionThreadId,
-          entry.timestamp
+          entry.timestamp,
         );
         const item = normalizeResponseItemForHistory(completedItem, index + 1, {
           cwd: sessionCwd,
@@ -152,7 +159,8 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
       }
 
       if (eventType === "user_message") {
-        const explicitTurnId = normalizeString(payload?.turn_id) || normalizeString(payload?.turnId);
+        const explicitTurnId =
+          normalizeString(payload?.turn_id) || normalizeString(payload?.turnId);
         if (!explicitTurnId && !activeTurnId) {
           pendingUserMessages.push({
             id: normalizeString(payload?.id) || `user-message-line-${index + 1}`,
@@ -168,7 +176,7 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
           turnsById,
           explicitTurnId || activeTurnId || `turn-line-${index + 1}`,
           sessionThreadId,
-          entry.timestamp
+          entry.timestamp,
         );
         turn.items.push({
           id: normalizeString(payload?.id) || `user-message-line-${index + 1}`,
@@ -195,9 +203,12 @@ function parseSessionJsonlTurns(content, { threadId = "" } = {}) {
       const turn = ensureTurn(
         turns,
         turnsById,
-        normalizeString(payload.turn_id) || normalizeString(payload.turnId) || activeTurnId || `turn-line-${index + 1}`,
+        normalizeString(payload.turn_id) ||
+          normalizeString(payload.turnId) ||
+          activeTurnId ||
+          `turn-line-${index + 1}`,
         sessionThreadId,
-        entry.timestamp
+        entry.timestamp,
       );
       const item = normalizeResponseItemForHistory(payload, index + 1, {
         cwd: sessionCwd,
@@ -228,10 +239,11 @@ function shouldSkipDuplicateProposedPlanMessage(turn, item) {
     return false;
   }
 
-  return turn.items.some((candidate) => (
-    normalizeHistoryToken(candidate?.type) === "plan"
-      && candidate?.remodexJsonlProgressPlan !== true
-  ));
+  return turn.items.some(
+    (candidate) =>
+      normalizeHistoryToken(candidate?.type) === "plan" &&
+      candidate?.remodexJsonlProgressPlan !== true,
+  );
 }
 
 function flushPendingUserMessagesToTurn(turn, pendingUserMessages) {
@@ -285,10 +297,11 @@ function normalizeResponseItemForHistory(payload, lineNumber, { cwd = "" } = {})
 
   const item = {
     ...payload,
-    id: normalizeString(payload.id)
-      || normalizeString(payload.item_id)
-      || normalizeString(payload.itemId)
-      || `response-item-line-${lineNumber}`,
+    id:
+      normalizeString(payload.id) ||
+      normalizeString(payload.item_id) ||
+      normalizeString(payload.itemId) ||
+      `response-item-line-${lineNumber}`,
     type,
   };
 
@@ -307,18 +320,20 @@ function normalizeReadableToolItemForHistory(payload, lineNumber, { cwd = "" } =
     return null;
   }
 
-  const toolName = normalizeString(payload.name)
-    || normalizeString(payload.tool_name)
-    || normalizeString(payload.toolName);
+  const toolName =
+    normalizeString(payload.name) ||
+    normalizeString(payload.tool_name) ||
+    normalizeString(payload.toolName);
   if (!toolName) {
     return null;
   }
 
-  const callId = normalizeString(payload.call_id)
-    || normalizeString(payload.callId)
-    || normalizeString(payload.id);
+  const callId =
+    normalizeString(payload.call_id) ||
+    normalizeString(payload.callId) ||
+    normalizeString(payload.id);
   const argumentsObject = parseToolArguments(
-    payload.arguments !== undefined ? payload.arguments : payload.input
+    payload.arguments !== undefined ? payload.arguments : payload.input,
   );
   const id = callId || normalizeString(payload.id) || `tool-call-line-${lineNumber}`;
   const status = normalizeString(payload.status) || "completed";
@@ -355,13 +370,17 @@ function normalizeReadableToolItemForHistory(payload, lineNumber, { cwd = "" } =
 
 function normalizeApplyPatchItemForHistory(payload, lineNumber, { cwd = "" } = {}) {
   const type = normalizeHistoryItemType(payload.type);
-  if (normalizeString(payload.name) !== "apply_patch" || normalizeHistoryToken(type) !== "customtoolcall") {
+  if (
+    normalizeString(payload.name) !== "apply_patch" ||
+    normalizeHistoryToken(type) !== "customtoolcall"
+  ) {
     return null;
   }
 
-  const callId = normalizeString(payload.call_id)
-    || normalizeString(payload.callId)
-    || normalizeString(payload.id);
+  const callId =
+    normalizeString(payload.call_id) ||
+    normalizeString(payload.callId) ||
+    normalizeString(payload.id);
   const item = buildApplyPatchFileChangeItem({
     callId,
     patch: normalizeString(payload.input),
@@ -386,10 +405,11 @@ function normalizeProgressPlanItemForHistory(payload) {
   }
 
   return {
-    id: normalizeString(payload.call_id)
-      || normalizeString(payload.callId)
-      || normalizeString(payload.id)
-      || undefined,
+    id:
+      normalizeString(payload.call_id) ||
+      normalizeString(payload.callId) ||
+      normalizeString(payload.id) ||
+      undefined,
     type: "plan",
     text: explanation || "Planning...",
     explanation: explanation || undefined,
@@ -425,9 +445,8 @@ function normalizeHistoryPlanStatus(rawStatus) {
 }
 
 function parseToolArguments(rawArguments) {
-  const parsed = typeof rawArguments === "string"
-    ? safeParseJSON(normalizeString(rawArguments))
-    : rawArguments;
+  const parsed =
+    typeof rawArguments === "string" ? safeParseJSON(normalizeString(rawArguments)) : rawArguments;
   return objectValue(parsed) || {};
 }
 
@@ -436,23 +455,27 @@ function resolveToolCommand(toolName, argumentsObject) {
     return toolName;
   }
 
-  return firstNonEmptyString([
-    normalizeString(argumentsObject.cmd),
-    normalizeString(argumentsObject.command),
-    normalizeString(argumentsObject.raw_command),
-    normalizeString(argumentsObject.rawCommand),
-    normalizeString(argumentsObject.input),
-  ]) || toolName;
+  return (
+    firstNonEmptyString([
+      normalizeString(argumentsObject.cmd),
+      normalizeString(argumentsObject.command),
+      normalizeString(argumentsObject.raw_command),
+      normalizeString(argumentsObject.rawCommand),
+      normalizeString(argumentsObject.input),
+    ]) || toolName
+  );
 }
 
 function resolveToolWorkingDirectory(argumentsObject, { cwd = "" } = {}) {
-  return firstNonEmptyString([
-    normalizeString(argumentsObject.workdir),
-    normalizeString(argumentsObject.cwd),
-    normalizeString(argumentsObject.working_directory),
-    normalizeString(argumentsObject.workingDirectory),
-    normalizeString(cwd),
-  ]) || "";
+  return (
+    firstNonEmptyString([
+      normalizeString(argumentsObject.workdir),
+      normalizeString(argumentsObject.cwd),
+      normalizeString(argumentsObject.working_directory),
+      normalizeString(argumentsObject.workingDirectory),
+      normalizeString(cwd),
+    ]) || ""
+  );
 }
 
 function isCommandToolName(toolName) {
@@ -530,9 +553,10 @@ function readableSearchMessage(argumentsObject, payload) {
 }
 
 function firstSearchQuery(object) {
-  const direct = normalizeString(object.q)
-    || normalizeString(object.query)
-    || normalizeString(object.search_query);
+  const direct =
+    normalizeString(object.q) ||
+    normalizeString(object.query) ||
+    normalizeString(object.search_query);
   if (direct) {
     return direct;
   }
@@ -547,8 +571,8 @@ function firstSearchQuery(object) {
     return "";
   }
   for (const item of searchArray) {
-    const query = normalizeString(objectValue(item)?.q)
-      || normalizeString(objectValue(item)?.query);
+    const query =
+      normalizeString(objectValue(item)?.q) || normalizeString(objectValue(item)?.query);
     if (query) {
       return query;
     }
@@ -576,11 +600,13 @@ function readableSymbolMessage(verb, argumentsObject, payload) {
 }
 
 function humanizeToolName(toolName) {
-  return normalizeString(toolName)
-    .replace(/^[^.]+\./, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || "tool";
+  return (
+    normalizeString(toolName)
+      .replace(/^[^.]+\./, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "tool"
+  );
 }
 
 function compactHistoryPath(path) {
@@ -659,11 +685,13 @@ function shouldSkipResponseItemForHistory(payload, skippedCallIds) {
 
 function isSubagentOrchestrationCall(payload) {
   const name = normalizeString(payload.name).toLowerCase();
-  return name === "spawn_agent"
-    || name === "wait_agent"
-    || name === "send_input"
-    || name === "resume_agent"
-    || name === "close_agent";
+  return (
+    name === "spawn_agent" ||
+    name === "wait_agent" ||
+    name === "send_input" ||
+    name === "resume_agent" ||
+    name === "close_agent"
+  );
 }
 
 function isInternalProgressPlanCall(payload) {
@@ -708,7 +736,9 @@ function normalizeHistoryItemType(rawType) {
 }
 
 function normalizeHistoryToken(rawType) {
-  return normalizeString(rawType).toLowerCase().replace(/[\s_-]+/g, "");
+  return normalizeString(rawType)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
 function objectValue(value) {

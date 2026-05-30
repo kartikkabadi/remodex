@@ -4,14 +4,17 @@
 // Exports: createRuntimeProviderRouter plus merge helpers used by tests
 // Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store
 
+const { readString } = require("./normalize");
 const { createOpenCodeProvider } = require("./opencode-provider");
 const {
   CODEX_PROVIDER_ID,
   OPENCODE_PROVIDER_ID,
+  compareThreadsByUpdatedAt,
   isOpenCodeProvider,
   readModelProvider,
+  readThreadId,
 } = require("./opencode-models");
-const { resolveModelCapabilities } = require("./provider-capabilities");
+const { CODEX_CAPABILITIES, OPENCODE_CAPABILITIES, resolveModelCapabilities } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 
 const PROVIDER_FIELD_KEYS = [
@@ -62,12 +65,13 @@ function createRuntimeProviderRouter({
       return false;
     }
 
-    const responseProvider = runtimeProviders.find((provider) => (
-      parsed.id != null
-      && !parsed.method
-      && typeof provider.handleApplicationResponse === "function"
-      && provider.handleApplicationResponse(parsed)
-    ));
+    const responseProvider = runtimeProviders.find(
+      (provider) =>
+        parsed.id != null &&
+        !parsed.method &&
+        typeof provider.handleApplicationResponse === "function" &&
+        provider.handleApplicationResponse(parsed),
+    );
     if (responseProvider) {
       return true;
     }
@@ -132,19 +136,23 @@ function createRuntimeProviderRouter({
       .then(resolveResult)
       .then((result) => {
         if (request.id != null) {
-          sendApplicationResponse(JSON.stringify({
-            id: request.id,
-            result,
-          }));
+          sendApplicationResponse(
+            JSON.stringify({
+              id: request.id,
+              result,
+            }),
+          );
         }
       })
       .catch((error) => {
         if (request.id != null) {
-          sendApplicationResponse(createJsonRpcErrorResponse(
-            request.id,
-            error,
-            error?.errorCode || "runtime_provider_failed"
-          ));
+          sendApplicationResponse(
+            createJsonRpcErrorResponse(
+              request.id,
+              error,
+              error?.errorCode || "runtime_provider_failed",
+            ),
+          );
         }
       });
   }
@@ -166,7 +174,9 @@ async function listProviderModels(providers) {
 }
 
 async function listProviderThreads(providers, params) {
-  const settled = await Promise.allSettled(providers.map((provider) => provider.listThreads(params)));
+  const settled = await Promise.allSettled(
+    providers.map((provider) => provider.listThreads(params)),
+  );
   return settled.flatMap((result) => {
     if (result.status !== "fulfilled") {
       return [];
@@ -211,10 +221,7 @@ function mergeModelListResult(codexResult, providerModels) {
 
   return {
     ...result,
-    [key]: [
-      ...normalizedCodexModels,
-      ...providerModels,
-    ],
+    [key]: [...normalizedCodexModels, ...providerModels],
   };
 }
 
@@ -222,7 +229,9 @@ function mergeThreadListResult(codexResult, providerThreads) {
   const result = codexResult && typeof codexResult === "object" ? codexResult : {};
   const key = firstArrayKey(result, ["data", "items", "threads"]) || "data";
   const codexThreads = Array.isArray(result[key]) ? result[key] : [];
-  const merged = dedupeMergedThreads(codexThreads, providerThreads).sort(compareThreadsByUpdatedAt);
+  const merged = dedupeMergedThreads(codexThreads, providerThreads).toSorted(
+    compareThreadsByUpdatedAt,
+  );
 
   return {
     ...result,
@@ -279,7 +288,9 @@ function rememberProjectFromRequest(projectRegistry, request, metadata = {}) {
   }
 
   const params = request?.params || {};
-  const cwd = readString(params.cwd || params.current_working_directory || params.working_directory);
+  const cwd = readString(
+    params.cwd || params.current_working_directory || params.working_directory,
+  );
   if (!cwd) {
     return;
   }
@@ -293,7 +304,12 @@ function rememberProjectFromRequest(projectRegistry, request, metadata = {}) {
 
 function stripRuntimeProviderFieldsForCodex(rawMessage) {
   const parsed = safeParseJSON(rawMessage);
-  if (!parsed || !parsed.params || typeof parsed.params !== "object" || Array.isArray(parsed.params)) {
+  if (
+    !parsed ||
+    !parsed.params ||
+    typeof parsed.params !== "object" ||
+    Array.isArray(parsed.params)
+  ) {
     return rawMessage;
   }
 
@@ -327,12 +343,6 @@ function stripProviderFieldsFromObject(value) {
   return result;
 }
 
-function compareThreadsByUpdatedAt(lhs, rhs) {
-  const lhsTime = Date.parse(lhs?.updatedAt || lhs?.updated_at || lhs?.createdAt || lhs?.created_at || 0) || 0;
-  const rhsTime = Date.parse(rhs?.updatedAt || rhs?.updated_at || rhs?.createdAt || rhs?.created_at || 0) || 0;
-  return rhsTime - lhsTime;
-}
-
 function firstArrayKey(value, keys) {
   return keys.find((key) => Array.isArray(value?.[key])) || "";
 }
@@ -360,16 +370,8 @@ function hasExplicitProviderField(params = {}) {
   return false;
 }
 
-function readThreadId(params = {}) {
-  return readString(params.threadId || params.thread_id || params.id);
-}
-
 function readThreadIdentifier(thread = {}) {
   return readString(thread.id || thread.threadId || thread.thread_id);
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function createJsonRpcErrorResponse(requestId, error, defaultErrorCode) {
@@ -427,19 +429,7 @@ async function buildRuntimeCatalog(providers, env) {
       label: "Codex",
       enabled: true,
       agents: [],
-      capabilities: {
-        supportsFastMode: true,
-        supportsPlanMode: true,
-        supportsVoice: true,
-        supportsDesktopHandoff: true,
-        supportsWorktree: true,
-        supportsFork: true,
-        supportsApprovals: true,
-        supportsStreamingTools: true,
-        supportsSlashCommands: true,
-        supportsMCP: true,
-        supportsAgentSelection: false,
-      },
+      capabilities: { ...CODEX_CAPABILITIES },
     },
   ];
 
@@ -448,6 +438,7 @@ async function buildRuntimeCatalog(providers, env) {
     const hasCommand = readString(env.REMODEX_OPENCODE_COMMAND) || "opencode";
     const enabled = readString(env.REMODEX_ENABLE_OPENCODE) === "1" && Boolean(hasCommand);
     let agents = [];
+    let unavailableReason = null;
     try {
       const raw = await opencodeProvider.listAgents();
       agents = (raw || []).map((a) => ({
@@ -455,30 +446,20 @@ async function buildRuntimeCatalog(providers, env) {
         label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
       }));
     } catch {
-      /* catalog not available */
+      agents = [];
+      if (enabled) {
+        // Keep enabled flag but note the reason
+        unavailableReason = "OpenCode agents could not be listed";
+      }
     }
 
     runtimes.push({
       id: "opencode",
       label: "OpenCode",
       enabled,
-      unavailableReason: enabled ? null : "OpenCode is not enabled on this Mac",
+      unavailableReason: !enabled ? "OpenCode is not enabled on this Mac" : (unavailableReason || null),
       agents,
-      capabilities: {
-        supportsAgentSelection: true,
-        supportsReasoningEffort: false,
-        supportsFastMode: false,
-        supportsPlanMode: false,
-        supportsVoice: false,
-        supportsDesktopHandoff: false,
-        supportsWorktree: false,
-        supportsFork: true,
-        supportsApprovals: true,
-        supportsStreamingTools: true,
-        supportsSlashCommands: true,
-        supportsMCP: true,
-        transport: "http",
-      },
+      capabilities: { ...OPENCODE_CAPABILITIES },
     });
   }
 

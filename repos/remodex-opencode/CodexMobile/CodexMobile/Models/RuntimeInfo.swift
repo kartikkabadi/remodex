@@ -1,0 +1,16 @@
+// FILE: RuntimeInfo.swift
+// Purpose: Runtime-level info from runtime/catalog — capabilities, enabled flag, agents.
+// Layer: Model
+// Exports: RuntimeInfo
+// Depends on: Foundation, ProviderCapabilities
+
+import Foundation
+
+struct RuntimeInfo: Codable, Hashable, Sendable {
+    let id: String
+    let label: String
+    let enabled: Bool
+    let unavailableReason: String?
+    let capabilities: ProviderCapabilities
+    let agents: [AgentOption]
+}

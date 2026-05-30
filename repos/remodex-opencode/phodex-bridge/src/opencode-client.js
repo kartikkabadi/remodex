@@ -6,6 +6,7 @@
 // Exports: createOpenCodeClient
 // Depends on: @opencode-ai/sdk/v2 (dynamic ESM import), ./opencode-models, ./provider-capabilities
 
+const { readString } = require("./normalize");
 const {
   OPENCODE_PROVIDER_ID,
   DEFAULT_OPENCODE_MODEL,
@@ -24,10 +25,7 @@ async function getSdkClient() {
 
 const REQUEST_TIMEOUT_MS = 90_000;
 
-async function createOpenCodeClient({
-  baseUrl,
-  logPrefix = "[remodex]",
-} = {}) {
+async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
   if (!baseUrl) {
     throw new Error("OpenCode SDK client requires a baseUrl.");
   }
@@ -37,10 +35,7 @@ async function createOpenCodeClient({
 
   async function listModels() {
     try {
-      const response = await withTimeout(
-        client.provider.list(),
-        REQUEST_TIMEOUT_MS
-      );
+      const response = await withTimeout(client.provider.list(), REQUEST_TIMEOUT_MS);
       return flattenProviderModels(response);
     } catch (error) {
       console.warn(`${logPrefix} OpenCode provider.list() failed: ${error.message}`);
@@ -50,10 +45,7 @@ async function createOpenCodeClient({
 
   async function listAgents() {
     try {
-      const agents = await withTimeout(
-        client.app.agents(),
-        REQUEST_TIMEOUT_MS
-      );
+      const agents = await withTimeout(client.app.agents(), REQUEST_TIMEOUT_MS);
       return (Array.isArray(agents) ? agents : []).map((a) => ({
         id: readString(a.id || a),
         label: readString(a.name || a.displayName || a.id || a),
@@ -68,16 +60,13 @@ async function createOpenCodeClient({
   async function createSession({ cwd }) {
     const response = await withTimeout(
       client.session.create({ directory: readString(cwd) || process.cwd() }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
     return readString(response?.sessionID || response?.sessionId);
   }
 
   async function getSession(sessionId) {
-    return withTimeout(
-      client.session.get({ sessionID: sessionId }),
-      REQUEST_TIMEOUT_MS
-    );
+    return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
   async function prompt({ sessionID, prompt, cwd }) {
@@ -87,7 +76,7 @@ async function createOpenCodeClient({
         prompt,
         cwd,
       }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
   }
 
@@ -98,7 +87,7 @@ async function createOpenCodeClient({
         configId: "model",
         value: model,
       }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
   }
 
@@ -109,7 +98,7 @@ async function createOpenCodeClient({
         configId: "mode",
         value: mode,
       }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
   }
 
@@ -120,21 +109,18 @@ async function createOpenCodeClient({
         configId: "effort",
         value: effort,
       }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
   }
 
   async function abort(sessionId) {
-    return withTimeout(
-      client.session.abort({ sessionID: sessionId }),
-      REQUEST_TIMEOUT_MS
-    );
+    return withTimeout(client.session.abort({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
   async function getMessages(sessionId) {
     const response = await withTimeout(
       client.session.messages({ sessionID: sessionId }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
     return response?.messages || [];
   }
@@ -142,7 +128,7 @@ async function createOpenCodeClient({
   async function replyToPermission(requestId, allow) {
     return withTimeout(
       client.permission.reply({ requestID: requestId, reply: { allow: Boolean(allow) } }),
-      REQUEST_TIMEOUT_MS
+      REQUEST_TIMEOUT_MS,
     );
   }
 
@@ -201,25 +187,56 @@ function dispatchEvent(event, handler) {
       break;
 
     case "message.part.delta": {
-      const delta = readString(event.delta || event.text || event.textDelta);
       const partType = readString(event.part?.type || event.partType);
-      if (!delta) break;
+      const turnId = readString(event.turnID || event.turnId);
+      const itemId = readString(event.partID || event.partId) || `agent-${Date.now()}`;
 
       if (partType === "reasoning" || event.isReasoning) {
-        handler("item/reasoning/textDelta", {
-          turnId: readString(event.turnID || event.turnId),
-          itemId: readString(event.partID || event.partId) || `reasoning-${Date.now()}`,
-          delta,
-          textDelta: delta,
-        });
+        const delta = readString(event.delta || event.text || event.textDelta);
+        if (delta) {
+          handler("item/reasoning/textDelta", {
+            turnId,
+            itemId,
+            delta,
+            textDelta: delta,
+          });
+        }
+      } else if (partType === "tool_call" || partType === "tool") {
+        const toolName = readString(event.tool?.name || event.toolName || event.name);
+        const toolId = readString(event.tool?.id || event.toolID || event.toolId) || `tool-${Date.now()}`;
+        const state = readString(event.state || event.status);
+        const args = event.args || event.tool?.args || {};
+        const output = readString(event.output || event.delta || event.text || event.textDelta);
+
+        if (output) {
+          handler("item/toolCallUpdate", {
+            turnId,
+            itemId: toolId,
+            toolName,
+            args,
+            output,
+            status: state || "running",
+          });
+        } else {
+          handler("item/toolCall", {
+            turnId,
+            itemId: toolId,
+            toolName,
+            args,
+            status: state || "running",
+          });
+        }
       } else {
-        handler("item/agentMessage/delta", {
-          turnId: readString(event.turnID || event.turnId),
-          itemId: readString(event.partID || event.partId) || `agent-${Date.now()}`,
-          delta,
-          textDelta: delta,
-          assistantPhase: "final",
-        });
+        const delta = readString(event.delta || event.text || event.textDelta);
+        if (delta) {
+          handler("item/agentMessage/delta", {
+            turnId,
+            itemId,
+            delta,
+            textDelta: delta,
+            assistantPhase: "final",
+          });
+        }
       }
       break;
     }
@@ -311,11 +328,12 @@ function buildModelFromAny(model, upstreamProviderId) {
     provider: OPENCODE_PROVIDER_ID,
     upstreamProviderId: readString(upstreamProviderId),
     upstreamProviderDisplayName: formatProviderDisplayName(upstreamProviderId),
-    displayName: readString(model.name || model.displayName) || displayNameForOpenCodeModel(reference),
+    displayName:
+      readString(model.name || model.displayName) || displayNameForOpenCodeModel(reference),
     description: readString(model.description) || "",
     isDefault: reference === DEFAULT_OPENCODE_MODEL,
     capabilities,
-    contextWindow: model.contextWindow || model.context_window || model.maxTokens || null,
+    contextWindow: model.contextWindow || model.context_window || null,
     status: readString(model.status) || "active",
   };
 }
@@ -344,13 +362,9 @@ function withTimeout(promise, ms) {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`OpenCode SDK request timed out after ${ms}ms`)), ms)
+      setTimeout(() => reject(new Error(`OpenCode SDK request timed out after ${ms}ms`)), ms),
     ),
   ]);
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = { createOpenCodeClient };

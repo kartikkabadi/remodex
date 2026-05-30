@@ -7,12 +7,10 @@
 const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
-const {
-  findRecentRolloutFileForContextRead,
-  resolveSessionsRoot,
-} = require("./rollout-watch");
+const { findRecentRolloutFileForContextRead, resolveSessionsRoot } = require("./rollout-watch");
 const { resolveCodexGeneratedImagesRoot } = require("./codex-home");
 const { buildApplyPatchFileChangeItem } = require("./apply-patch-changes");
+const { readString } = require("./normalize");
 
 const DEFAULT_POLL_INTERVAL_MS = 700;
 const DEFAULT_LOOKUP_TIMEOUT_MS = 5_000;
@@ -178,16 +176,20 @@ function createThreadRolloutLiveMirror({
       }
 
       if (
-        state.isDesktopOrigin !== false
-        && state.activeTurnId
-        && currentTime - lastHeartbeatAt >= activityHeartbeatMs
+        state.isDesktopOrigin !== false &&
+        state.activeTurnId &&
+        currentTime - lastHeartbeatAt >= activityHeartbeatMs
       ) {
         lastHeartbeatAt = currentTime;
-        sendApplicationResponse(JSON.stringify(createNotification("turn/activity", {
-          threadId: state.threadId,
-          turnId: state.activeTurnId,
-          id: state.activeTurnId,
-        })));
+        sendApplicationResponse(
+          JSON.stringify(
+            createNotification("turn/activity", {
+              threadId: state.threadId,
+              turnId: state.activeTurnId,
+              id: state.activeTurnId,
+            }),
+          ),
+        );
       }
 
       if (currentTime - lastActivityAt >= idleTimeoutMs) {
@@ -234,7 +236,6 @@ function bootstrapFromExistingRollout({
   const lines = initialContents.split("\n");
   const activeRunLines = [];
   let insideActiveRun = false;
-  let activeTurnId = null;
   let pendingUserPreludeLine = null;
 
   for (const rawLine of lines) {
@@ -252,17 +253,14 @@ function bootstrapFromExistingRollout({
       populateSessionMetaState(state, parsed.payload);
     }
 
-    const taskEventType = parsed?.type === "event_msg"
-      ? readString(parsed?.payload?.type)
-      : "";
+    const taskEventType = parsed?.type === "event_msg" ? readString(parsed?.payload?.type) : "";
     if (taskEventType === "user_message") {
       pendingUserPreludeLine = line;
     }
     if (taskEventType === "task_started") {
       insideActiveRun = true;
-      activeTurnId = readString(parsed?.payload?.turn_id)
-        || readString(parsed?.payload?.turnId)
-        || "";
+      activeTurnId =
+        readString(parsed?.payload?.turn_id) || readString(parsed?.payload?.turnId) || "";
       activeRunLines.length = 0;
       if (pendingUserPreludeLine) {
         activeRunLines.push(pendingUserPreludeLine);
@@ -376,11 +374,13 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
         return [];
       }
 
-      notifications.push(createNotification("codex/event/user_message", {
-        threadId: state.threadId,
-        turnId,
-        message,
-      }));
+      notifications.push(
+        createNotification("codex/event/user_message", {
+          threadId: state.threadId,
+          turnId,
+          message,
+        }),
+      );
       return notifications;
     }
 
@@ -391,11 +391,13 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
       }
 
       notifications.push(...turnFileChangeSnapshotNotifications(state, turnId));
-      notifications.push(createNotification("turn/completed", {
-        threadId: state.threadId,
-        turnId,
-        id: turnId,
-      }));
+      notifications.push(
+        createNotification("turn/completed", {
+          threadId: state.threadId,
+          turnId,
+          id: turnId,
+        }),
+      );
       resetRunState(state);
       return notifications;
     }
@@ -406,11 +408,16 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
     }
 
     if (eventType === "agent_reasoning") {
-      notifications.push(...reasoningNotifications(state, firstNonEmptyString([
-        readString(payload.message),
-        readString(payload.text),
-        readString(payload.summary),
-      ])));
+      notifications.push(
+        ...reasoningNotifications(
+          state,
+          firstNonEmptyString([
+            readString(payload.message),
+            readString(payload.text),
+            readString(payload.summary),
+          ]),
+        ),
+      );
       return notifications;
     }
 
@@ -421,19 +428,23 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
       }
       const turnId = resolveRolloutEventTurnId(state, payload);
 
-      notifications.push(createNotification("codex/event/agent_message", {
-        threadId: state.threadId,
-        turnId,
-        itemId: buildAgentMessageItemId(state.threadId, turnId, entry, message),
-        message,
-      }));
+      notifications.push(
+        createNotification("codex/event/agent_message", {
+          threadId: state.threadId,
+          turnId,
+          itemId: buildAgentMessageItemId(state.threadId, turnId, entry, message),
+          message,
+        }),
+      );
       return notifications;
     }
 
     if (eventType === "image_generation_end") {
-      notifications.push(...imageGenerationNotifications(state, payload, {
-        preferCallId: true,
-      }));
+      notifications.push(
+        ...imageGenerationNotifications(state, payload, {
+          preferCallId: true,
+        }),
+      );
       return notifications;
     }
 
@@ -472,7 +483,12 @@ function synthesizeNotificationsFromRolloutEntry(entry, state) {
     return notifications;
   }
 
-  if (itemType === "imagegeneration" || itemType === "imagegenerationcall" || itemType === "imagegenerationend" || itemType === "imageview") {
+  if (
+    itemType === "imagegeneration" ||
+    itemType === "imagegenerationcall" ||
+    itemType === "imagegenerationend" ||
+    itemType === "imageview"
+  ) {
     notifications.push(...imageGenerationNotifications(state, payload));
     return notifications;
   }
@@ -495,7 +511,9 @@ function reasoningNotifications(state, text) {
     createNotification("item/reasoning/textDelta", {
       threadId: state.threadId,
       turnId: state.activeTurnId,
-      itemId: state.reasoningItemId || buildSyntheticItemId("thinking", state.threadId, state.activeTurnId),
+      itemId:
+        state.reasoningItemId ||
+        buildSyntheticItemId("thinking", state.threadId, state.activeTurnId),
       delta,
     }),
   ];
@@ -578,15 +596,17 @@ function customToolStartNotifications(state, payload) {
     });
     if (item) {
       state.applyPatchCalls.set(callId, item);
-      notifications.push(createNotification("codex/event/patch_apply_begin", {
-        threadId: state.threadId,
-        turnId: state.activeTurnId,
-        id: state.activeTurnId,
-        call_id: callId,
-        itemId: item.id,
-        status: "inProgress",
-        changes: item.changes,
-      }));
+      notifications.push(
+        createNotification("codex/event/patch_apply_begin", {
+          threadId: state.threadId,
+          turnId: state.activeTurnId,
+          id: state.activeTurnId,
+          call_id: callId,
+          itemId: item.id,
+          status: "inProgress",
+          changes: item.changes,
+        }),
+      );
     }
   }
 
@@ -614,9 +634,7 @@ function patchApplyEndNotifications(state, payload) {
   }
 
   const fileChangeItem = state.applyPatchCalls.get(callId);
-  const changes = Array.isArray(payload.changes)
-    ? payload.changes
-    : fileChangeItem?.changes || [];
+  const changes = Array.isArray(payload.changes) ? payload.changes : fileChangeItem?.changes || [];
   if (changes.length === 0) {
     return [];
   }
@@ -643,13 +661,18 @@ function turnFileChangeSnapshotNotifications(state, turnId) {
     return [];
   }
 
-  const changes = patchEntries.flatMap(([, item]) => Array.isArray(item?.changes) ? item.changes : []);
+  const changes = patchEntries.flatMap(([, item]) =>
+    Array.isArray(item?.changes) ? item.changes : [],
+  );
   if (changes.length === 0) {
     return [];
   }
 
   const [lastCallId, lastItem] = patchEntries[patchEntries.length - 1];
-  const itemId = readString(lastItem?.id) || readString(lastCallId) || buildSyntheticItemId("file-change", state.threadId, turnId);
+  const itemId =
+    readString(lastItem?.id) ||
+    readString(lastCallId) ||
+    buildSyntheticItemId("file-change", state.threadId, turnId);
   return [
     createNotification("codex/event/patch_apply_end", {
       threadId: state.threadId,
@@ -688,25 +711,29 @@ function toolOutputNotifications(state, payload) {
   const output = readString(payload.output);
   const notifications = [...ensureThinkingNotifications(state)];
   if (output) {
-    notifications.push(createNotification("codex/event/exec_command_output_delta", {
+    notifications.push(
+      createNotification("codex/event/exec_command_output_delta", {
+        threadId: state.threadId,
+        turnId: state.activeTurnId,
+        call_id: callId,
+        command: toolCall.command,
+        cwd: toolCall.cwd || "",
+        chunk: output,
+      }),
+    );
+  }
+
+  notifications.push(
+    createNotification("codex/event/exec_command_end", {
       threadId: state.threadId,
       turnId: state.activeTurnId,
       call_id: callId,
       command: toolCall.command,
       cwd: toolCall.cwd || "",
-      chunk: output,
-    }));
-  }
-
-  notifications.push(createNotification("codex/event/exec_command_end", {
-    threadId: state.threadId,
-    turnId: state.activeTurnId,
-    call_id: callId,
-    command: toolCall.command,
-    cwd: toolCall.cwd || "",
-    status: "completed",
-    output: output || "",
-  }));
+      status: "completed",
+      output: output || "",
+    }),
+  );
   state.commandCalls.delete(callId);
   return notifications;
 }
@@ -735,12 +762,13 @@ function imageGenerationNotifications(state, payload, { preferCallId = false } =
     return [];
   }
 
-  const imagePath = firstNonEmptyString([
-    readString(payload.saved_path),
-    readString(payload.savedPath),
-    readString(payload.file_path),
-    readString(payload.path),
-  ]) || generatedImagePathForRolloutItem(state.threadId, callId);
+  const imagePath =
+    firstNonEmptyString([
+      readString(payload.saved_path),
+      readString(payload.savedPath),
+      readString(payload.file_path),
+      readString(payload.path),
+    ]) || generatedImagePathForRolloutItem(state.threadId, callId);
   if (!imagePath) {
     return [];
   }
@@ -760,9 +788,10 @@ function imageGenerationNotifications(state, payload, { preferCallId = false } =
 }
 
 function itemCompletedNotifications(state, payload) {
-  const item = payload && typeof payload.item === "object" && !Array.isArray(payload.item)
-    ? payload.item
-    : null;
+  const item =
+    payload && typeof payload.item === "object" && !Array.isArray(payload.item)
+      ? payload.item
+      : null;
   if (!item || normalizeRolloutItemType(item.type) !== "plan") {
     return [];
   }
@@ -840,10 +869,12 @@ function isDesktopRolloutOrigin(sessionMeta) {
     return false;
   }
 
-  return originator.includes("desktop")
-    || originator.includes("vscode")
-    || source.includes("vscode")
-    || source.includes("desktop");
+  return (
+    originator.includes("desktop") ||
+    originator.includes("vscode") ||
+    source.includes("vscode") ||
+    source.includes("desktop")
+  );
 }
 
 function extractReasoningText(payload) {
@@ -853,11 +884,7 @@ function extractReasoningText(payload) {
         .filter(Boolean)
         .join("\n")
     : "";
-  return firstNonEmptyString([
-    summary,
-    readString(payload?.text),
-    readString(payload?.content),
-  ]);
+  return firstNonEmptyString([summary, readString(payload?.text), readString(payload?.content)]);
 }
 
 function parseToolArguments(rawArguments) {
@@ -907,36 +934,40 @@ function normalizeProgressPlanSteps(rawPlan) {
 function normalizeProgressPlanStatus(rawStatus) {
   const normalized = readString(rawStatus);
   switch (normalized) {
-  case "pending":
-  case "in_progress":
-  case "inProgress":
-  case "completed":
-    return normalized;
-  default:
-    return "";
+    case "pending":
+    case "in_progress":
+    case "inProgress":
+    case "completed":
+      return normalized;
+    default:
+      return "";
   }
 }
 
 function resolveToolCommand(toolName, argumentsObject) {
   if (isCommandToolName(toolName)) {
-    return firstNonEmptyString([
-      readString(argumentsObject.cmd),
-      readString(argumentsObject.command),
-      readString(argumentsObject.raw_command),
-      readString(argumentsObject.rawCommand),
-    ]) || toolName;
+    return (
+      firstNonEmptyString([
+        readString(argumentsObject.cmd),
+        readString(argumentsObject.command),
+        readString(argumentsObject.raw_command),
+        readString(argumentsObject.rawCommand),
+      ]) || toolName
+    );
   }
 
   return toolName;
 }
 
 function resolveToolWorkingDirectory(argumentsObject, state) {
-  return firstNonEmptyString([
-    readString(argumentsObject.workdir),
-    readString(argumentsObject.cwd),
-    readString(argumentsObject.working_directory),
-    readString(state.sessionMeta?.cwd),
-  ]) || "";
+  return (
+    firstNonEmptyString([
+      readString(argumentsObject.workdir),
+      readString(argumentsObject.cwd),
+      readString(argumentsObject.working_directory),
+      readString(state.sessionMeta?.cwd),
+    ]) || ""
+  );
 }
 
 function isCommandToolName(toolName) {
@@ -950,14 +981,14 @@ function isInternalProgressPlanToolName(toolName) {
 
 function genericToolActivityMessage(toolName) {
   switch (readString(toolName).toLowerCase()) {
-  case "apply_patch":
-    return "Applying patch";
-  case "write_stdin":
-    return "Writing to terminal";
-  case "read_thread_terminal":
-    return "Reading terminal output";
-  default:
-    return `Running ${toolName}`;
+    case "apply_patch":
+      return "Applying patch";
+    case "write_stdin":
+      return "Writing to terminal";
+    case "read_thread_terminal":
+      return "Reading terminal output";
+    default:
+      return `Running ${toolName}`;
   }
 }
 
@@ -987,12 +1018,14 @@ function flushPendingUserMessageNotifications(state, turnId) {
     return [];
   }
 
-  return messages.map((pending) => createNotification("codex/event/user_message", {
-    threadId: state.threadId,
-    turnId: turnId || state.activeTurnId || "",
-    message: pending.message,
-    ...(pending.id ? { id: pending.id } : {}),
-  }));
+  return messages.map((pending) =>
+    createNotification("codex/event/user_message", {
+      threadId: state.threadId,
+      turnId: turnId || state.activeTurnId || "",
+      message: pending.message,
+      ...(pending.id ? { id: pending.id } : {}),
+    }),
+  );
 }
 
 function buildSyntheticItemId(kind, threadId, turnId, suffix = "") {
@@ -1023,7 +1056,7 @@ function buildAgentMessageItemId(threadId, turnId, entry, message) {
     "agent-message",
     threadId,
     turnId || "turnless",
-    `${timestamp}:${messageHash}`
+    `${timestamp}:${messageHash}`,
   );
 }
 
@@ -1053,10 +1086,7 @@ function resetRunState(state) {
 }
 
 function readThreadId(params) {
-  return firstNonEmptyString([
-    readString(params?.threadId),
-    readString(params?.thread_id),
-  ]) || "";
+  return firstNonEmptyString([readString(params?.threadId), readString(params?.thread_id)]) || "";
 }
 
 function readFileSize(filePath, fsModule) {
@@ -1089,10 +1119,6 @@ function safeParseJSON(rawValue) {
   } catch {
     return null;
   }
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function firstNonEmptyString(values) {

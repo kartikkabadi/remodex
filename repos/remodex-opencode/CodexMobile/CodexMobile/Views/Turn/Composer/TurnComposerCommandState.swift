@@ -111,15 +111,13 @@ enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendabl
         return commands.filter { $0.searchBlob.contains(trimmedQuery) }
     }
 
-    // Hides slash commands that the connected runtime cannot fulfill for this session.
     static func availableCommands(
-        supportsThreadFork: Bool,
         allowsForkCommand: Bool
     ) -> [TurnComposerSlashCommand] {
-        allCommands.filter { command in
+        return allCommands.filter { command in
             switch command {
             case .fork:
-                return supportsThreadFork && allowsForkCommand
+                return allowsForkCommand
             case .codeReview, .compact, .feedback, .status, .subagents:
                 return true
             }

@@ -14,7 +14,7 @@ const { handleWorkspaceMethod } = require("../src/workspace-handler");
 
 const validOnePixelPNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-  "base64"
+  "base64",
 );
 const IS_WINDOWS_HOST = path.delimiter === ";";
 
@@ -36,10 +36,7 @@ function writeFakeSips(fakeBinDir, scriptContent) {
 
   if (IS_WINDOWS_HOST) {
     fs.writeFileSync(path.join(fakeBinDir, "sips.js"), scriptContent);
-    fs.writeFileSync(
-      path.join(fakeBinDir, "sips.cmd"),
-      `@echo off\r\nnode "%~dp0sips.js" %*\r\n`
-    );
+    fs.writeFileSync(path.join(fakeBinDir, "sips.cmd"), `@echo off\r\nnode "%~dp0sips.js" %*\r\n`);
   }
 }
 
@@ -166,7 +163,7 @@ if (!inputPath || !outputPath || !Number.isFinite(maxDimension)) {
   throw new Error("Expected -File <script> <input> <output> <maxDimension>");
 }
 fs.copyFileSync(inputPath, outputPath);
-`
+`,
   );
 
   execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore" });
@@ -214,7 +211,7 @@ const dimension = Number(process.argv[process.argv.indexOf("-Z") + 1]);
 const outputPath = process.argv[process.argv.indexOf("--out") + 1];
 fs.appendFileSync(${JSON.stringify(fakeSipsLog)}, String(dimension) + "\\n");
 fs.writeFileSync(outputPath, dimension > 512 ? Buffer.alloc(2 * 1024 * 1024 + 1) : validOnePixelPNG);
-`
+`,
   );
 
   execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore" });
@@ -257,7 +254,7 @@ const fs = require("fs");
 const dimension = Number(process.argv[process.argv.indexOf("-Z") + 1]);
 fs.appendFileSync(${JSON.stringify(fakeSipsLog)}, String(dimension) + "\\n");
 setTimeout(() => {}, 30_000);
-`
+`,
   );
 
   execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore" });
@@ -265,12 +262,13 @@ setTimeout(() => {}, 30_000);
   fs.writeFileSync(imagePath, validOnePixelPNG);
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readImage", {
-      cwd: tempDir,
-      path: imagePath,
-      maxPixelDimension: 1600,
-    }),
-    /took too long/
+    () =>
+      handleWorkspaceMethod("workspace/readImage", {
+        cwd: tempDir,
+        path: imagePath,
+        maxPixelDimension: 1600,
+      }),
+    /took too long/,
   );
 
   const attemptedDimensions = fs.readFileSync(fakeSipsLog, "utf8").trim().split("\n").map(Number);
@@ -319,12 +317,13 @@ test("workspace/readImage does not fall back to original bytes when preview conv
   fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readImage", {
-      cwd: tempDir,
-      path: imagePath,
-      maxPixelDimension: 1600,
-    }),
-    /lightweight phone preview/
+    () =>
+      handleWorkspaceMethod("workspace/readImage", {
+        cwd: tempDir,
+        path: imagePath,
+        maxPixelDimension: 1600,
+      }),
+    /lightweight phone preview/,
   );
 });
 
@@ -357,11 +356,12 @@ test("workspace/readImage rejects non-image paths", async () => {
   fs.writeFileSync(textPath, "not an image");
 
   await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readImage", {
-      cwd: tempDir,
-      path: textPath,
-    }),
-    /Only local image files/
+    () =>
+      handleWorkspaceMethod("workspace/readImage", {
+        cwd: tempDir,
+        path: textPath,
+      }),
+    /Only local image files/,
   );
 });
 
@@ -371,12 +371,13 @@ test("workspace/readImage rejects workspace images when cwd is missing", async (
   fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
   try {
-  await assert.rejects(
-    () => handleWorkspaceMethod("workspace/readImage", {
-      path: imagePath,
-    }),
-    /Only images in this workspace/
-  );
+    await assert.rejects(
+      () =>
+        handleWorkspaceMethod("workspace/readImage", {
+          path: imagePath,
+        }),
+      /Only images in this workspace/,
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -457,23 +458,27 @@ test("workspace/readImage sniffs extensionless temporary screenshots", async () 
   assert.equal(result.dataBase64, bytes.toString("base64"));
 });
 
-test("workspace/readImage allows macOS shared /tmp screenshot images", { skip: process.platform !== "darwin" }, async () => {
-  const tempDir = fs.mkdtempSync(path.join("/tmp", "remodex-image-"));
-  const imagePath = path.join(tempDir, "emanuele-mobile.png");
-  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-  fs.writeFileSync(imagePath, bytes);
+test(
+  "workspace/readImage allows macOS shared /tmp screenshot images",
+  { skip: process.platform !== "darwin" },
+  async () => {
+    const tempDir = fs.mkdtempSync(path.join("/tmp", "remodex-image-"));
+    const imagePath = path.join(tempDir, "emanuele-mobile.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    fs.writeFileSync(imagePath, bytes);
 
-  try {
-    const result = await handleWorkspaceMethod("workspace/readImage", {
-      path: imagePath,
-    });
+    try {
+      const result = await handleWorkspaceMethod("workspace/readImage", {
+        path: imagePath,
+      });
 
-    assert.equal(result.path, fs.realpathSync(imagePath));
-    assert.equal(result.dataBase64, bytes.toString("base64"));
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
+      assert.equal(result.path, fs.realpathSync(imagePath));
+      assert.equal(result.dataBase64, bytes.toString("base64"));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("workspace/readImage rejects cwd widening outside a repository", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.homedir(), "remodex-image-"));
@@ -482,11 +487,12 @@ test("workspace/readImage rejects cwd widening outside a repository", async () =
 
   try {
     await assert.rejects(
-      () => handleWorkspaceMethod("workspace/readImage", {
-        cwd: "/",
-        path: imagePath,
-      }),
-      /Only images in this workspace/
+      () =>
+        handleWorkspaceMethod("workspace/readImage", {
+          cwd: "/",
+          path: imagePath,
+        }),
+      /Only images in this workspace/,
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

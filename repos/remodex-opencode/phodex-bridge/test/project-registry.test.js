@@ -48,10 +48,10 @@ test("rememberProjectPath persists and sorts available projects by last activity
 
   const projects = registry.listProjects();
 
-  assert.deepEqual(projects.map((project) => project.path), [
-    fs.realpathSync(newerProject),
-    fs.realpathSync(olderProject),
-  ]);
+  assert.deepEqual(
+    projects.map((project) => project.path),
+    [fs.realpathSync(newerProject), fs.realpathSync(olderProject)],
+  );
   assert.deepEqual(projects[0].providerHints, ["opencode"]);
 });
 
@@ -63,20 +63,23 @@ test("rememberProjectsFromThreads dedupes realpath aliases and keeps source hist
   fs.symlinkSync(targetProject, linkedProject, "dir");
 
   const registry = makeRegistry(homeDir);
-  registry.rememberProjectsFromThreads([
+  registry.rememberProjectsFromThreads(
+    [
+      {
+        cwd: targetProject,
+        provider: "codex",
+        updatedAt: "2026-05-20T10:00:00.000Z",
+      },
+      {
+        cwd: linkedProject,
+        modelProvider: "opencode",
+        updatedAt: "2026-05-21T10:00:00.000Z",
+      },
+    ],
     {
-      cwd: targetProject,
-      provider: "codex",
-      updatedAt: "2026-05-20T10:00:00.000Z",
+      source: "thread-list",
     },
-    {
-      cwd: linkedProject,
-      modelProvider: "opencode",
-      updatedAt: "2026-05-21T10:00:00.000Z",
-    },
-  ], {
-    source: "thread-list",
-  });
+  );
 
   const projects = registry.listProjects();
 
@@ -97,10 +100,17 @@ test("registry skips generated projectless chat paths", () => {
   assert.equal(registry.rememberProjectPath(rootlessProject, { source: "test" }), null);
   assert.ok(registry.rememberProjectPath(normalProject, { source: "test" }));
 
-  assert.deepEqual(registry.listProjects().map((project) => project.path), [
-    fs.realpathSync(normalProject),
-  ]);
-  assert.equal(isGeneratedProjectlessPath(rootlessProject, { homeDir, codexHome: path.join(homeDir, ".codex") }), true);
+  assert.deepEqual(
+    registry.listProjects().map((project) => project.path),
+    [fs.realpathSync(normalProject)],
+  );
+  assert.equal(
+    isGeneratedProjectlessPath(rootlessProject, {
+      homeDir,
+      codexHome: path.join(homeDir, ".codex"),
+    }),
+    true,
+  );
 });
 
 test("normalizeProjectPath rejects pseudo project buckets", () => {

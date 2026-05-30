@@ -27,17 +27,20 @@ test("createShortPairingCode emits a short human-friendly token", () => {
 
 test("printQR does not print the full pairing JSON unless debug output is enabled", () => {
   const logs = captureConsoleLog(() => {
-    printQR({
-      pairingPayload: {
-        relay: "ws://127.0.0.1:9000/relay",
-        sessionId: "session-sensitive-long-value",
-        macDeviceId: "mac-123",
-        expiresAt: 1_900_000_000_000,
+    printQR(
+      {
+        pairingPayload: {
+          relay: "ws://127.0.0.1:9000/relay",
+          sessionId: "session-sensitive-long-value",
+          macDeviceId: "mac-123",
+          expiresAt: 1_900_000_000_000,
+        },
+        pairingCode: "ABCDEFGHJK",
       },
-      pairingCode: "ABCDEFGHJK",
-    }, {
-      env: {},
-    });
+      {
+        env: {},
+      },
+    );
   });
 
   const output = logs.join("\n");
@@ -48,15 +51,18 @@ test("printQR does not print the full pairing JSON unless debug output is enable
 
 test("printQR can print the pairing JSON for explicit debug workflows", () => {
   const logs = captureConsoleLog(() => {
-    printQR({
-      relay: "ws://127.0.0.1:9000/relay",
-      sessionId: "session-debug",
-      macDeviceId: "mac-123",
-      expiresAt: 1_900_000_000_000,
-    }, {
-      printPairingJson: true,
-      env: {},
-    });
+    printQR(
+      {
+        relay: "ws://127.0.0.1:9000/relay",
+        sessionId: "session-debug",
+        macDeviceId: "mac-123",
+        expiresAt: 1_900_000_000_000,
+      },
+      {
+        printPairingJson: true,
+        env: {},
+      },
+    );
   });
 
   const output = logs.join("\n");
@@ -66,7 +72,10 @@ test("printQR can print the pairing JSON for explicit debug workflows", () => {
 
 test("shouldPrintPairingJson accepts explicit flags and debug env aliases", () => {
   assert.equal(shouldPrintPairingJson({ explicitValue: true, env: {} }), true);
-  assert.equal(shouldPrintPairingJson({ explicitValue: false, env: { REMODEX_PRINT_PAIRING_JSON: "1" } }), false);
+  assert.equal(
+    shouldPrintPairingJson({ explicitValue: false, env: { REMODEX_PRINT_PAIRING_JSON: "1" } }),
+    false,
+  );
   assert.equal(shouldPrintPairingJson({ env: { REMODEX_PRINT_PAIRING_JSON: "yes" } }), true);
   assert.equal(shouldPrintPairingJson({ env: { PHODEX_PRINT_PAIRING_JSON: "on" } }), true);
   assert.equal(shouldPrintPairingJson({ env: { REMODEX_PRINT_PAIRING_JSON: "0" } }), false);

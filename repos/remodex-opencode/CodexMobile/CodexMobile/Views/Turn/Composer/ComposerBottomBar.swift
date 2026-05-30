@@ -108,8 +108,9 @@ struct ComposerBottomBar: View {
             } label: {
                 voiceButtonLabel
             }
-            .disabled(voiceButtonPresentation.isDisabled)
+            .disabled(voiceButtonPresentation.isDisabled || !runtimeState.capabilities.supportsVoice)
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
+            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsVoice, reason: "Voice not supported by this runtime")
 
             if isThreadRunning && isSending && activeTurnID == nil {
                 ProgressView()
@@ -250,28 +251,26 @@ struct ComposerBottomBar: View {
             // `RemodexIcon.menuLabel` keeps Central artwork in SwiftUI Menus
             // by routing through `Label(_, image:)` for mapped assets and
             // falling back to `Label(_, systemImage:)` for plain SF Symbols.
-            if runtimeState.supportsPlanMode {
-                Toggle(isOn: Binding(
-                    get: { isPlanModeArmed },
-                    set: { newValue in
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        onSetPlanModeArmed(newValue)
-                    }
-                )) {
-                    RemodexIcon.menuLabel("Plan mode", systemName: "remodex.plan-mode")
-                }
-            }
-
-            if runtimeState.supportsFastMode {
-                Button {
+            Toggle(isOn: Binding(
+                get: { isPlanModeArmed },
+                set: { newValue in
                     HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                    toggleFastMode()
-                } label: {
-                    // Native SF bolt on purpose so the menu item matches the
-                    // speed badge / Speed submenu icon used elsewhere.
-                    Label("Fast Mode", systemImage: fastModePlusMenuIconName)
+                    onSetPlanModeArmed(newValue)
                 }
+            )) {
+                RemodexIcon.menuLabel("Plan mode", systemName: "remodex.plan-mode")
             }
+            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsPlanMode, reason: "Plan mode not supported by this runtime")
+
+            Button {
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                toggleFastMode()
+            } label: {
+                // Native SF bolt on purpose so the menu item matches the
+                // speed badge / Speed submenu icon used elsewhere.
+                Label("Fast Mode", systemImage: fastModePlusMenuIconName)
+            }
+            .capabilityGreyOut(isEnabled: runtimeState.capabilities.supportsFastMode, reason: "Fast mode not supported by this model")
 
             Section {
                 Button {

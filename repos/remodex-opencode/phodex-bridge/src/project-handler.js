@@ -9,6 +9,7 @@ const os = require("os");
 const path = require("path");
 const { resolveCodexHome } = require("./codex-home");
 const { createProjectRegistry, getDefaultProjectRegistry } = require("./project-registry");
+const { readStringOrNull } = require("./normalize");
 
 const DEFAULT_DIRECTORY_LIMIT = 200;
 const DEFAULT_DIRECTORY_SEARCH_LIMIT = 80;
@@ -57,7 +58,7 @@ function handleProjectRequest(rawMessage, sendResponse, options = {}) {
             message,
             data: { errorCode },
           },
-        })
+        }),
       );
     });
 
@@ -119,13 +120,10 @@ async function projectQuickLocations(options = {}) {
 
 async function projectProjectlessRoots(options = {}) {
   const homeDir = resolveHomeDir(options);
-  const codexHome = path.resolve(readString(options.codexHome) || resolveCodexHome());
+  const codexHome = path.resolve(readStringOrNull(options.codexHome) || resolveCodexHome());
   const documentedThreadsRoot = path.join(codexHome, "threads");
   const desktopDocumentsRoot = path.join(homeDir, "Documents", "Codex");
-  const roots = uniqueExistingOrCandidatePaths([
-    documentedThreadsRoot,
-    desktopDocumentsRoot,
-  ]);
+  const roots = uniqueExistingOrCandidatePaths([documentedThreadsRoot, desktopDocumentsRoot]);
 
   return {
     codexHome,
@@ -143,7 +141,7 @@ async function projectKnownProjects(params = {}, options = {}) {
 }
 
 async function projectRememberKnownProject(params = {}, options = {}) {
-  const requestedPath = readString(params.path || params.projectPath || params.cwd);
+  const requestedPath = readStringOrNull(params.path || params.projectPath || params.cwd);
   if (!requestedPath) {
     throw projectError("missing_path", "A folder path is required.");
   }
@@ -151,8 +149,8 @@ async function projectRememberKnownProject(params = {}, options = {}) {
   const directory = await requireUsableDirectory(requestedPath, options);
   const registry = resolveProjectRegistry(options);
   const project = registry.rememberProjectPath(directory.path, {
-    source: readString(params.source) || "manual",
-    provider: readString(params.provider || params.modelProvider || params.model_provider),
+    source: readStringOrNull(params.source) || "manual",
+    provider: readStringOrNull(params.provider || params.modelProvider || params.model_provider),
   });
   if (!project) {
     throw projectError("not_project_folder", "That folder is reserved for projectless chats.");
@@ -162,7 +160,7 @@ async function projectRememberKnownProject(params = {}, options = {}) {
 }
 
 async function projectListDirectory(params, options = {}) {
-  const requestedPath = readString(params.path) || resolveHomeDir(options);
+  const requestedPath = readStringOrNull(params.path) || resolveHomeDir(options);
   const directory = await requireUsableDirectory(requestedPath, options);
   const includeHidden = params.includeHidden === true;
   const limit = normalizeLimit(params.limit);
@@ -180,8 +178,8 @@ async function projectListDirectory(params, options = {}) {
 }
 
 async function projectSearchDirectories(params, options = {}) {
-  const requestedPath = readString(params.path) || resolveHomeDir(options);
-  const query = readString(params.query);
+  const requestedPath = readStringOrNull(params.path) || resolveHomeDir(options);
+  const query = readStringOrNull(params.query);
   const directory = await requireUsableDirectory(requestedPath, options);
   if (!query) {
     return {
@@ -206,7 +204,7 @@ async function projectSearchDirectories(params, options = {}) {
 }
 
 async function projectValidatePath(params, options = {}) {
-  const requestedPath = readString(params.path);
+  const requestedPath = readStringOrNull(params.path);
   if (!requestedPath) {
     throw projectError("missing_path", "A folder path is required.");
   }
@@ -215,8 +213,8 @@ async function projectValidatePath(params, options = {}) {
 }
 
 async function projectCreateDirectory(params, options = {}) {
-  const parentPath = readString(params.parentPath || params.parent || params.path);
-  const rawName = readString(params.name || params.folderName || params.directoryName);
+  const parentPath = readStringOrNull(params.parentPath || params.parent || params.path);
+  const rawName = readStringOrNull(params.name || params.folderName || params.directoryName);
   if (!parentPath) {
     throw projectError("missing_parent_path", "A parent folder path is required.");
   }
@@ -255,7 +253,7 @@ async function projectCreateDirectory(params, options = {}) {
 async function projectCreateRootlessChatRoot(params = {}, options = {}) {
   const homeDir = resolveHomeDir(options);
   const desktopDocumentsRoot = path.join(homeDir, "Documents", "Codex");
-  const dateFolder = readString(params.dateFolder) || formatRootlessChatDate(new Date());
+  const dateFolder = readStringOrNull(params.dateFolder) || formatRootlessChatDate(new Date());
   if (!isISODateFolderName(dateFolder)) {
     throw projectError("invalid_date_folder", "The chat date folder must be in YYYY-MM-DD format.");
   }
@@ -266,7 +264,10 @@ async function projectCreateRootlessChatRoot(params = {}, options = {}) {
   try {
     await fs.promises.mkdir(dateRootPath, { recursive: true });
   } catch (error) {
-    throw projectError("create_failed", error?.message || "Unable to prepare the Codex chats folder.");
+    throw projectError(
+      "create_failed",
+      error?.message || "Unable to prepare the Codex chats folder.",
+    );
   }
 
   const targetPath = await reserveUniqueRootlessChatPath(dateRootPath, slugBase);
@@ -274,7 +275,10 @@ async function projectCreateRootlessChatRoot(params = {}, options = {}) {
     await fs.promises.mkdir(targetPath, { recursive: false });
   } catch (error) {
     if (error?.code !== "EEXIST") {
-      throw projectError("create_failed", error?.message || "Unable to create the rootless chat folder.");
+      throw projectError(
+        "create_failed",
+        error?.message || "Unable to create the rootless chat folder.",
+      );
     }
   }
 
@@ -303,10 +307,7 @@ function rootlessChatSlugFromPromptHint(rawPromptHint) {
     return ROOTLESS_CHAT_SLUG_FALLBACK;
   }
 
-  const tokens = sanitized
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, ROOTLESS_CHAT_SLUG_MAX_TOKENS);
+  const tokens = sanitized.split(/\s+/).filter(Boolean).slice(0, ROOTLESS_CHAT_SLUG_MAX_TOKENS);
   if (!tokens.length) {
     return ROOTLESS_CHAT_SLUG_FALLBACK;
   }
@@ -380,7 +381,9 @@ async function readDirectoryEntries(directoryPath, options = {}) {
   }
 
   return entries
-    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+    .toSorted((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    )
     .slice(0, options.limit || DEFAULT_DIRECTORY_LIMIT);
 }
 
@@ -460,7 +463,10 @@ async function directoryEntryForPath(candidatePath, dirent, options = {}) {
 async function requireUsableDirectory(candidatePath, options = {}) {
   const validation = await validateDirectory(candidatePath, options);
   if (!validation.isAllowed) {
-    throw projectError("path_not_allowed", "That folder is outside the allowed local project locations.");
+    throw projectError(
+      "path_not_allowed",
+      "That folder is outside the allowed local project locations.",
+    );
   }
   if (!validation.exists) {
     throw projectError("missing_directory", "That folder does not exist on this Mac.");
@@ -514,33 +520,45 @@ function parentPathWithinAllowedRoots(candidatePath, options = {}) {
 
 function assertPathAllowed(candidatePath, options = {}) {
   if (!isPathAllowed(candidatePath, options)) {
-    throw projectError("path_not_allowed", "That folder is outside the allowed local project locations.");
+    throw projectError(
+      "path_not_allowed",
+      "That folder is outside the allowed local project locations.",
+    );
   }
 }
 
 function isPathAllowed(candidatePath, options = {}) {
   const normalizedPath = path.resolve(candidatePath);
-  return allowedProjectRoots(options).some((rootPath) => samePathOrDescendant(normalizedPath, rootPath));
+  return allowedProjectRoots(options).some((rootPath) =>
+    samePathOrDescendant(normalizedPath, rootPath),
+  );
 }
 
 function allowedProjectRoots(options = {}) {
-  const roots = Array.isArray(options.allowedRoots) && options.allowedRoots.length
-    ? options.allowedRoots
-    : [resolveHomeDir(options)];
+  const roots =
+    Array.isArray(options.allowedRoots) && options.allowedRoots.length
+      ? options.allowedRoots
+      : [resolveHomeDir(options)];
 
-  return [...new Set(roots.flatMap((rootPath) => {
-    const resolvedRoot = path.resolve(rootPath);
-    return [resolvedRoot, realpathSyncIfAvailable(resolvedRoot)].filter(Boolean);
-  }))];
+  return [
+    ...new Set(
+      roots.flatMap((rootPath) => {
+        const resolvedRoot = path.resolve(rootPath);
+        return [resolvedRoot, realpathSyncIfAvailable(resolvedRoot)].filter(Boolean);
+      }),
+    ),
+  ];
 }
 
 function samePathOrDescendant(candidatePath, rootPath) {
   const relative = path.relative(rootPath, candidatePath);
-  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 function normalizeCandidatePath(candidatePath, options = {}) {
-  const rawPath = readString(candidatePath);
+  const rawPath = readStringOrNull(candidatePath);
   if (!rawPath) {
     throw projectError("missing_path", "A folder path is required.");
   }
@@ -612,9 +630,9 @@ function normalizeSearchVisitedLimit(rawLimit) {
 }
 
 function sortedDirents(dirents) {
-  return [...dirents].sort((left, right) => (
-    left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
-  ));
+  return [...dirents].toSorted((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+  );
 }
 
 function searchTokens(query) {
@@ -667,10 +685,6 @@ function realpathSyncIfAvailable(candidatePath) {
   } catch {
     return null;
   }
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function projectError(errorCode, userMessage) {

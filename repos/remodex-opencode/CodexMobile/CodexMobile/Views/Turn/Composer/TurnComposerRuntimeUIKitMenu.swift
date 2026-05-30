@@ -172,7 +172,21 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
     private static func intelligenceMenu(_ input: Input) -> UIMenu? {
         let options = input.runtimeState.reasoningDisplayOptions
-        guard !options.isEmpty else { return nil }
+        if options.isEmpty {
+            if input.runtimeState.capabilities.supportsReasoningEffort {
+                let reason = "This model does not support reasoning effort levels"
+                let action = UIAction(title: reason) { _ in }
+                action.attributes.insert(.disabled)
+                return UIMenu(
+                    title: "Intelligence",
+                    subtitle: "Unavailable",
+                    image: RemodexIcon.menuUIImage(systemName: "brain"),
+                    options: [],
+                    children: [action]
+                )
+            }
+            return nil
+        }
 
         let actions: [UIMenuElement] = options.map { option in
             let action = UIAction(
@@ -201,7 +215,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
     private static func speedMenu(_ input: Input) -> UIMenu? {
         let selectedModelCapabilities = modelCapabilitiesForSelectedModel(input)
-        guard input.runtimeState.supportsFastMode
+        guard input.runtimeState.capabilities.supportsFastMode
               && (selectedModelCapabilities?.supportsFastMode ?? true) else { return nil }
 
         let normalAction = UIAction(

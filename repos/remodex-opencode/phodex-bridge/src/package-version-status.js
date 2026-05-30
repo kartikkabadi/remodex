@@ -130,7 +130,7 @@ function refreshLatestVersionInBackground({
       .catch(() => getCachedLatestVersion())
       .finally(() => {
         setInFlightPromise(null);
-      })
+      }),
   );
 }
 

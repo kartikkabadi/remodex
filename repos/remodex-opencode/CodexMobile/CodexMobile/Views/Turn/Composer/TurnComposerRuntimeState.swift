@@ -22,17 +22,18 @@ struct TurnComposerRuntimeState: Equatable {
     let selectedReasoningEffort: String?
     let reasoningMenuDisabled: Bool
     let selectedServiceTier: CodexServiceTier?
-    let supportsFastMode: Bool
-    let supportsPlanMode: Bool
+    let capabilities: ProviderCapabilities
     let availableAgents: [AgentOption]
     let selectedAgent: String?
+    let isRuntimeEnabled: Bool
+    let runtimeUnavailableReason: String?
 
     var selectedReasoningTitle: String {
         effectiveReasoningEffort.map(TurnComposerMetaMapper.reasoningTitle(for:)) ?? "Select reasoning"
     }
 
     var showsSpeedBadgeInModelMenu: Bool {
-        supportsFastMode && selectedServiceTier != nil
+        capabilities.supportsFastMode && selectedServiceTier != nil
     }
 
     func isSelectedReasoning(_ effort: String) -> Bool {
@@ -52,6 +53,11 @@ struct TurnComposerRuntimeState: Equatable {
         let threadOverride = codex.threadRuntimeOverride(for: threadId)
         let capabilities = selectedModel?.capabilities
         let agentOverride = codex.opencodeAgentOverride
+        let currentProviderId = selectedModel?.modelProvider
+        let runtimeInfo = codex.availableRuntimes.first(where: { $0.id == currentProviderId })
+        let isRuntimeEnabled = runtimeInfo?.enabled ?? true
+        let runtimeUnavailableReason = runtimeInfo?.unavailableReason
+        let resolvedCapabilities = capabilities ?? ProviderCapabilities.defaultCodex
         return TurnComposerRuntimeState(
             reasoningDisplayOptions: reasoningDisplayOptions,
             effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(threadId: threadId),
@@ -60,10 +66,11 @@ struct TurnComposerRuntimeState: Equatable {
                 : codex.selectedReasoningEffort,
             reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || selectedModel == nil,
             selectedServiceTier: codex.effectiveServiceTier(for: threadId),
-            supportsFastMode: capabilities?.supportsFastMode ?? codex.selectedModelSupportsServiceTier(.fast, threadId: threadId),
-            supportsPlanMode: capabilities?.supportsPlanMode ?? true,
+            capabilities: resolvedCapabilities,
             availableAgents: codex.availableAgents,
-            selectedAgent: agentOverride
+            selectedAgent: agentOverride,
+            isRuntimeEnabled: isRuntimeEnabled,
+            runtimeUnavailableReason: runtimeUnavailableReason
         )
     }
 }

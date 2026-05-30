@@ -49,12 +49,8 @@ test("remodex restart kickstarts the installed macOS service without requiring r
     },
   });
 
-  assert.deepEqual(calls, [
-    "restart-service",
-  ]);
-  assert.deepEqual(messages, [
-    "[remodex] macOS bridge service restarted.",
-  ]);
+  assert.deepEqual(calls, ["restart-service"]);
+  assert.deepEqual(messages, ["[remodex] macOS bridge service restarted."]);
 });
 
 test("remodex start refreshes macOS service config and plist", async () => {
@@ -86,12 +82,8 @@ test("remodex start refreshes macOS service config and plist", async () => {
     },
   });
 
-  assert.deepEqual(calls, [
-    ["start-service", undefined],
-  ]);
-  assert.deepEqual(messages, [
-    "[remodex] macOS bridge service is running.",
-  ]);
+  assert.deepEqual(calls, [["start-service", undefined]]);
+  assert.deepEqual(messages, ["[remodex] macOS bridge service is running."]);
 });
 
 test("remodex up shows a startup indicator while waiting for the pairing QR", async () => {
@@ -125,9 +117,7 @@ test("remodex up shows a startup indicator while waiting for the pairing QR", as
     },
   });
 
-  assert.deepEqual(messages, [
-    "[remodex] Starting bridge and pairing QR...",
-  ]);
+  assert.deepEqual(messages, ["[remodex] Starting bridge and pairing QR..."]);
   assert.deepEqual(calls, [
     ["start-service", { waitForPairing: true }],
     ["print-qr", { pairingSession: { pairingPayload: { sessionId: "session-up" } } }],
@@ -165,9 +155,7 @@ test("remodex qr refreshes service config and prints the pairing QR", async () =
     },
   });
 
-  assert.deepEqual(messages, [
-    "[remodex] Refreshing bridge pairing QR...",
-  ]);
+  assert.deepEqual(messages, ["[remodex] Refreshing bridge pairing QR..."]);
   assert.deepEqual(calls, [
     ["start-service", { waitForPairing: true }],
     ["print-qr", { pairingSession: { pairingPayload: { sessionId: "session-qr" } } }],
@@ -227,9 +215,7 @@ test("runCli prints expected failures without a Node stack trace", async () => {
   });
 
   assert.equal(exitCode, 1);
-  assert.deepEqual(messages, [
-    "[remodex] No relay URL configured. Run ./run-local-remodex.sh.",
-  ]);
+  assert.deepEqual(messages, ["[remodex] No relay URL configured. Run ./run-local-remodex.sh."]);
   assert.equal(messages.join("\n").includes("at "), false);
 });
 

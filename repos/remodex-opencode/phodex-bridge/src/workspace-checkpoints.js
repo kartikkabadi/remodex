@@ -67,11 +67,19 @@ async function workspaceCheckpointDiff(repoRoot, params) {
   if (!fromCommit || !toCommit) {
     throw workspaceCheckpointError(
       "checkpoint_missing",
-      "One of the requested workspace checkpoints is unavailable."
+      "One of the requested workspace checkpoints is unavailable.",
     );
   }
 
-  const diff = await git(repoRoot, "diff", "--patch", "--minimal", "--no-color", fromCommit, toCommit);
+  const diff = await git(
+    repoRoot,
+    "diff",
+    "--patch",
+    "--minimal",
+    "--no-color",
+    fromCommit,
+    toCommit,
+  );
   return {
     repoRoot,
     fromCheckpointRef: fromRef,
@@ -86,7 +94,7 @@ async function workspaceCheckpointRestorePreview(repoRoot, params) {
   if (!commit) {
     throw workspaceCheckpointError(
       "checkpoint_missing",
-      "The requested workspace checkpoint is unavailable."
+      "The requested workspace checkpoint is unavailable.",
     );
   }
 
@@ -111,7 +119,7 @@ async function workspaceCheckpointRestoreApply(repoRoot, params) {
   if (params.confirmDestructiveRestore !== true) {
     throw workspaceCheckpointError(
       "restore_confirmation_required",
-      "Checkpoint restore requires explicit destructive-restore confirmation."
+      "Checkpoint restore requires explicit destructive-restore confirmation.",
     );
   }
 
@@ -120,7 +128,7 @@ async function workspaceCheckpointRestoreApply(repoRoot, params) {
   if (expectedTargetCommit && preview.commit !== expectedTargetCommit) {
     throw workspaceCheckpointError(
       "checkpoint_changed",
-      "The workspace checkpoint changed after preview. Review the restore again before applying it."
+      "The workspace checkpoint changed after preview. Review the restore again before applying it.",
     );
   }
 
@@ -153,7 +161,8 @@ function resolveCheckpointDescriptor(params, prefix = "") {
   if (checkpointRef) {
     return {
       ref: validateCheckpointRef(checkpointRef),
-      kind: firstNonEmptyString([params[`${prefix}CheckpointKind`], params.checkpointKind]) || "custom",
+      kind:
+        firstNonEmptyString([params[`${prefix}CheckpointKind`], params.checkpointKind]) || "custom",
       threadId: firstNonEmptyString([params.threadId]) || "",
       turnId: firstNonEmptyString([params.turnId]) || null,
       messageId: firstNonEmptyString([params.messageId]) || null,
@@ -161,12 +170,13 @@ function resolveCheckpointDescriptor(params, prefix = "") {
   }
 
   const threadId = requireIdentifier(params.threadId, "threadId");
-  const kind = firstNonEmptyString([
-    params[`${prefix}CheckpointKind`],
-    params[`${prefix}Kind`],
-    params.checkpointKind,
-    params.kind,
-  ]) || "turnEnd";
+  const kind =
+    firstNonEmptyString([
+      params[`${prefix}CheckpointKind`],
+      params[`${prefix}Kind`],
+      params.checkpointKind,
+      params.kind,
+    ]) || "turnEnd";
   const turnId = firstNonEmptyString([params[`${prefix}TurnId`], params.turnId]);
   const messageId = firstNonEmptyString([params[`${prefix}MessageId`], params.messageId]);
   const ref = checkpointRefFor({ threadId, kind, turnId, messageId });
@@ -198,16 +208,16 @@ function checkpointRefFor({ threadId, kind, turnId, messageId }) {
   switch (kind) {
     case "messageStart":
       return `${CHECKPOINT_REFS_PREFIX}/${threadKey}/message-start/${encodeRefSegment(
-        requireIdentifier(messageId, "messageId")
+        requireIdentifier(messageId, "messageId"),
       )}`;
     case "turnStart":
       return `${CHECKPOINT_REFS_PREFIX}/${threadKey}/turn-start/${encodeRefSegment(
-        requireIdentifier(turnId, "turnId")
+        requireIdentifier(turnId, "turnId"),
       )}`;
     case "turnEnd":
     case "turn":
       return `${CHECKPOINT_REFS_PREFIX}/${threadKey}/turn/${encodeRefSegment(
-        requireIdentifier(turnId, "turnId")
+        requireIdentifier(turnId, "turnId"),
       )}`;
     case "restoreBackup":
       return `${CHECKPOINT_REFS_PREFIX}/${threadKey}/restore-backup/${Date.now()}-${Math.random()
@@ -216,7 +226,7 @@ function checkpointRefFor({ threadId, kind, turnId, messageId }) {
     default:
       throw workspaceCheckpointError(
         "invalid_checkpoint_kind",
-        `Unsupported workspace checkpoint kind: ${kind}`
+        `Unsupported workspace checkpoint kind: ${kind}`,
       );
   }
 }
@@ -252,7 +262,7 @@ async function captureGitCheckpoint(repoRoot, checkpointRef) {
     if (!treeOid) {
       throw workspaceCheckpointError(
         "checkpoint_capture_failed",
-        "Git did not produce a checkpoint tree."
+        "Git did not produce a checkpoint tree.",
       );
     }
 
@@ -261,7 +271,7 @@ async function captureGitCheckpoint(repoRoot, checkpointRef) {
     if (!commitOid) {
       throw workspaceCheckpointError(
         "checkpoint_capture_failed",
-        "Git did not produce a checkpoint commit."
+        "Git did not produce a checkpoint commit.",
       );
     }
 
@@ -276,7 +286,7 @@ async function resolveCheckpointCommit(repoRoot, checkpointRef) {
   const result = await gitResult(
     repoRoot,
     ["rev-parse", "--verify", "--quiet", `${checkpointRef}^{commit}`],
-    { allowNonZeroExit: true }
+    { allowNonZeroExit: true },
   );
   if (result.code !== 0) {
     return null;
@@ -294,17 +304,26 @@ async function hasHeadCommit(repoRoot) {
 
 async function changedFilesAgainstCommit(repoRoot, commit) {
   const output = await git(repoRoot, "diff", "--name-only", commit, "--");
-  return output.split("\n").map((line) => line.trim()).filter(Boolean);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 async function stagedFilesInRepo(repoRoot) {
   const output = await git(repoRoot, "diff", "--name-only", "--cached");
-  return output.split("\n").map((line) => line.trim()).filter(Boolean);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 async function untrackedFilesInRepo(repoRoot) {
   const output = await git(repoRoot, "ls-files", "--others", "--exclude-standard");
-  return output.split("\n").map((line) => line.trim()).filter(Boolean);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function validateCheckpointRef(checkpointRef) {
@@ -312,13 +331,13 @@ function validateCheckpointRef(checkpointRef) {
   if (!normalized.startsWith(`${CHECKPOINT_REFS_PREFIX}/`)) {
     throw workspaceCheckpointError(
       "invalid_checkpoint_ref",
-      "Workspace checkpoint refs must stay inside the Remodex checkpoint namespace."
+      "Workspace checkpoint refs must stay inside the Remodex checkpoint namespace.",
     );
   }
   if (normalized.includes("..") || normalized.includes(" ")) {
     throw workspaceCheckpointError(
       "invalid_checkpoint_ref",
-      "Workspace checkpoint ref contains invalid path segments."
+      "Workspace checkpoint ref contains invalid path segments.",
     );
   }
   return normalized;
@@ -329,7 +348,7 @@ function requireIdentifier(value, name) {
   if (!normalized) {
     throw workspaceCheckpointError(
       "missing_checkpoint_identifier",
-      `Workspace checkpoint requires ${name}.`
+      `Workspace checkpoint requires ${name}.`,
     );
   }
   return normalized;
@@ -344,7 +363,7 @@ function encodeRefSegment(value) {
 }
 
 function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort();
+  return [...new Set(values.filter(Boolean))].toSorted();
 }
 
 function firstNonEmptyString(candidates) {
@@ -362,7 +381,11 @@ function firstNonEmptyString(candidates) {
 
 async function git(repoRoot, ...args) {
   let options = {};
-  if (args.length && typeof args[args.length - 1] === "object" && !Array.isArray(args[args.length - 1])) {
+  if (
+    args.length &&
+    typeof args[args.length - 1] === "object" &&
+    !Array.isArray(args[args.length - 1])
+  ) {
     options = args.pop();
   }
   const result = await gitResult(repoRoot, args, options);

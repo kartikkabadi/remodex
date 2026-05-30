@@ -9,6 +9,8 @@ import SwiftUI
 struct SlashCommandAutocompletePanel: View {
     let state: TurnComposerSlashCommandPanelState
     let availableCommands: [TurnComposerSlashCommand]
+    let supportsSlashCommands: Bool
+    let supportsThreadFork: Bool
     let hasComposerContentConflictingWithReview: Bool
     let isThreadRunning: Bool
     let showsGitBranchSelector: Bool
@@ -55,57 +57,75 @@ struct SlashCommandAutocompletePanel: View {
     private func commandList(query: String) -> some View {
         let items = TurnComposerSlashCommand.filtered(matching: query, within: availableCommands)
 
-        if items.isEmpty {
-            Text("No commands for /\(query)")
-                .font(AppFont.footnote())
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            if !supportsSlashCommands {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(AppFont.caption2())
+                        .foregroundStyle(.secondary)
+                    Text("Slash commands not supported by this runtime")
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
+                }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(items) { item in
-                        let isEnabled = isCommandEnabled(item)
-                        Button {
-                            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                            onSelectCommand(item)
-                        } label: {
-                            HStack(spacing: 10) {
-                                commandIcon(for: item, isEnabled: isEnabled)
+                .padding(.vertical, 8)
+            }
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.commandToken)
-                                        .font(AppFont.subheadline(weight: .semibold))
-                                        .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
-                                        .lineLimit(1)
+            if items.isEmpty {
+                Text("No commands for /\(query)")
+                    .font(AppFont.footnote())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(items) { item in
+                            let isEnabled = isCommandEnabled(item) && supportsSlashCommands
+                            let disabledReason: String? = !supportsSlashCommands
+                                ? "Slash commands not supported by this runtime"
+                                : (!isCommandEnabled(item) ? commandSubtitle(for: item) : nil)
+                            Button {
+                                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                                onSelectCommand(item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    commandIcon(for: item, isEnabled: isEnabled)
 
-                                    Text(commandSubtitle(for: item))
-                                        .font(AppFont.caption2())
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.commandToken)
+                                            .font(AppFont.subheadline(weight: .semibold))
+                                            .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                                            .lineLimit(1)
+
+                                        Text(commandSubtitle(for: item))
+                                            .font(AppFont.caption2())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer(minLength: 8)
+
+                                    Text(item.title)
+                                        .font(AppFont.footnote())
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
-
-                                Spacer(minLength: 8)
-
-                                Text(item.title)
-                                    .font(AppFont.footnote())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(height: Self.rowHeight)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: Self.rowHeight)
-                            .contentShape(Rectangle())
+                            .buttonStyle(AutocompleteRowButtonStyle())
+                            .capabilityGreyOut(isEnabled: isEnabled, reason: disabledReason)
                         }
-                        .buttonStyle(AutocompleteRowButtonStyle())
-                        .disabled(!isEnabled)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollIndicators(.visible)
+                .frame(height: Self.visibleListHeight(for: items.count))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .scrollIndicators(.visible)
-            .frame(height: Self.visibleListHeight(for: items.count))
         }
     }
 
@@ -300,7 +320,7 @@ struct SlashCommandAutocompletePanel: View {
         case .feedback:
             return true
         case .fork:
-            return !isThreadRunning
+            return supportsThreadFork && !isThreadRunning
         case .status:
             return true
         case .subagents:
@@ -309,6 +329,10 @@ struct SlashCommandAutocompletePanel: View {
     }
 
     private func commandSubtitle(for command: TurnComposerSlashCommand) -> String {
+        if command == .fork, !supportsThreadFork {
+            return "Fork not supported by this runtime"
+        }
+
         if (command == .compact || command == .fork), isThreadRunning {
             return "Wait for the current response to finish first"
         }

@@ -251,6 +251,7 @@ struct TurnView: View {
                 gitActionLoadingTitle: viewModel.gitActionLoadingTitle,
                 showsDiscardRuntimeChangesAndSync: viewModel.shouldShowDiscardRuntimeChangesAndSync,
                 gitSyncState: viewModel.gitSyncState,
+                supportsDesktopHandoff: supportsDesktopHandoff,
                 onTapMacHandoff: onTapMacHandoff,
                 onTapWorktreeHandoff: onTapWorktreeHandoff,
                 onTapNewChat: onTapNewChat,
@@ -645,6 +646,18 @@ struct TurnView: View {
         return false
     }
 
+    private var supportsDesktopHandoff: Bool {
+        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsDesktopHandoff ?? false
+    }
+
+    private var supportsApprovals: Bool {
+        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsApprovals ?? true
+    }
+
+    private var supportsWorktreeCap: Bool {
+        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsWorktree ?? false
+    }
+
     // MARK: - Bindings
 
     private var shouldAnchorToAssistantResponseBinding: Binding<Bool> {
@@ -871,10 +884,11 @@ struct TurnView: View {
         isThreadRunning: Bool,
         gitWorkingDirectory: String?
     ) -> Bool {
-        isWorktreeHandoffAvailable(
-            isThreadRunning: isThreadRunning,
-            gitWorkingDirectory: gitWorkingDirectory
-        ) && !viewModel.isCreatingGitWorktree
+        supportsWorktreeCap
+            && isWorktreeHandoffAvailable(
+                isThreadRunning: isThreadRunning,
+                gitWorkingDirectory: gitWorkingDirectory
+            ) && !viewModel.isCreatingGitWorktree
     }
 
     private func handleWorktreeHandoffTap(currentThread: CodexThread) {
@@ -1313,6 +1327,11 @@ struct TurnView: View {
     }
 
     private func syncApprovalAlertPresentation() {
+        guard supportsApprovals else {
+            alertApprovalRequest = nil
+            isApprovalAlertPresented = false
+            return
+        }
         alertApprovalRequest = approvalForThread
         isApprovalAlertPresented = alertApprovalRequest != nil
     }

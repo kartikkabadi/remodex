@@ -27,29 +27,36 @@ function makeProvider(ownedThreadIds = []) {
 test("mergeModelListResult annotates Codex models and appends provider models", () => {
   const result = mergeModelListResult(
     { items: [{ id: "gpt-5.5", model: "gpt-5.5", provider: "openai" }] },
-    [{ id: "opencode/gpt-5.5", modelProvider: "opencode" }]
+    [{ id: "opencode/gpt-5.5", modelProvider: "opencode" }],
   );
 
-  assert.deepEqual(result.items.map((model) => model.modelProvider), ["codex", "opencode"]);
+  assert.deepEqual(
+    result.items.map((model) => model.modelProvider),
+    ["codex", "opencode"],
+  );
   assert.equal(result.items[0].provider, "codex");
 });
 
 test("mergeThreadListResult deduplicates provider-owned thread copies", () => {
   const result = mergeThreadListResult(
     {
-      data: [{
-        id: "thread-1",
-        title: "Codex copy",
-        modelProvider: "codex",
-        updatedAt: "2026-05-20T10:00:00Z",
-      }],
+      data: [
+        {
+          id: "thread-1",
+          title: "Codex copy",
+          modelProvider: "codex",
+          updatedAt: "2026-05-20T10:00:00Z",
+        },
+      ],
     },
-    [{
-      id: "thread-1",
-      title: "OpenCode copy",
-      modelProvider: "opencode",
-      updatedAt: "2026-05-21T10:00:00Z",
-    }]
+    [
+      {
+        id: "thread-1",
+        title: "OpenCode copy",
+        modelProvider: "opencode",
+        updatedAt: "2026-05-21T10:00:00Z",
+      },
+    ],
   );
 
   assert.equal(result.data.length, 1);
@@ -62,51 +69,61 @@ test("providerForRequest routes explicit OpenCode and honors explicit Codex fall
 
   assert.equal(
     providerForRequest({ method: "turn/start", params: { threadId: "thread-1" } }, [provider]),
-    provider
+    provider,
   );
   assert.equal(
-    providerForRequest({
-      method: "turn/start",
-      params: {
-        threadId: "thread-1",
-        modelProvider: "codex",
+    providerForRequest(
+      {
+        method: "turn/start",
+        params: {
+          threadId: "thread-1",
+          modelProvider: "codex",
+        },
       },
-    }, [provider]),
-    null
+      [provider],
+    ),
+    null,
   );
   assert.equal(
-    providerForRequest({
-      method: "turn/start",
-      params: {
-        threadId: "codex-thread",
-        collaborationMode: {
-          settings: {
-            model_provider: "open-code",
+    providerForRequest(
+      {
+        method: "turn/start",
+        params: {
+          threadId: "codex-thread",
+          collaborationMode: {
+            settings: {
+              model_provider: "open-code",
+            },
           },
         },
       },
-    }, [provider]),
-    provider
+      [provider],
+    ),
+    provider,
   );
 });
 
 test("stripRuntimeProviderFieldsForCodex removes top-level and nested provider selectors", () => {
-  const stripped = JSON.parse(stripRuntimeProviderFieldsForCodex(JSON.stringify({
-    id: 1,
-    method: "turn/start",
-    params: {
-      threadId: "thread-1",
-      model: "gpt-5.5",
-      modelProvider: "codex",
-      collaborationMode: {
-        settings: {
+  const stripped = JSON.parse(
+    stripRuntimeProviderFieldsForCodex(
+      JSON.stringify({
+        id: 1,
+        method: "turn/start",
+        params: {
+          threadId: "thread-1",
           model: "gpt-5.5",
-          model_provider: "codex",
-          reasoning_effort: "medium",
+          modelProvider: "codex",
+          collaborationMode: {
+            settings: {
+              model: "gpt-5.5",
+              model_provider: "codex",
+              reasoning_effort: "medium",
+            },
+          },
         },
-      },
-    },
-  })));
+      }),
+    ),
+  );
 
   assert.equal(stripped.params.modelProvider, undefined);
   assert.equal(stripped.params.collaborationMode.settings.model_provider, undefined);
@@ -122,11 +139,13 @@ test("thread/list remembers Codex and provider project folders", async () => {
   });
   const router = createRuntimeProviderRouter({
     sendCodexRequest: async () => ({
-      data: [{
-        id: "codex-thread",
-        cwd: "/Users/me/work/codex-app",
-        provider: "codex",
-      }],
+      data: [
+        {
+          id: "codex-thread",
+          cwd: "/Users/me/work/codex-app",
+          provider: "codex",
+        },
+      ],
     }),
     sendApplicationResponse(payload) {
       responsePayload = JSON.parse(payload);
@@ -137,43 +156,52 @@ test("thread/list remembers Codex and provider project folders", async () => {
         remembered.push({ threads, metadata });
       },
     },
-    providers: [{
-      id: "opencode",
-      async listModels() {
-        return [];
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads() {
+          return {
+            data: [
+              {
+                id: "ses_test",
+                cwd: "/Users/me/work/opencode-app",
+                modelProvider: "opencode",
+              },
+            ],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
       },
-      async listThreads() {
-        return {
-          data: [{
-            id: "ses_test",
-            cwd: "/Users/me/work/opencode-app",
-            modelProvider: "opencode",
-          }],
-        };
-      },
-      ownsThread() {
-        return false;
-      },
-      handleRequest() {
-        return {};
-      },
-    }],
+    ],
   });
 
-  assert.equal(router.handleApplicationMessage(JSON.stringify({
-    id: "threads-1",
-    method: "thread/list",
-    params: {},
-  })), true);
+  assert.equal(
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "threads-1",
+        method: "thread/list",
+        params: {},
+      }),
+    ),
+    true,
+  );
   await responsePromise;
 
   assert.equal(responsePayload.id, "threads-1");
-  assert.deepEqual(remembered.map((call) => call.threads.map((thread) => thread.cwd)), [
-    ["/Users/me/work/codex-app"],
-    ["/Users/me/work/opencode-app"],
-  ]);
-  assert.deepEqual(remembered.map((call) => call.metadata.source), [
-    "codex-thread-list",
-    "provider-thread-list",
-  ]);
+  assert.deepEqual(
+    remembered.map((call) => call.threads.map((thread) => thread.cwd)),
+    [["/Users/me/work/codex-app"], ["/Users/me/work/opencode-app"]],
+  );
+  assert.deepEqual(
+    remembered.map((call) => call.metadata.source),
+    ["codex-thread-list", "provider-thread-list"],
+  );
 });

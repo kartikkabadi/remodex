@@ -282,7 +282,11 @@ function findRolloutFileForThread(root, threadId, { fsModule = fs } = {}) {
         continue;
       }
 
-      if (entry.name.includes(threadId) && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
+      if (
+        entry.name.includes(threadId) &&
+        entry.name.startsWith("rollout-") &&
+        entry.name.endsWith(".jsonl")
+      ) {
         return fullPath;
       }
     }
@@ -302,12 +306,12 @@ function findRecentRolloutFileForWatch(
     candidateLimit = DEFAULT_RECENT_ROLLOUT_CANDIDATE_LIMIT,
     lookbackMs = DEFAULT_RECENT_ROLLOUT_LOOKBACK_MS,
     turnLookupScanBytes = DEFAULT_TURN_LOOKUP_SCAN_BYTES,
-  } = {}
+  } = {},
 ) {
   const candidates = collectRecentRolloutFiles(root, {
     fsModule,
     candidateLimit,
-    modifiedAfterMs: startedAt > 0 ? (startedAt - lookbackMs) : 0,
+    modifiedAfterMs: startedAt > 0 ? startedAt - lookbackMs : 0,
   });
   if (candidates.length === 0) {
     return null;
@@ -315,10 +319,12 @@ function findRecentRolloutFileForWatch(
 
   if (turnId) {
     for (const candidate of candidates) {
-      if (rolloutFileContainsTurnId(candidate.filePath, turnId, {
-        fsModule,
-        scanBytes: turnLookupScanBytes,
-      })) {
+      if (
+        rolloutFileContainsTurnId(candidate.filePath, turnId, {
+          fsModule,
+          scanBytes: turnLookupScanBytes,
+        })
+      ) {
         return candidate.filePath;
       }
     }
@@ -344,11 +350,11 @@ function findRecentRolloutFileForContextRead(
     turnId = "",
     fsModule = fs,
     candidateLimit = DEFAULT_CONTEXT_READ_CANDIDATE_LIMIT,
-    lookbackMs = DEFAULT_RECENT_ROLLOUT_LOOKBACK_MS,
-    now = () => Date.now(),
+    _lookbackMs = DEFAULT_RECENT_ROLLOUT_LOOKBACK_MS,
+    _now = () => Date.now(),
     turnLookupScanBytes = DEFAULT_TURN_LOOKUP_SCAN_BYTES,
     threadLookupScanBytes = DEFAULT_THREAD_LOOKUP_SCAN_BYTES,
-  } = {}
+  } = {},
 ) {
   const candidates = collectRecentRolloutFiles(root, {
     fsModule,
@@ -361,10 +367,12 @@ function findRecentRolloutFileForContextRead(
 
   if (turnId) {
     for (const candidate of candidates) {
-      if (rolloutFileContainsTurnId(candidate.filePath, turnId, {
-        fsModule,
-        scanBytes: turnLookupScanBytes,
-      })) {
+      if (
+        rolloutFileContainsTurnId(candidate.filePath, turnId, {
+          fsModule,
+          scanBytes: turnLookupScanBytes,
+        })
+      ) {
         return candidate.filePath;
       }
     }
@@ -379,10 +387,12 @@ function findRecentRolloutFileForContextRead(
     }
 
     for (const candidate of candidates) {
-      if (rolloutFileContainsThreadId(candidate.filePath, threadId, {
-        fsModule,
-        scanBytes: threadLookupScanBytes,
-      })) {
+      if (
+        rolloutFileContainsThreadId(candidate.filePath, threadId, {
+          fsModule,
+          scanBytes: threadLookupScanBytes,
+        })
+      ) {
         return candidate.filePath;
       }
     }
@@ -434,10 +444,12 @@ function findNewestRolloutFileForThread(root, threadId, { fsModule = fs } = {}) 
         continue;
       }
 
-      if (!entry.isFile()
-        || !entry.name.startsWith("rollout-")
-        || !entry.name.endsWith(".jsonl")
-        || !entry.name.includes(threadId)) {
+      if (
+        !entry.isFile() ||
+        !entry.name.startsWith("rollout-") ||
+        !entry.name.endsWith(".jsonl") ||
+        !entry.name.includes(threadId)
+      ) {
         continue;
       }
 
@@ -460,7 +472,7 @@ function collectRecentRolloutFiles(
     fsModule = fs,
     candidateLimit = DEFAULT_RECENT_ROLLOUT_CANDIDATE_LIMIT,
     modifiedAfterMs = 0,
-  } = {}
+  } = {},
 ) {
   if (!fsModule.existsSync(root)) {
     return [];
@@ -480,9 +492,7 @@ function collectRecentRolloutFiles(
         continue;
       }
 
-      if (!entry.isFile()
-        || !entry.name.startsWith("rollout-")
-        || !entry.name.endsWith(".jsonl")) {
+      if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
         continue;
       }
 
@@ -498,10 +508,11 @@ function collectRecentRolloutFiles(
     }
   }
 
-  candidates.sort((lhs, rhs) =>
-    (rhs.mtimeMs - lhs.mtimeMs)
-      || path.basename(rhs.filePath).localeCompare(path.basename(lhs.filePath))
-      || rhs.filePath.localeCompare(lhs.filePath)
+  candidates.sort(
+    (lhs, rhs) =>
+      rhs.mtimeMs - lhs.mtimeMs ||
+      path.basename(rhs.filePath).localeCompare(path.basename(lhs.filePath)) ||
+      rhs.filePath.localeCompare(lhs.filePath),
   );
   return candidates.slice(0, candidateLimit);
 }
@@ -509,22 +520,14 @@ function collectRecentRolloutFiles(
 function rolloutFileContainsTurnId(
   filePath,
   turnId,
-  {
-    fsModule = fs,
-    scanBytes = DEFAULT_TURN_LOOKUP_SCAN_BYTES,
-  } = {}
+  { fsModule = fs, scanBytes = DEFAULT_TURN_LOOKUP_SCAN_BYTES } = {},
 ) {
   if (!filePath || !turnId) {
     return false;
   }
 
   const stat = fsModule.statSync(filePath);
-  const chunk = readFileSlice(
-    filePath,
-    0,
-    Math.min(stat.size, scanBytes),
-    fsModule
-  );
+  const chunk = readFileSlice(filePath, 0, Math.min(stat.size, scanBytes), fsModule);
   if (!chunk) {
     return false;
   }
@@ -535,10 +538,7 @@ function rolloutFileContainsTurnId(
 function rolloutFileContainsThreadId(
   filePath,
   threadId,
-  {
-    fsModule = fs,
-    scanBytes = DEFAULT_THREAD_LOOKUP_SCAN_BYTES,
-  } = {}
+  { fsModule = fs, scanBytes = DEFAULT_THREAD_LOOKUP_SCAN_BYTES } = {},
 ) {
   if (!filePath || !threadId) {
     return false;
@@ -549,17 +549,17 @@ function rolloutFileContainsThreadId(
     filePath,
     Math.max(0, stat.size - Math.min(stat.size, scanBytes)),
     stat.size,
-    fsModule
+    fsModule,
   );
   if (!chunk) {
     return false;
   }
 
   return (
-    chunk.includes(`"thread_id":"${threadId}"`)
-      || chunk.includes(`"threadId":"${threadId}"`)
-      || chunk.includes(`"conversation_id":"${threadId}"`)
-      || chunk.includes(`"conversationId":"${threadId}"`)
+    chunk.includes(`"thread_id":"${threadId}"`) ||
+    chunk.includes(`"threadId":"${threadId}"`) ||
+    chunk.includes(`"conversation_id":"${threadId}"`) ||
+    chunk.includes(`"conversationId":"${threadId}"`)
   );
 }
 
@@ -687,16 +687,21 @@ function contextUsageFromTokenCountPayload(payload) {
 
   // Prefer the last-turn snapshot over cumulative totals so the UI shows the
   // active context load, not the lifetime token count of the whole session file.
-  const usageRoot = info.last_token_usage || info.lastTokenUsage || info.total_token_usage || info.totalTokenUsage;
+  const usageRoot =
+    info.last_token_usage || info.lastTokenUsage || info.total_token_usage || info.totalTokenUsage;
   const tokenLimit = readPositiveInteger(
-    info.model_context_window ?? info.modelContextWindow ?? info.context_window ?? info.contextWindow
+    info.model_context_window ??
+      info.modelContextWindow ??
+      info.context_window ??
+      info.contextWindow,
   );
   if (!tokenLimit) {
     return null;
   }
 
-  const tokensUsed = readPositiveInteger(usageRoot?.total_tokens ?? usageRoot?.totalTokens)
-    ?? sumPositiveIntegers([
+  const tokensUsed =
+    readPositiveInteger(usageRoot?.total_tokens ?? usageRoot?.totalTokens) ??
+    sumPositiveIntegers([
       usageRoot?.input_tokens ?? usageRoot?.inputTokens,
       usageRoot?.output_tokens ?? usageRoot?.outputTokens,
       usageRoot?.reasoning_output_tokens ?? usageRoot?.reasoningOutputTokens,

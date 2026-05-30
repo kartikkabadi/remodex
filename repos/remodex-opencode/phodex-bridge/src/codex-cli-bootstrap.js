@@ -61,7 +61,7 @@ function ensureCodexCLI({
   if (!npmVersion) {
     logWarn(
       logger,
-      "[remodex] npm is unavailable, so Remodex could not install or update the Codex CLI automatically."
+      "[remodex] npm is unavailable, so Remodex could not install or update the Codex CLI automatically.",
     );
     return {
       status: "failed",
@@ -82,7 +82,7 @@ function ensureCodexCLI({
     const message = extractCommandFailureMessage(error);
     logWarn(
       logger,
-      `[remodex] Codex CLI ${versionBefore ? "update" : "install"} failed. ${message}`
+      `[remodex] Codex CLI ${versionBefore ? "update" : "install"} failed. ${message}`,
     );
     return {
       status: "failed",
@@ -102,7 +102,7 @@ function ensureCodexCLI({
   if (!versionAfter) {
     logWarn(
       logger,
-      "[remodex] Codex CLI bootstrap finished, but `codex --version` is still unavailable in this shell."
+      "[remodex] Codex CLI bootstrap finished, but `codex --version` is still unavailable in this shell.",
     );
     return {
       status: "failed",
@@ -113,7 +113,7 @@ function ensureCodexCLI({
 
   logInfo(
     logger,
-    `[remodex] Codex CLI ${versionBefore ? "updated" : "installed"} (${versionAfter}).`
+    `[remodex] Codex CLI ${versionBefore ? "updated" : "installed"} (${versionAfter}).`,
   );
   return {
     status: versionBefore ? "updated" : "installed",
@@ -123,17 +123,13 @@ function ensureCodexCLI({
 }
 
 function shouldSkipCodexBootstrap(env = process.env) {
-  const raw = String(env[SKIP_BOOTSTRAP_ENV_NAME] || "").trim().toLowerCase();
+  const raw = String(env[SKIP_BOOTSTRAP_ENV_NAME] || "")
+    .trim()
+    .toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
-function readExecutableVersion({
-  executable,
-  args,
-  env,
-  platform,
-  execFileSyncImpl,
-}) {
+function readExecutableVersion({ executable, args, env, platform, execFileSyncImpl }) {
   try {
     const output = execFileSyncImpl(resolveExecutableName(executable, platform), args, {
       encoding: "utf8",

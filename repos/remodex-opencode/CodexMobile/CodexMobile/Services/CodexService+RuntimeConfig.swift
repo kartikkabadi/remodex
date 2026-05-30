@@ -257,20 +257,60 @@ extension CodexService {
 
         guard let resultObject = response.result?.objectValue else {
             availableAgents = []
+            availableRuntimes = []
             return
         }
 
         let runtimes = resultObject["runtimes"]?.arrayValue ?? []
-        let opencodeRuntime = runtimes.first(where: {
-            $0.objectValue?["id"]?.stringValue == "opencode"
-        })
-        let agents = opencodeRuntime?.objectValue?["agents"]?.arrayValue ?? []
-        availableAgents = agents.compactMap { agentJSON -> AgentOption? in
-            guard let id = agentJSON.objectValue?["id"]?.stringValue,
-                  let label = agentJSON.objectValue?["label"]?.stringValue else {
-                return nil
+        availableAgents = []
+        availableRuntimes = []
+
+        for runtimeJSON in runtimes {
+            guard let runtimeObj = runtimeJSON.objectValue else { continue }
+            guard let runtimeId = runtimeObj["id"]?.stringValue else { continue }
+
+            let label = runtimeObj["label"]?.stringValue ?? runtimeId
+            let enabled = runtimeObj["enabled"]?.boolValue ?? false
+            let unavailableReason = runtimeObj["unavailableReason"]?.stringValue
+
+            // Parse capabilities
+            var capabilities = ProviderCapabilities.defaultCodex
+            if let capsObj = runtimeObj["capabilities"]?.objectValue {
+                capabilities = ProviderCapabilities(
+                    supportsAgentSelection: capsObj["supportsAgentSelection"]?.boolValue ?? false,
+                    supportsReasoningEffort: capsObj["supportsReasoningEffort"]?.boolValue ?? false,
+                    supportsFastMode: capsObj["supportsFastMode"]?.boolValue ?? true,
+                    supportsPlanMode: capsObj["supportsPlanMode"]?.boolValue ?? false,
+                    supportsStreamingTools: capsObj["supportsStreamingTools"]?.boolValue ?? true,
+                    supportsApprovals: capsObj["supportsApprovals"]?.boolValue ?? true,
+                    supportsFork: capsObj["supportsFork"]?.boolValue ?? true,
+                    supportsVoice: capsObj["supportsVoice"]?.boolValue ?? false,
+                    supportsDesktopHandoff: capsObj["supportsDesktopHandoff"]?.boolValue ?? true,
+                    supportsSlashCommands: capsObj["supportsSlashCommands"]?.boolValue ?? true,
+                    supportsMCP: capsObj["supportsMCP"]?.boolValue ?? true,
+                    supportsWorktree: capsObj["supportsWorktree"]?.boolValue ?? false
+                )
             }
-            return AgentOption(id: id, displayName: label)
+
+            // Parse agents
+            let agents = (runtimeObj["agents"]?.arrayValue ?? []).compactMap { agentJSON -> AgentOption? in
+                guard let agentId = agentJSON.objectValue?["id"]?.stringValue,
+                      let agentLabel = agentJSON.objectValue?["label"]?.stringValue else {
+                    return nil
+                }
+                return AgentOption(id: agentId, displayName: agentLabel)
+            }
+
+            let runtimeInfo = RuntimeInfo(
+                id: runtimeId,
+                label: label,
+                enabled: enabled,
+                unavailableReason: unavailableReason,
+                capabilities: capabilities,
+                agents: agents
+            )
+            availableRuntimes.append(runtimeInfo)
+            availableAgents.append(contentsOf: agents)
         }
     }
 

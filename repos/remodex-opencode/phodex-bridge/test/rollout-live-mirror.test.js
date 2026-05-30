@@ -47,12 +47,14 @@ test("desktop-origin active runs replay thinking and exec command activity on re
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-desktop",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-desktop",
+      },
+    }),
+  );
 
   await wait(30);
 
@@ -65,7 +67,7 @@ test("desktop-origin active runs replay thinking and exec command activity on re
       "codex/event/exec_command_begin",
       "codex/event/exec_command_output_delta",
       "codex/event/exec_command_end",
-    ]
+    ],
   );
   assert.equal(outbound[1].params.delta, "Thinking...");
   assert.equal(outbound[0].params.remodexDesktopMirror, true);
@@ -78,9 +80,7 @@ test("desktop-origin active runs emit activity heartbeat while rollout is quiet"
     threadId: "thread-heartbeat",
     originator: "Codex Desktop",
     source: "vscode",
-    lines: [
-      taskStarted("turn-heartbeat"),
-    ],
+    lines: [taskStarted("turn-heartbeat")],
   });
   const previousCodexHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = homeDir;
@@ -100,12 +100,14 @@ test("desktop-origin active runs emit activity heartbeat while rollout is quiet"
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-heartbeat",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-heartbeat",
+      },
+    }),
+  );
 
   await wait(45);
 
@@ -145,12 +147,14 @@ test("desktop-origin bootstrap replays the pending user message and final assist
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-chat",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-chat",
+      },
+    }),
+  );
 
   await wait(30);
 
@@ -161,7 +165,7 @@ test("desktop-origin bootstrap replays the pending user message and final assist
       "codex/event/user_message",
       "item/reasoning/textDelta",
       "codex/event/agent_message",
-    ]
+    ],
   );
   assert.equal(outbound[0].params.remodexRolloutLiveMirror, true);
   assert.equal(outbound[1].params.message, "Please review this diff");
@@ -169,7 +173,7 @@ test("desktop-origin bootstrap replays the pending user message and final assist
   assert.equal(outbound[3].params.message, "Review complete");
   assert.equal(
     outbound[3].params.itemId,
-    "rollout-agent-message:thread-chat:turn-chat:2026-03-15T19:47:40.000Z:73e01b91e228"
+    "rollout-agent-message:thread-chat:turn-chat:2026-03-15T19:47:40.000Z:73e01b91e228",
   );
 });
 
@@ -197,12 +201,14 @@ test("desktop-origin live tail attaches pre-task user messages to the next turn"
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-live-prelude",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-live-prelude",
+      },
+    }),
+  );
 
   await wait(20);
   appendRolloutLines(rolloutPath, [userMessage("Start from Mac")]);
@@ -214,11 +220,7 @@ test("desktop-origin live tail attaches pre-task user messages to the next turn"
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "codex/event/user_message",
-      "item/reasoning/textDelta",
-    ]
+    ["turn/started", "codex/event/user_message", "item/reasoning/textDelta"],
   );
   assert.equal(outbound[1].params.message, "Start from Mac");
   assert.equal(outbound[1].params.turnId, "turn-live-prelude");
@@ -257,22 +259,20 @@ test("desktop-origin update_plan calls mirror as structured activity plan update
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-plan",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-plan",
+      },
+    }),
+  );
 
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "turn/plan/updated",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "turn/plan/updated"],
   );
   assert.equal(outbound[1].params.turnId, "turn-plan");
   assert.equal(outbound[2].params.turnId, "turn-plan");
@@ -284,7 +284,7 @@ test("desktop-origin update_plan calls mirror as structured activity plan update
   assert.equal(outbound[2].params.remodexDesktopMirror, true);
   assert.equal(
     outbound.some((message) => message.params?.message === "Running update_plan"),
-    false
+    false,
   );
 });
 
@@ -293,9 +293,7 @@ test("desktop-origin completed plan items mirror as final plan rows", async (t) 
     threadId: "thread-plan-result",
     originator: "Codex Desktop",
     source: "desktop",
-    lines: [
-      taskStarted("turn-plan-result"),
-    ],
+    lines: [taskStarted("turn-plan-result")],
   });
   const previousCodexHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = homeDir;
@@ -314,28 +312,29 @@ test("desktop-origin completed plan items mirror as final plan rows", async (t) 
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-plan-result",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-plan-result",
+      },
+    }),
+  );
 
   await wait(20);
   appendRolloutLines(rolloutPath, [
-    planItemCompleted("turn-plan-result", "plan-result-1", "# Improve Dashboard\n\n- Tighten validation"),
+    planItemCompleted(
+      "turn-plan-result",
+      "plan-result-1",
+      "# Improve Dashboard\n\n- Tighten validation",
+    ),
     taskComplete("turn-plan-result"),
   ]);
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "item/completed",
-      "turn/completed",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "item/completed", "turn/completed"],
   );
   assert.equal(outbound[2].params.threadId, "thread-plan-result");
   assert.equal(outbound[2].params.turnId, "turn-plan-result");
@@ -349,8 +348,8 @@ test("desktop-origin task_started without turn_id still mirrors live file change
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    "-let title = \"Old\"",
-    "+let title = \"New\"",
+    '-let title = "Old"',
+    '+let title = "New"',
     "*** End Patch",
     "",
   ].join("\n");
@@ -377,12 +376,14 @@ test("desktop-origin task_started without turn_id still mirrors live file change
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-turnless-task",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-turnless-task",
+      },
+    }),
+  );
 
   await wait(20);
   appendRolloutLines(rolloutPath, [
@@ -403,7 +404,7 @@ test("desktop-origin task_started without turn_id still mirrors live file change
       "codex/event/patch_apply_end",
       "codex/event/patch_apply_end",
       "turn/completed",
-    ]
+    ],
   );
   const mirroredTurnId = outbound[0].params.turnId;
   assert.match(mirroredTurnId, /^rollout-turn:thread-turnless-task:/);
@@ -420,10 +421,7 @@ test("desktop-origin active runs mirror generated image previews", async (t) => 
     threadId: "thread-image",
     originator: "Codex Desktop",
     source: "desktop",
-    lines: [
-      taskStarted("turn-image"),
-      imageGenerationCall("ig_123"),
-    ],
+    lines: [taskStarted("turn-image"), imageGenerationCall("ig_123")],
   });
   const previousCodexHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = homeDir;
@@ -442,29 +440,27 @@ test("desktop-origin active runs mirror generated image previews", async (t) => 
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-image",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-image",
+      },
+    }),
+  );
 
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "codex/event/image_generation_end"],
   );
   assert.equal(outbound[2].params.call_id, "ig_123");
   assert.equal(outbound[2].params.itemId, "ig_123");
   assert.equal(outbound[2].params.turnId, "turn-image");
   assert.equal(
     outbound[2].params.saved_path,
-    path.join(homeDir, "generated_images", "thread-image", "ig_123.png")
+    path.join(homeDir, "generated_images", "thread-image", "ig_123.png"),
   );
 });
 
@@ -473,10 +469,7 @@ test("desktop-origin active runs mirror imageView items", async (t) => {
     threadId: "thread-image-view",
     originator: "Codex Desktop",
     source: "desktop",
-    lines: [
-      taskStarted("turn-image-view"),
-      imageViewItem("view_123", "/tmp/generated view.png"),
-    ],
+    lines: [taskStarted("turn-image-view"), imageViewItem("view_123", "/tmp/generated view.png")],
   });
   const previousCodexHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = homeDir;
@@ -495,22 +488,20 @@ test("desktop-origin active runs mirror imageView items", async (t) => {
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-image-view",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-image-view",
+      },
+    }),
+  );
 
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "codex/event/image_generation_end"],
   );
   assert.equal(outbound[2].params.call_id, "view_123");
   assert.equal(outbound[2].params.saved_path, "/tmp/generated view.png");
@@ -543,22 +534,20 @@ test("desktop-origin active runs mirror image_generation items", async (t) => {
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-image-generation",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-image-generation",
+      },
+    }),
+  );
 
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "codex/event/image_generation_end"],
   );
   assert.equal(outbound[2].params.call_id, "ig_generation");
   assert.equal(outbound[2].params.saved_path, "/tmp/generated item.png");
@@ -591,22 +580,20 @@ test("desktop-origin active runs mirror generated image end events without respo
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-image-event",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-image-event",
+      },
+    }),
+  );
 
   await wait(30);
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "codex/event/image_generation_end",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "codex/event/image_generation_end"],
   );
   assert.equal(outbound[2].params.call_id, "ig_event");
   assert.equal(outbound[2].params.itemId, "ig_event");
@@ -644,12 +631,14 @@ test("phone-origin rollouts do not emit mirrored updates", async (t) => {
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/read",
-    params: {
-      threadId: "thread-phone",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/read",
+      params: {
+        threadId: "thread-phone",
+      },
+    }),
+  );
 
   await wait(30);
 
@@ -680,12 +669,14 @@ test("desktop-origin idle watchers stream new rollout growth after the phone reo
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-grow",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-grow",
+      },
+    }),
+  );
   await wait(20);
 
   appendRolloutLines(rolloutPath, [
@@ -696,11 +687,7 @@ test("desktop-origin idle watchers stream new rollout growth after the phone reo
 
   assert.deepEqual(
     outbound.map((message) => message.method),
-    [
-      "turn/started",
-      "item/reasoning/textDelta",
-      "codex/event/background_event",
-    ]
+    ["turn/started", "item/reasoning/textDelta", "codex/event/background_event"],
   );
   assert.equal(outbound[2].params.message, "Applying patch");
 });
@@ -710,8 +697,8 @@ test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    "-let title = \"Old\"",
-    "+let title = \"New\"",
+    '-let title = "Old"',
+    '+let title = "New"',
     "*** End Patch",
     "",
   ].join("\n");
@@ -742,12 +729,14 @@ test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-patch",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-patch",
+      },
+    }),
+  );
 
   await wait(30);
 
@@ -759,7 +748,7 @@ test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle
       "codex/event/patch_apply_begin",
       "codex/event/background_event",
       "codex/event/patch_apply_end",
-    ]
+    ],
   );
   assert.equal(outbound[2].params.itemId, "call-patch");
   assert.equal(outbound[2].params.status, "inProgress");
@@ -769,7 +758,10 @@ test("desktop-origin rollouts mirror custom apply_patch as file-change lifecycle
   assert.equal(outbound[4].params.changes[0].kind, "update");
   assert.equal(outbound[4].params.changes[0].additions, 1);
   assert.equal(outbound[4].params.changes[0].deletions, 1);
-  assert.match(outbound[4].params.changes[0].diff, /diff --git a\/Sources\/App.swift b\/Sources\/App.swift/);
+  assert.match(
+    outbound[4].params.changes[0].diff,
+    /diff --git a\/Sources\/App.swift b\/Sources\/App.swift/,
+  );
 });
 
 test("desktop-origin rollouts emit turn-end file-change snapshot after final text", async (t) => {
@@ -777,8 +769,8 @@ test("desktop-origin rollouts emit turn-end file-change snapshot after final tex
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    "-let title = \"Old\"",
-    "+let title = \"New\"",
+    '-let title = "Old"',
+    '+let title = "New"',
     "*** End Patch",
     "",
   ].join("\n");
@@ -820,12 +812,14 @@ test("desktop-origin rollouts emit turn-end file-change snapshot after final tex
   });
   t.after(() => controller.stopAll());
 
-  controller.observeInbound(JSON.stringify({
-    method: "thread/resume",
-    params: {
-      threadId: "thread-patch-snapshot",
-    },
-  }));
+  controller.observeInbound(
+    JSON.stringify({
+      method: "thread/resume",
+      params: {
+        threadId: "thread-patch-snapshot",
+      },
+    }),
+  );
   await wait(20);
   appendRolloutLines(rolloutPath, [
     agentMessage("Done editing.", "final_answer"),
@@ -834,10 +828,11 @@ test("desktop-origin rollouts emit turn-end file-change snapshot after final tex
   await wait(40);
 
   const methods = outbound.map((message) => message.method);
-  const aggregateIndex = outbound.findIndex((message) => (
-    message.method === "codex/event/patch_apply_end"
-    && message.params.remodexTurnFileChangeSnapshot === true
-  ));
+  const aggregateIndex = outbound.findIndex(
+    (message) =>
+      message.method === "codex/event/patch_apply_end" &&
+      message.params.remodexTurnFileChangeSnapshot === true,
+  );
   const completedIndex = methods.lastIndexOf("turn/completed");
   const agentIndex = methods.lastIndexOf("codex/event/agent_message");
 
@@ -848,7 +843,7 @@ test("desktop-origin rollouts emit turn-end file-change snapshot after final tex
   assert.equal(outbound[aggregateIndex].params.changes.length, 2);
   assert.deepEqual(
     outbound[aggregateIndex].params.changes.map((change) => change.path),
-    ["Sources/App.swift", "Sources/Settings.swift"]
+    ["Sources/App.swift", "Sources/Settings.swift"],
   );
 });
 

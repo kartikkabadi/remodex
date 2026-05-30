@@ -40,12 +40,15 @@ function runMacOSBridgeService({ env = process.env, platform = process.platform 
     const message = "No relay URL configured for the macOS bridge service.";
     // Clear any stale QR so the CLI does not keep showing a pairing payload for a dead service.
     clearPairingSession({ env });
-    writeBridgeStatus({
-      state: "error",
-      connectionStatus: "error",
-      pid: process.pid,
-      lastError: message,
-    }, { env });
+    writeBridgeStatus(
+      {
+        state: "error",
+        connectionStatus: "error",
+        pid: process.pid,
+        lastError: message,
+      },
+      { env },
+    );
     console.error(`[remodex] ${message}`);
     return;
   }
@@ -57,10 +60,7 @@ function runMacOSBridgeService({ env = process.env, platform = process.platform 
       writePairingSession(pairingSession, { env });
     },
     onBridgeStatus(status) {
-      writeBridgeStatus(
-        mergeBridgeStatusForDaemon(status, readBridgeStatus({ env })),
-        { env }
-      );
+      writeBridgeStatus(mergeBridgeStatusForDaemon(status, readBridgeStatus({ env })), { env });
     },
   });
 }
@@ -222,10 +222,10 @@ function resetMacOSBridgePairing({
 }
 
 // Stops orphaned run-service processes left behind when launchd reports the job missing.
-function terminateRecordedBridgeProcess(status, {
-  execFileSyncImpl = execFileSync,
-  processImpl = process,
-} = {}) {
+function terminateRecordedBridgeProcess(
+  status,
+  { execFileSyncImpl = execFileSync, processImpl = process } = {},
+) {
   const pid = Number(status?.pid);
   if (!Number.isInteger(pid) || pid <= 0 || pid === processImpl.pid) {
     return false;
@@ -246,14 +246,11 @@ function terminateRecordedBridgeProcess(status, {
 // Checks the command line before killing so stale status files cannot target unrelated processes.
 function isRecordedRemodexBridgeProcess(pid, { execFileSyncImpl = execFileSync } = {}) {
   try {
-    const command = execFileSyncImpl("ps", [
-      "-p",
-      String(pid),
-      "-o",
-      "command=",
-    ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return command.includes("remodex")
-      && command.includes("run-service");
+    const command = execFileSyncImpl("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return command.includes("remodex") && command.includes("run-service");
   } catch {
     return false;
   }
@@ -394,19 +391,15 @@ async function waitForFreshPairingSession({
   while (Date.now() <= deadline) {
     const pairingSession = readPairingSession({ env, fsImpl });
     const createdAt = Date.parse(pairingSession?.createdAt || "");
-    if (
-      pairingSession?.pairingPayload
-      && Number.isFinite(createdAt)
-      && createdAt >= startedAt
-    ) {
+    if (pairingSession?.pairingPayload && Number.isFinite(createdAt) && createdAt >= startedAt) {
       return pairingSession;
     }
     await sleep(intervalMs);
   }
 
   throw new Error(
-    `Timed out waiting for the macOS bridge service to publish a pairing QR. `
-    + `Check ${resolveBridgeStderrLogPath({ env })}.`
+    `Timed out waiting for the macOS bridge service to publish a pairing QR. ` +
+      `Check ${resolveBridgeStderrLogPath({ env })}.`,
   );
 }
 
@@ -420,16 +413,12 @@ function restartLaunchAgent({
     execFileSyncImpl,
     ignoreMissing: true,
   });
-  execFileSyncImpl("launchctl", [
-    "bootstrap",
-    launchAgentDomain(env),
-    plistPath,
-  ], { stdio: ["ignore", "ignore", "pipe"] });
-  execFileSyncImpl("launchctl", [
-    "kickstart",
-    "-k",
-    launchAgentLabelDomain(env),
-  ], { stdio: ["ignore", "ignore", "pipe"] });
+  execFileSyncImpl("launchctl", ["bootstrap", launchAgentDomain(env), plistPath], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  execFileSyncImpl("launchctl", ["kickstart", "-k", launchAgentLabelDomain(env)], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
 }
 
 function kickstartLaunchAgent({
@@ -438,22 +427,16 @@ function kickstartLaunchAgent({
   plistPath,
 } = {}) {
   try {
-    execFileSyncImpl("launchctl", [
-      "kickstart",
-      "-k",
-      launchAgentLabelDomain(env),
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    execFileSyncImpl("launchctl", ["kickstart", "-k", launchAgentLabelDomain(env)], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
   } catch {
-    execFileSyncImpl("launchctl", [
-      "bootstrap",
-      launchAgentDomain(env),
-      plistPath,
-    ], { stdio: ["ignore", "ignore", "pipe"] });
-    execFileSyncImpl("launchctl", [
-      "kickstart",
-      "-k",
-      launchAgentLabelDomain(env),
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    execFileSyncImpl("launchctl", ["bootstrap", launchAgentDomain(env), plistPath], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    execFileSyncImpl("launchctl", ["kickstart", "-k", launchAgentLabelDomain(env)], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
   }
 }
 
@@ -471,10 +454,9 @@ function bootoutLaunchAgent({
 
   for (const targetArgs of bootoutTargets) {
     try {
-      execFileSyncImpl("launchctl", [
-        "bootout",
-        ...targetArgs,
-      ], { stdio: ["ignore", "ignore", "pipe"] });
+      execFileSyncImpl("launchctl", ["bootout", ...targetArgs], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
       return;
     } catch (error) {
       lastError = error;
@@ -487,15 +469,12 @@ function bootoutLaunchAgent({
   throw lastError;
 }
 
-function readLaunchAgentState({
-  env = process.env,
-  execFileSyncImpl = execFileSync,
-} = {}) {
+function readLaunchAgentState({ env = process.env, execFileSyncImpl = execFileSync } = {}) {
   try {
-    const output = execFileSyncImpl("launchctl", [
-      "print",
-      launchAgentLabelDomain(env),
-    ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const output = execFileSyncImpl("launchctl", ["print", launchAgentLabelDomain(env)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     return {
       loaded: true,
       pid: parseLaunchdPid(output),
@@ -528,7 +507,9 @@ function assertRelayConfigured(config) {
   if (typeof config?.relayUrl === "string" && config.relayUrl.trim()) {
     return;
   }
-  throw new Error("No relay URL configured. Run ./run-local-remodex.sh or set REMODEX_RELAY before enabling the macOS bridge service.");
+  throw new Error(
+    "No relay URL configured. Run ./run-local-remodex.sh or set REMODEX_RELAY before enabling the macOS bridge service.",
+  );
 }
 
 function launchAgentDomain(env) {
@@ -562,10 +543,15 @@ function isMissingLaunchAgentError(error) {
     error?.message,
     error?.stderr?.toString?.("utf8"),
     error?.stdout?.toString?.("utf8"),
-  ].filter(Boolean).join("\n").toLowerCase();
-  return combined.includes("could not find service")
-    || combined.includes("service could not be found")
-    || combined.includes("no such process");
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  return (
+    combined.includes("could not find service") ||
+    combined.includes("service could not be found") ||
+    combined.includes("no such process")
+  );
 }
 
 function escapeXml(value) {
@@ -592,8 +578,8 @@ function mergeBridgeStatusForDaemon(nextStatus, persistedStatus) {
   }
 
   if (
-    nextStatus.codexLaunchState !== "starting"
-    || (nextStatus.connectionStatus !== "starting" && nextStatus.connectionStatus !== "connecting")
+    nextStatus.codexLaunchState !== "starting" ||
+    (nextStatus.connectionStatus !== "starting" && nextStatus.connectionStatus !== "connecting")
   ) {
     return nextStatus;
   }

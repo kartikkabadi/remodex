@@ -17,6 +17,10 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
     let supportedReasoningEfforts: [CodexReasoningEffortOption]
     let defaultReasoningEffort: String?
     let capabilities: ProviderCapabilities
+    let upstreamProviderId: String?
+    let upstreamProviderDisplayName: String?
+    let contextWindow: [String: JSONValue]?
+    let modelStatus: String?
 
     init(
         id: String,
@@ -28,7 +32,11 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         supportsFastMode: Bool = false,
         supportedReasoningEfforts: [CodexReasoningEffortOption],
         defaultReasoningEffort: String?,
-        capabilities: ProviderCapabilities? = nil
+        capabilities: ProviderCapabilities? = nil,
+        upstreamProviderId: String? = nil,
+        upstreamProviderDisplayName: String? = nil,
+        contextWindow: [String: JSONValue]? = nil,
+        modelStatus: String? = nil
     ) {
         self.id = id
         self.model = model
@@ -40,6 +48,10 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         self.supportedReasoningEfforts = supportedReasoningEfforts
         self.defaultReasoningEffort = defaultReasoningEffort
         self.capabilities = capabilities ?? ProviderCapabilities.defaultCodex
+        self.upstreamProviderId = upstreamProviderId
+        self.upstreamProviderDisplayName = upstreamProviderDisplayName
+        self.contextWindow = contextWindow
+        self.modelStatus = modelStatus
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -71,6 +83,13 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         case defaultReasoningEffort
         case defaultReasoningEffortSnake = "default_reasoning_effort"
         case capabilities
+        case upstreamProviderId
+        case upstreamProviderIdSnake = "upstream_provider_id"
+        case upstreamProviderDisplayName
+        case upstreamProviderDisplayNameSnake = "upstream_provider_display_name"
+        case contextWindow
+        case contextWindowSnake = "context_window"
+        case modelStatus = "status"
     }
 
     init(from decoder: Decoder) throws {
@@ -135,6 +154,18 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         defaultReasoningEffort = (normalizedDefault?.isEmpty == true) ? nil : normalizedDefault
 
         capabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities) ?? .defaultCodex
+
+        let upstreamId = try container.decodeIfPresent(String.self, forKey: .upstreamProviderId)
+        let upstreamIdSnake = try container.decodeIfPresent(String.self, forKey: .upstreamProviderIdSnake)
+        upstreamProviderId = upstreamId ?? upstreamIdSnake
+
+        let upstreamName = try container.decodeIfPresent(String.self, forKey: .upstreamProviderDisplayName)
+        let upstreamNameSnake = try container.decodeIfPresent(String.self, forKey: .upstreamProviderDisplayNameSnake)
+        upstreamProviderDisplayName = upstreamName ?? upstreamNameSnake
+
+        contextWindow = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .contextWindow))
+            ?? (try? container.decodeIfPresent([String: JSONValue].self, forKey: .contextWindowSnake))
+        modelStatus = try container.decodeIfPresent(String.self, forKey: .modelStatus)
     }
 
     // Codex model/list has shipped several field spellings; keep this parser
@@ -203,6 +234,10 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         try container.encode(supportsFastMode, forKey: .supportsFastMode)
         try container.encode(supportedReasoningEfforts, forKey: .supportedReasoningEfforts)
         try container.encodeIfPresent(defaultReasoningEffort, forKey: .defaultReasoningEffort)
+        try container.encode(capabilities, forKey: .capabilities)
+        try container.encodeIfPresent(upstreamProviderId, forKey: .upstreamProviderId)
+        try container.encodeIfPresent(upstreamProviderDisplayName, forKey: .upstreamProviderDisplayName)
+        try container.encodeIfPresent(modelStatus, forKey: .modelStatus)
     }
 
     var selectionKey: String {

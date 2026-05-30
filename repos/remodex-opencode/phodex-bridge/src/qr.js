@@ -15,7 +15,8 @@ function createShortPairingCode({
   length = SHORT_PAIRING_CODE_LENGTH,
   randomBytesImpl = randomBytes,
 } = {}) {
-  const resolvedLength = Number.isInteger(length) && length > 0 ? length : SHORT_PAIRING_CODE_LENGTH;
+  const resolvedLength =
+    Number.isInteger(length) && length > 0 ? length : SHORT_PAIRING_CODE_LENGTH;
   const bytes = randomBytesImpl(resolvedLength);
   let code = "";
   for (let index = 0; index < resolvedLength; index += 1) {
@@ -28,9 +29,10 @@ function normalizePairingSession(pairingSessionOrPayload) {
   if (pairingSessionOrPayload?.pairingPayload) {
     return {
       pairingPayload: pairingSessionOrPayload.pairingPayload,
-      pairingCode: typeof pairingSessionOrPayload.pairingCode === "string"
-        ? pairingSessionOrPayload.pairingCode.trim()
-        : "",
+      pairingCode:
+        typeof pairingSessionOrPayload.pairingCode === "string"
+          ? pairingSessionOrPayload.pairingCode.trim()
+          : "",
     };
   }
 
@@ -43,7 +45,8 @@ function normalizePairingSession(pairingSessionOrPayload) {
 function printQR(pairingSessionOrPayload, options = {}) {
   const { pairingPayload, pairingCode } = normalizePairingSession(pairingSessionOrPayload);
   const payload = JSON.stringify(pairingPayload);
-  const sessionId = typeof pairingPayload?.sessionId === "string" ? pairingPayload.sessionId.trim() : "";
+  const sessionId =
+    typeof pairingPayload?.sessionId === "string" ? pairingPayload.sessionId.trim() : "";
   const sessionIdShort = sessionId.length > 12 ? `${sessionId.slice(0, 8)}…` : sessionId;
   const env = options.env || process.env;
 

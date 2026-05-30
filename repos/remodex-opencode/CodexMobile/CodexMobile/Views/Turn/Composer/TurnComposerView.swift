@@ -339,6 +339,8 @@ private struct TurnComposerAutocompletePanels: View {
                 SlashCommandAutocompletePanel(
                     state: state.slashCommandPanelState,
                     availableCommands: state.availableSlashCommands,
+                    supportsSlashCommands: state.supportsSlashCommands,
+                    supportsThreadFork: state.supportsThreadFork,
                     hasComposerContentConflictingWithReview: state.hasComposerContentConflictingWithReview,
                     isThreadRunning: state.isThreadRunning,
                     showsGitBranchSelector: state.showsGitBranchSelector,
@@ -619,6 +621,8 @@ private struct ComposerPreviewContent: View {
             ),
             autocompleteState: TurnComposerAutocompleteState(
                 availableSlashCommands: TurnComposerSlashCommand.allCommands,
+                supportsSlashCommands: true,
+                supportsThreadFork: true,
                 fileAutocompleteItems: [],
                 isFileAutocompleteVisible: false,
                 isFileAutocompleteLoading: false,
@@ -663,7 +667,7 @@ private struct ComposerPreviewContent: View {
                 selectedReasoningEffort: "high",
                 reasoningMenuDisabled: false,
                 selectedServiceTier: .fast,
-                supportsFastMode: true
+                capabilities: ProviderCapabilities.defaultCodex
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },

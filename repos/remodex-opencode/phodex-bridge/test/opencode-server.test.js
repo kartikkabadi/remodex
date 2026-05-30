@@ -43,13 +43,12 @@ test("server resolves baseUrl from stdout listening message", async () => {
 
 test("server start rejects when spawn throws", async () => {
   const server = createOpenCodeServer({
-    spawnImpl: () => { throw new Error("ENOENT"); },
+    spawnImpl: () => {
+      throw new Error("ENOENT");
+    },
   });
 
-  await assert.rejects(
-    () => server.start(),
-    { message: /Failed to spawn/ }
-  );
+  await assert.rejects(() => server.start(), { message: /Failed to spawn/ });
 });
 
 test("server start rejects on timeout when no listening message appears", async () => {
@@ -59,10 +58,7 @@ test("server start rejects on timeout when no listening message appears", async 
   });
 
   const startResult = server.start();
-  await assert.rejects(
-    () => startResult,
-    { message: /did not start/ }
-  );
+  await assert.rejects(() => startResult, { message: /did not start/ });
 });
 
 test("server stop kills child process and cleans up state", async () => {
@@ -103,16 +99,13 @@ test("server rejects when health check returns not-ok", async () => {
     httpGetImpl: () => Promise.resolve({ ok: false }),
   });
 
-  await assert.rejects(
-    () => server.start(),
-    { message: /not-ok/ }
-  );
+  await assert.rejects(() => server.start(), { message: /not-ok/ });
 });
 
 test("server uses custom command from env", async () => {
   const server = createOpenCodeServer({
     env: { REMODEX_OPENCODE_COMMAND: "/usr/local/bin/opencode" },
-    spawnImpl: (cmd, args) => {
+    spawnImpl: (cmd, _args) => {
       assert.equal(cmd, "/usr/local/bin/opencode");
       return fakeChildThatEmits("opencode server listening on http://127.0.0.1:4291\n");
     },
@@ -139,11 +132,24 @@ function fakeChildThatEmits(stdoutMsg) {
         return child.stdout;
       },
     },
-    stderr: { setEncoding() {}, on() { return child.stderr; } },
+    stderr: {
+      setEncoding() {},
+      on() {
+        return child.stderr;
+      },
+    },
     stdin: { on() {}, writable: true },
-    kill() { child.killed = true; return true; },
-    on(event, handler) { handlers.set(event, handler); return child; },
-    _emit(event, ...args) { handlers.get(event)?.(...args); },
+    kill() {
+      child.killed = true;
+      return true;
+    },
+    on(event, handler) {
+      handlers.set(event, handler);
+      return child;
+    },
+    _emit(event, ...args) {
+      handlers.get(event)?.(...args);
+    },
   };
   return child;
 }
@@ -152,11 +158,26 @@ function fakeChildThatNeverEmits() {
   const child = {
     killed: false,
     pid: 99999,
-    stdout: { setEncoding() {}, on() { return child.stdout; } },
-    stderr: { setEncoding() {}, on() { return child.stderr; } },
+    stdout: {
+      setEncoding() {},
+      on() {
+        return child.stdout;
+      },
+    },
+    stderr: {
+      setEncoding() {},
+      on() {
+        return child.stderr;
+      },
+    },
     stdin: { on() {}, writable: true },
-    kill() { child.killed = true; return true; },
-    on() { return child; },
+    kill() {
+      child.killed = true;
+      return true;
+    },
+    on() {
+      return child;
+    },
     _emit() {},
   };
   return child;

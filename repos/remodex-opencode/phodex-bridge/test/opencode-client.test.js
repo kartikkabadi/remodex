@@ -10,17 +10,11 @@ const assert = require("node:assert/strict");
 const { createOpenCodeClient } = require("../src/opencode-client");
 
 test("throws when baseUrl is empty", async () => {
-  await assert.rejects(
-    () => createOpenCodeClient({ baseUrl: "" }),
-    { message: /baseUrl/ }
-  );
+  await assert.rejects(() => createOpenCodeClient({ baseUrl: "" }), { message: /baseUrl/ });
 });
 
 test("throws when baseUrl is missing", async () => {
-  await assert.rejects(
-    () => createOpenCodeClient({}),
-    { message: /baseUrl/ }
-  );
+  await assert.rejects(() => createOpenCodeClient({}), { message: /baseUrl/ });
 });
 
 test("creates client when baseUrl is provided", async () => {
@@ -76,5 +70,3 @@ test("replyToPermission sends permission reply", async () => {
   const client = await createOpenCodeClient({ baseUrl: "http://127.0.0.1:4291" });
   assert.equal(typeof client.replyToPermission, "function");
 });
-
-

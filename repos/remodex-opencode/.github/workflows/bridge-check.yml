@@ -5,10 +5,12 @@ on:
     paths:
       - ".github/workflows/bridge-check.yml"
       - "phodex-bridge/**"
+      - "relay/**"
   pull_request:
     paths:
       - ".github/workflows/bridge-check.yml"
       - "phodex-bridge/**"
+      - "relay/**"
 
 jobs:
   bridge-check:
@@ -25,11 +27,39 @@ jobs:
           cache: npm
           cache-dependency-path: phodex-bridge/package-lock.json
 
+      - name: Socket Firewall
+        uses: socketdev/action@v1.3.1
+        with:
+          mode: firewall-free
+
       - name: Install bridge dependencies
         working-directory: phodex-bridge
-        run: npm ci
+        run: sfw npm ci
+
+      - name: Install OpenCode CLI
+        run: npm install -g opencode-ai@latest
 
       - name: Verify bridge entrypoints load
         working-directory: phodex-bridge
         run: |
           node -e "const mod = require('./src'); const names = ['startBridge', 'openLastActiveThread', 'watchThreadRollout']; for (const name of names) { if (typeof mod[name] !== 'function') { throw new Error('Missing export: ' + name); } }"
+
+      - name: Format check
+        working-directory: phodex-bridge
+        run: npm run fmt:check
+
+      - name: Lint
+        working-directory: phodex-bridge
+        run: npm run lint
+
+      - name: Run bridge tests
+        working-directory: phodex-bridge
+        run: npm test
+
+      - name: Install relay dependencies
+        working-directory: relay
+        run: sfw npm ci
+
+      - name: Run relay tests
+        working-directory: relay
+        run: npm test

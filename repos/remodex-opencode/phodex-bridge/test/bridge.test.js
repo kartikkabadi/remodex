@@ -34,18 +34,20 @@ test("hasRelayConnectionGoneStale returns true once the relay silence crosses th
       now: 26_000,
       staleAfterMs: 25_000,
     }),
-    true
+    true,
   );
 });
 
 test("normalizeRelayBoundJsonRpcMessage rewrites payload-only responses to result", () => {
-  const normalized = normalizeRelayBoundJsonRpcMessage(JSON.stringify({
-    id: "req-payload-only",
-    payload: {
-      data: [{ id: "turn-1" }],
-      nextCursor: null,
-    },
-  }));
+  const normalized = normalizeRelayBoundJsonRpcMessage(
+    JSON.stringify({
+      id: "req-payload-only",
+      payload: {
+        data: [{ id: "turn-1" }],
+        nextCursor: null,
+      },
+    }),
+  );
 
   assert.deepEqual(JSON.parse(normalized), {
     id: "req-payload-only",
@@ -57,15 +59,17 @@ test("normalizeRelayBoundJsonRpcMessage rewrites payload-only responses to resul
 });
 
 test("normalizeRelayBoundJsonRpcMessage unwraps nested app-server result payloads", () => {
-  const normalized = normalizeRelayBoundJsonRpcMessage(JSON.stringify({
-    id: "req-nested-payload",
-    result: {
-      payload: {
-        data: [{ id: "thread-1" }],
-        nextCursor: null,
+  const normalized = normalizeRelayBoundJsonRpcMessage(
+    JSON.stringify({
+      id: "req-nested-payload",
+      result: {
+        payload: {
+          data: [{ id: "thread-1" }],
+          nextCursor: null,
+        },
       },
-    },
-  }));
+    }),
+  );
 
   assert.deepEqual(JSON.parse(normalized), {
     id: "req-nested-payload",
@@ -87,12 +91,14 @@ test("normalizeRelayBoundJsonRpcMessage drops non-RPC relay payloads before iOS 
 
 test("normalizeRelayBoundJsonRpcMessage drops client-origin RPC requests before iOS handles them", () => {
   assert.equal(
-    normalizeRelayBoundJsonRpcMessage(JSON.stringify({
-      id: "req-thread-list",
-      method: "thread/list",
-      params: {},
-    })),
-    null
+    normalizeRelayBoundJsonRpcMessage(
+      JSON.stringify({
+        id: "req-thread-list",
+        method: "thread/list",
+        params: {},
+      }),
+    ),
+    null,
   );
 });
 
@@ -120,24 +126,33 @@ test("resolveJsonlTurnsListRolloutPathForFallback searches JSONL for stale non-e
 
 test("normalizeRelayBoundJsonRpcMessage converts tracked method-bearing responses for iOS", () => {
   const pendingRequestMethodsById = new Map([
-    ["req-thread-list", {
-      method: "thread/list",
-      createdAt: Date.now(),
-    }],
-    ["req-turns-list", {
-      method: "thread/turns/list",
-      createdAt: Date.now(),
-    }],
+    [
+      "req-thread-list",
+      {
+        method: "thread/list",
+        createdAt: Date.now(),
+      },
+    ],
+    [
+      "req-turns-list",
+      {
+        method: "thread/turns/list",
+        createdAt: Date.now(),
+      },
+    ],
   ]);
 
-  const threadListResponse = normalizeRelayBoundJsonRpcMessage(JSON.stringify({
-    id: "req-thread-list",
-    method: "thread/list",
-    payload: {
-      data: [{ id: "thread-1" }],
-      nextCursor: null,
-    },
-  }), { pendingRequestMethodsById });
+  const threadListResponse = normalizeRelayBoundJsonRpcMessage(
+    JSON.stringify({
+      id: "req-thread-list",
+      method: "thread/list",
+      payload: {
+        data: [{ id: "thread-1" }],
+        nextCursor: null,
+      },
+    }),
+    { pendingRequestMethodsById },
+  );
 
   assert.deepEqual(JSON.parse(threadListResponse), {
     id: "req-thread-list",
@@ -147,16 +162,19 @@ test("normalizeRelayBoundJsonRpcMessage converts tracked method-bearing response
     },
   });
 
-  const turnsListResponse = normalizeRelayBoundJsonRpcMessage(JSON.stringify({
-    id: "req-turns-list",
-    method: "thread/turns/list",
-    result: {
-      payload: {
-        data: [{ id: "turn-1" }],
-        nextCursor: null,
+  const turnsListResponse = normalizeRelayBoundJsonRpcMessage(
+    JSON.stringify({
+      id: "req-turns-list",
+      method: "thread/turns/list",
+      result: {
+        payload: {
+          data: [{ id: "turn-1" }],
+          nextCursor: null,
+        },
       },
-    },
-  }), { pendingRequestMethodsById });
+    }),
+    { pendingRequestMethodsById },
+  );
 
   assert.deepEqual(JSON.parse(turnsListResponse), {
     id: "req-turns-list",
@@ -244,7 +262,7 @@ test("hasRelayConnectionGoneStale returns false for fresh or missing activity ti
       now: 25_999,
       staleAfterMs: 25_000,
     }),
-    false
+    false,
   );
   assert.equal(hasRelayConnectionGoneStale(Number.NaN), false);
 });
@@ -252,15 +270,15 @@ test("hasRelayConnectionGoneStale returns false for fresh or missing activity ti
 test("hasRelayConnectionGoneStale default threshold waits 45 seconds", () => {
   assert.equal(
     hasRelayConnectionGoneStale(1_000, {
-            now: 45_999,
+      now: 45_999,
     }),
-    false
+    false,
   );
   assert.equal(
     hasRelayConnectionGoneStale(1_000, {
-            now: 46_000,
+      now: 46_000,
     }),
-    true
+    true,
   );
 });
 
@@ -278,14 +296,14 @@ test("buildHeartbeatBridgeStatus downgrades stale connected snapshots", () => {
         now: 26_500,
         staleAfterMs: 25_000,
         staleMessage: "Relay heartbeat stalled; reconnect pending.",
-      }
+      },
     ),
     {
       state: "running",
       connectionStatus: "disconnected",
       pid: 123,
       lastError: "Relay heartbeat stalled; reconnect pending.",
-    }
+    },
   );
 });
 
@@ -301,7 +319,7 @@ test("buildHeartbeatBridgeStatus leaves fresh or already-disconnected snapshots 
       now: 20_000,
       staleAfterMs: 25_000,
     }),
-    freshStatus
+    freshStatus,
   );
 
   const disconnectedStatus = {
@@ -354,11 +372,11 @@ test("fetchAdaptiveThreadTurnsListForRelay caps initial mobile pages to five tur
   assert.equal(response.result.data.length, 5);
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    makeTurns(1, 5).map((turn) => turn.id)
+    makeTurns(1, 5).map((turn) => turn.id),
   );
   assert.equal(
     response.result.data.some((turn) => turn.id.startsWith("remodex-history-compacted-")),
-    false
+    false,
   );
   assert.equal(response.result.stableMeta, undefined);
   assert.equal(response.result.nextCursor, "cursor-after-5");
@@ -367,7 +385,7 @@ test("fetchAdaptiveThreadTurnsListForRelay caps initial mobile pages to five tur
     [
       { limit: 1, cursor: undefined },
       { limit: 4, cursor: "cursor-after-1" },
-    ]
+    ],
   );
 });
 
@@ -392,11 +410,18 @@ test("fetchAdaptiveThreadTurnsListForRelay skips JSONL augmentation while sizing
 
   assert.equal(response.result.data.length, 1);
   assert.ok(sanitizeContexts.length > 0);
-  assert.equal(sanitizeContexts.every(({ requestMethod }) => requestMethod === "thread/turns/list"), true);
-  assert.equal(sanitizeContexts.every(({ requestContext }) => (
-    requestContext.threadId === "thread-sizing-context"
-      && requestContext.skipJsonlArtifactAugmentation === true
-  )), true);
+  assert.equal(
+    sanitizeContexts.every(({ requestMethod }) => requestMethod === "thread/turns/list"),
+    true,
+  );
+  assert.equal(
+    sanitizeContexts.every(
+      ({ requestContext }) =>
+        requestContext.threadId === "thread-sizing-context" &&
+        requestContext.skipJsonlArtifactAugmentation === true,
+    ),
+    true,
+  );
 });
 
 test("final thread turns-list relay sanitize context keeps JSONL artifact augmentation enabled", () => {
@@ -413,12 +438,15 @@ test("final thread turns-list relay sanitize context keeps JSONL artifact augmen
     threadId: "thread-final-context",
     skipJsonlArtifactAugmentation: false,
   });
-  assert.deepEqual(buildThreadTurnsListRelaySanitizeContext(request, {
-    skipJsonlArtifactAugmentation: true,
-  }), {
-    threadId: "thread-final-context",
-    skipJsonlArtifactAugmentation: true,
-  });
+  assert.deepEqual(
+    buildThreadTurnsListRelaySanitizeContext(request, {
+      skipJsonlArtifactAugmentation: true,
+    }),
+    {
+      threadId: "thread-final-context",
+      skipJsonlArtifactAugmentation: true,
+    },
+  );
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay returns a compacted single turn when one huge first turn is still too large", async () => {
@@ -458,7 +486,7 @@ test("fetchAdaptiveThreadTurnsListForRelay returns a compacted single turn when 
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1"]
+    ["turn-1"],
   );
   assert.equal(response.result.data[0].remodexEmergencySingleTurnForRelay, true);
   assert.equal(response.result.data[0].items.length, 1);
@@ -505,12 +533,12 @@ test("fetchAdaptiveThreadTurnsListForRelay stops after a huge second turns-list 
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    makeTurns(1, 5).map((turn) => turn.id)
+    makeTurns(1, 5).map((turn) => turn.id),
   );
   assert.equal(response.result.nextCursor, "cursor-after-5");
   assert.deepEqual(
     fetches.map((params) => params.limit),
-    [1, 4]
+    [1, 4],
   );
 });
 
@@ -546,49 +574,55 @@ test("fetchAdaptiveThreadTurnsListForRelay forwards input and returned cursors",
     [
       { limit: 1, cursor: "cursor-before-page" },
       { limit: 4, cursor: "cursor-after-first" },
-    ]
+    ],
   );
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay reads nested result payload pages", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-nested-payload",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-nested-payload",
-      limit: 5,
-    },
-  }, {
-    fetchPage: async () => ({
-      payload: {
-        data: makeTurns(1, 1),
-        nextCursor: null,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-nested-payload",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-nested-payload",
+        limit: 5,
       },
-    }),
-  });
+    },
+    {
+      fetchPage: async () => ({
+        payload: {
+          data: makeTurns(1, 1),
+          nextCursor: null,
+        },
+      }),
+    },
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1"]
+    ["turn-1"],
   );
   assert.equal(response.result.nextCursor, null);
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay preserves turns-list response array shapes", async () => {
   for (const turnsKey of ["data", "items", "turns"]) {
-    const response = await fetchAdaptiveThreadTurnsListForRelay({
-      id: `req-${turnsKey}`,
-      method: "thread/turns/list",
-      params: {
-        threadId: `thread-${turnsKey}`,
-        limit: 1,
+    const response = await fetchAdaptiveThreadTurnsListForRelay(
+      {
+        id: `req-${turnsKey}`,
+        method: "thread/turns/list",
+        params: {
+          threadId: `thread-${turnsKey}`,
+          limit: 1,
+        },
       },
-    }, {
-      fetchPage: async () => ({
-        [turnsKey]: makeTurns(1, 1),
-        nextCursor: `cursor-${turnsKey}`,
-      }),
-    });
+      {
+        fetchPage: async () => ({
+          [turnsKey]: makeTurns(1, 1),
+          nextCursor: `cursor-${turnsKey}`,
+        }),
+      },
+    );
 
     assert.equal(Array.isArray(response.result[turnsKey]), true);
     assert.equal(response.result[turnsKey][0].id, "turn-1");
@@ -600,58 +634,64 @@ test("fetchAdaptiveThreadTurnsListForRelay preserves turns-list response array s
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay returns fetched turns when a later batch fails", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-later-error",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-later-error",
-      limit: 5,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-later-error",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-later-error",
+        limit: 5,
+      },
     },
-  }, {
-    fetchPage: async (params) => {
-      if (params.cursor === "cursor-after-first") {
-        throw new Error("app-server failed");
-      }
-      return {
-        data: makeTurns(1, 1),
-        nextCursor: "cursor-after-first",
-      };
+    {
+      fetchPage: async (params) => {
+        if (params.cursor === "cursor-after-first") {
+          throw new Error("app-server failed");
+        }
+        return {
+          data: makeTurns(1, 1),
+          nextCursor: "cursor-after-first",
+        };
+      },
     },
-  });
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1"]
+    ["turn-1"],
   );
   assert.equal(response.result.nextCursor, "cursor-after-first");
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay retries the first page with a safe limit after an error", async () => {
   const fetches = [];
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-first-error",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-first-error",
-      limit: 20,
-      sortDirection: "desc",
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-first-error",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-first-error",
+        limit: 20,
+        sortDirection: "desc",
+      },
     },
-  }, {
-    fetchPage: async (params) => {
-      fetches.push(params);
-      if (fetches.length === 1) {
-        throw new Error("missing payload");
-      }
-      return {
-        data: makeTurns(1, 5),
-        nextCursor: "cursor-after-safe",
-      };
+    {
+      fetchPage: async (params) => {
+        fetches.push(params);
+        if (fetches.length === 1) {
+          throw new Error("missing payload");
+        }
+        return {
+          data: makeTurns(1, 5),
+          nextCursor: "cursor-after-safe",
+        };
+      },
     },
-  });
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]
+    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"],
   );
   assert.equal(response.result.nextCursor, "cursor-after-safe");
   assert.deepEqual(
@@ -659,39 +699,42 @@ test("fetchAdaptiveThreadTurnsListForRelay retries the first page with a safe li
     [
       { limit: 1, cursor: undefined },
       { limit: 5, cursor: undefined },
-    ]
+    ],
   );
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay retries malformed first pages with a safe limit", async () => {
   const fetches = [];
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-first-malformed",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-first-malformed",
-      limit: 20,
-      sortDirection: "desc",
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-first-malformed",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-first-malformed",
+        limit: 20,
+        sortDirection: "desc",
+      },
     },
-  }, {
-    fetchPage: async (params) => {
-      fetches.push(params);
-      if (fetches.length === 1) {
+    {
+      fetchPage: async (params) => {
+        fetches.push(params);
+        if (fetches.length === 1) {
+          return {
+            unexpected: "server-shape",
+            nextCursor: "cursor-that-should-not-survive",
+          };
+        }
         return {
-          unexpected: "server-shape",
-          nextCursor: "cursor-that-should-not-survive",
+          data: makeTurns(1, 5),
+          nextCursor: "cursor-after-safe",
         };
-      }
-      return {
-        data: makeTurns(1, 5),
-        nextCursor: "cursor-after-safe",
-      };
+      },
     },
-  });
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]
+    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"],
   );
   assert.equal(response.result.nextCursor, "cursor-after-safe");
   assert.deepEqual(
@@ -699,98 +742,107 @@ test("fetchAdaptiveThreadTurnsListForRelay retries malformed first pages with a 
     [
       { limit: 1, cursor: undefined },
       { limit: 5, cursor: undefined },
-    ]
+    ],
   );
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay keeps only a safe slice when the combined page stays too large", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-large-combined",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-large-combined",
-      limit: 20,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-large-combined",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-large-combined",
+        limit: 20,
+      },
     },
-  }, {
-    fetchPage: async (params) => {
-      if (params.cursor !== "cursor-after-first") {
+    {
+      fetchPage: async (params) => {
+        if (params.cursor !== "cursor-after-first") {
+          return {
+            data: makeTurns(1, 1),
+            nextCursor: "cursor-after-first",
+          };
+        }
         return {
-          data: makeTurns(1, 1),
-          nextCursor: "cursor-after-first",
-        };
-      }
-      return {
-        data: makeTurns(2, 10).map((turn, index) => ({
-          ...turn,
-          items: turn.items.map((item) => ({
-            ...item,
-            text: index < 4 ? "small-enough" : "X".repeat(1024 * 1024),
+          data: makeTurns(2, 10).map((turn, index) => ({
+            ...turn,
+            items: turn.items.map((item) => ({
+              ...item,
+              text: index < 4 ? "small-enough" : "X".repeat(1024 * 1024),
+            })),
           })),
-        })),
-        nextCursor: "cursor-after-large",
-      };
+          nextCursor: "cursor-after-large",
+        };
+      },
+      sanitizeForRelay: (raw) => raw,
+      payloadSoftLimitBytes: 10_000,
     },
-    sanitizeForRelay: (raw) => raw,
-    payloadSoftLimitBytes: 10_000,
-  });
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]
+    ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"],
   );
   assert.equal(response.result.nextCursor, "cursor-after-large");
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay falls back to one turn when five are still too large", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-large-five",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-large-five",
-      limit: 20,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-large-five",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-large-five",
+        limit: 20,
+      },
     },
-  }, {
-    fetchPage: async (params) => {
-      if (params.cursor !== "cursor-after-first") {
+    {
+      fetchPage: async (params) => {
+        if (params.cursor !== "cursor-after-first") {
+          return {
+            data: makeTurns(1, 1),
+            nextCursor: "cursor-after-first",
+          };
+        }
         return {
-          data: makeTurns(1, 1),
-          nextCursor: "cursor-after-first",
-        };
-      }
-      return {
-        data: makeTurns(2, 10).map((turn) => ({
-          ...turn,
-          items: turn.items.map((item) => ({
-            ...item,
-            text: "X".repeat(1024 * 1024),
+          data: makeTurns(2, 10).map((turn) => ({
+            ...turn,
+            items: turn.items.map((item) => ({
+              ...item,
+              text: "X".repeat(1024 * 1024),
+            })),
           })),
-        })),
-        nextCursor: "cursor-after-large",
-      };
+          nextCursor: "cursor-after-large",
+        };
+      },
+      sanitizeForRelay: (raw) => raw,
+      payloadSoftLimitBytes: 2_000,
     },
-    sanitizeForRelay: (raw) => raw,
-    payloadSoftLimitBytes: 2_000,
-  });
+  );
 
   assert.deepEqual(
     response.result.data.map((turn) => turn.id),
-    ["turn-1"]
+    ["turn-1"],
   );
   assert.equal(response.result.nextCursor, "cursor-after-large");
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay returns an empty page when the first page has no payload", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-missing-payload",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-missing-payload",
-      limit: 2,
-      sortDirection: "desc",
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-missing-payload",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-missing-payload",
+        limit: 2,
+        sortDirection: "desc",
+      },
     },
-  }, {
-    fetchPage: async () => null,
-  });
+    {
+      fetchPage: async () => null,
+    },
+  );
 
   assert.equal(response.id, "req-turns-list-missing-payload");
   assert.deepEqual(response.result.data, []);
@@ -798,16 +850,19 @@ test("fetchAdaptiveThreadTurnsListForRelay returns an empty page when the first 
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay returns an empty page when no fallback is available", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-empty-fallback",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-empty-fallback",
-      limit: 10,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-empty-fallback",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-empty-fallback",
+        limit: 10,
+      },
     },
-  }, {
-    fetchPage: async () => null,
-  });
+    {
+      fetchPage: async () => null,
+    },
+  );
 
   assert.deepEqual(response, {
     id: "req-turns-list-empty-fallback",
@@ -819,19 +874,22 @@ test("fetchAdaptiveThreadTurnsListForRelay returns an empty page when no fallbac
 });
 
 test("fetchAdaptiveThreadTurnsListForRelay does not copy malformed page fields into empty fallback", async () => {
-  const response = await fetchAdaptiveThreadTurnsListForRelay({
-    id: "req-turns-list-malformed-object",
-    method: "thread/turns/list",
-    params: {
-      threadId: "thread-malformed-object",
-      limit: 10,
+  const response = await fetchAdaptiveThreadTurnsListForRelay(
+    {
+      id: "req-turns-list-malformed-object",
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-malformed-object",
+        limit: 10,
+      },
     },
-  }, {
-    fetchPage: async () => ({
-      unexpected: { nested: ["server-shape"] },
-      next_cursor: "cursor-that-should-not-survive",
-    }),
-  });
+    {
+      fetchPage: async () => ({
+        unexpected: { nested: ["server-shape"] },
+        next_cursor: "cursor-that-should-not-survive",
+      }),
+    },
+  );
 
   assert.deepEqual(response, {
     id: "req-turns-list-malformed-object",
@@ -873,9 +931,7 @@ test("sanitizeThreadHistoryImagesForRelay replaces inline history images with li
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const content = sanitized.result.thread.turns[0].items[0].content;
 
   assert.deepEqual(content[0], {
@@ -917,9 +973,7 @@ test("sanitizeThreadHistoryImagesForRelay replaces input_image history data URLs
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const content = sanitized.result.thread.turns[0].items[0].content;
 
   assert.deepEqual(content[0], {
@@ -933,8 +987,8 @@ test("sanitizeThreadHistoryImagesForRelay converts desktop apply_patch history t
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    "-let title = \"Old\"",
-    "+let title = \"New\"",
+    '-let title = "Old"',
+    '+let title = "New"',
     "*** End Patch",
     "",
   ].join("\n");
@@ -962,24 +1016,27 @@ test("sanitizeThreadHistoryImagesForRelay converts desktop apply_patch history t
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(item.type, "fileChange");
   assert.equal(item.id, "call-patch");
-  assert.deepEqual(item.changes.map((change) => ({
-    path: change.path,
-    kind: change.kind,
-    additions: change.additions,
-    deletions: change.deletions,
-  })), [{
-    path: "Sources/App.swift",
-    kind: "update",
-    additions: 1,
-    deletions: 1,
-  }]);
+  assert.deepEqual(
+    item.changes.map((change) => ({
+      path: change.path,
+      kind: change.kind,
+      additions: change.additions,
+      deletions: change.deletions,
+    })),
+    [
+      {
+        path: "Sources/App.swift",
+        kind: "update",
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  );
 });
 
 test("sanitizeThreadHistoryImagesForRelay augments app-server history with JSONL fileChange blocks", (t) => {
@@ -1028,15 +1085,15 @@ test("sanitizeThreadHistoryImagesForRelay augments app-server history with JSONL
             "*** Begin Patch",
             `*** Update File: ${cwd}/Sources/App.swift`,
             "@@",
-            "-let title = \"Old\"",
-            "+let title = \"New\"",
+            '-let title = "Old"',
+            '+let title = "New"',
             "*** End Patch",
             "",
           ].join("\n"),
         },
       }),
     ].join("\n"),
-    "utf8"
+    "utf8",
   );
 
   const rawMessage = JSON.stringify({
@@ -1061,9 +1118,7 @@ test("sanitizeThreadHistoryImagesForRelay augments app-server history with JSONL
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const items = sanitized.result.thread.turns[0].items;
 
   assert.equal(sanitized.result.thread.cwd, cwd);
@@ -1071,84 +1126,106 @@ test("sanitizeThreadHistoryImagesForRelay augments app-server history with JSONL
   assert.equal(items.length, 2);
   assert.equal(items[1].type, "fileChange");
   assert.equal(items[1].remodexJsonlFileChangeAggregate, true);
-  assert.deepEqual(items[1].changes.map((change) => ({
-    path: change.path,
-    kind: change.kind,
-    additions: change.additions,
-    deletions: change.deletions,
-  })), [{
-    path: "Sources/App.swift",
-    kind: "update",
-    additions: 1,
-    deletions: 1,
-  }]);
+  assert.deepEqual(
+    items[1].changes.map((change) => ({
+      path: change.path,
+      kind: change.kind,
+      additions: change.additions,
+      deletions: change.deletions,
+    })),
+    [
+      {
+        path: "Sources/App.swift",
+        kind: "update",
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  );
 
-  const turnsPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(JSON.stringify({
-    id: "req-turns-jsonl",
-    result: {
-      threadId,
-      data: [
-        {
-          id: turnId,
-          items: [
+  const turnsPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      JSON.stringify({
+        id: "req-turns-jsonl",
+        result: {
+          threadId,
+          data: [
             {
-              id: "assistant-jsonl-page",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Done." }],
+              id: turnId,
+              items: [
+                {
+                  id: "assistant-jsonl-page",
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "Done." }],
+                },
+              ],
             },
           ],
         },
-      ],
-    },
-  }), "thread/turns/list"));
+      }),
+      "thread/turns/list",
+    ),
+  );
 
   assert.equal(turnsPage.result.data[0].items.length, 2);
   assert.equal(turnsPage.result.data[0].items[1].type, "fileChange");
 
-  const hintedTurnsPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(JSON.stringify({
-    id: "req-turns-jsonl-hinted",
-    result: {
-      data: [
-        {
-          id: turnId,
-          items: [
+  const hintedTurnsPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      JSON.stringify({
+        id: "req-turns-jsonl-hinted",
+        result: {
+          data: [
             {
-              id: "assistant-jsonl-page-hinted",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Done." }],
+              id: turnId,
+              items: [
+                {
+                  id: "assistant-jsonl-page-hinted",
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "Done." }],
+                },
+              ],
             },
           ],
         },
-      ],
-    },
-  }), "thread/turns/list", { threadId }));
+      }),
+      "thread/turns/list",
+      { threadId },
+    ),
+  );
 
   assert.equal(hintedTurnsPage.result.data[0].items.length, 2);
   assert.equal(hintedTurnsPage.result.data[0].items[1].type, "fileChange");
 
-  const skippedTurnsPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(JSON.stringify({
-    id: "req-turns-jsonl-skip",
-    result: {
-      data: [
-        {
-          id: turnId,
-          items: [
+  const skippedTurnsPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      JSON.stringify({
+        id: "req-turns-jsonl-skip",
+        result: {
+          data: [
             {
-              id: "assistant-jsonl-page-skip",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Done." }],
+              id: turnId,
+              items: [
+                {
+                  id: "assistant-jsonl-page-skip",
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "Done." }],
+                },
+              ],
             },
           ],
         },
-      ],
-    },
-  }), "thread/turns/list", {
-    threadId,
-    skipJsonlArtifactAugmentation: true,
-  }));
+      }),
+      "thread/turns/list",
+      {
+        threadId,
+        skipJsonlArtifactAugmentation: true,
+      },
+    ),
+  );
 
   assert.equal(skippedTurnsPage.result.data[0].items.length, 1);
 });
@@ -1175,33 +1252,34 @@ test("sanitizeThreadHistoryImagesForRelay caches JSONL artifact scans until the 
   const rolloutPath = path.join(sessionsDir, `rollout-2026-05-19T19-40-00-${threadId}.jsonl`);
   fs.mkdirSync(sessionsDir, { recursive: true });
 
-  const buildPatchCall = (turnId, callId, fileName) => [
-    JSON.stringify({
-      type: "event_msg",
-      payload: {
-        type: "task_started",
-        turn_id: turnId,
-      },
-    }),
-    JSON.stringify({
-      type: "response_item",
-      payload: {
-        type: "custom_tool_call",
-        status: "completed",
-        name: "apply_patch",
-        call_id: callId,
-        input: [
-          "*** Begin Patch",
-          `*** Update File: Sources/${fileName}`,
-          "@@",
-          "-let title = \"Old\"",
-          "+let title = \"New\"",
-          "*** End Patch",
-          "",
-        ].join("\n"),
-      },
-    }),
-  ].join("\n");
+  const buildPatchCall = (turnId, callId, fileName) =>
+    [
+      JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "task_started",
+          turn_id: turnId,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          name: "apply_patch",
+          call_id: callId,
+          input: [
+            "*** Begin Patch",
+            `*** Update File: Sources/${fileName}`,
+            "@@",
+            '-let title = "Old"',
+            '+let title = "New"',
+            "*** End Patch",
+            "",
+          ].join("\n"),
+        },
+      }),
+    ].join("\n");
 
   fs.writeFileSync(
     rolloutPath,
@@ -1212,7 +1290,7 @@ test("sanitizeThreadHistoryImagesForRelay caches JSONL artifact scans until the 
       }),
       buildPatchCall(firstTurnId, "call-jsonl-cache-one", "One.swift"),
     ].join("\n"),
-    "utf8"
+    "utf8",
   );
 
   let rolloutReads = 0;
@@ -1223,34 +1301,39 @@ test("sanitizeThreadHistoryImagesForRelay caches JSONL artifact scans until the 
     return originalReadFileSync.call(this, filePath, ...args);
   };
 
-  const makeTurnsPage = (turnId, requestId) => JSON.stringify({
-    id: requestId,
-    result: {
-      threadId,
-      data: [
-        {
-          id: turnId,
-          items: [
-            {
-              id: `${requestId}-assistant`,
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Done." }],
-            },
-          ],
-        },
-      ],
-    },
-  });
+  const makeTurnsPage = (turnId, requestId) =>
+    JSON.stringify({
+      id: requestId,
+      result: {
+        threadId,
+        data: [
+          {
+            id: turnId,
+            items: [
+              {
+                id: `${requestId}-assistant`,
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Done." }],
+              },
+            ],
+          },
+        ],
+      },
+    });
 
-  const firstPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(
-    makeTurnsPage(firstTurnId, "req-jsonl-cache-one"),
-    "thread/turns/list"
-  ));
-  const secondPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(
-    makeTurnsPage(firstTurnId, "req-jsonl-cache-two"),
-    "thread/turns/list"
-  ));
+  const firstPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      makeTurnsPage(firstTurnId, "req-jsonl-cache-one"),
+      "thread/turns/list",
+    ),
+  );
+  const secondPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      makeTurnsPage(firstTurnId, "req-jsonl-cache-two"),
+      "thread/turns/list",
+    ),
+  );
 
   assert.equal(firstPage.result.data[0].items[1].type, "fileChange");
   assert.equal(secondPage.result.data[0].items[1].type, "fileChange");
@@ -1259,13 +1342,15 @@ test("sanitizeThreadHistoryImagesForRelay caches JSONL artifact scans until the 
   fs.appendFileSync(
     rolloutPath,
     `\n${buildPatchCall(secondTurnId, "call-jsonl-cache-two", "Two.swift")}`,
-    "utf8"
+    "utf8",
   );
 
-  const changedPage = JSON.parse(sanitizeThreadHistoryImagesForRelay(
-    makeTurnsPage(secondTurnId, "req-jsonl-cache-three"),
-    "thread/turns/list"
-  ));
+  const changedPage = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      makeTurnsPage(secondTurnId, "req-jsonl-cache-three"),
+      "thread/turns/list",
+    ),
+  );
 
   assert.equal(changedPage.result.data[0].items[1].type, "fileChange");
   assert.equal(changedPage.result.data[0].items[1].changes[0].path, "Sources/Two.swift");
@@ -1319,7 +1404,7 @@ test("sanitizeThreadHistoryImagesForRelay restores JSONL update_plan as progress
         },
       }),
     ].join("\n"),
-    "utf8"
+    "utf8",
   );
 
   const rawMessage = JSON.stringify({
@@ -1344,9 +1429,7 @@ test("sanitizeThreadHistoryImagesForRelay restores JSONL update_plan as progress
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const items = sanitized.result.thread.turns[0].items;
 
   assert.equal(items.length, 2);
@@ -1387,31 +1470,36 @@ test("sanitizeThreadHistoryImagesForRelay restores JSONL cwd without file change
         cwd,
       },
     }),
-    "utf8"
+    "utf8",
   );
 
-  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(JSON.stringify({
-    id: "req-thread-cwd",
-    result: {
-      thread: {
-        id: threadId,
-        cwd: "/tmp/stale",
-        turns: [
-          {
-            id: "turn-cwd",
-            items: [
+  const sanitized = JSON.parse(
+    sanitizeThreadHistoryImagesForRelay(
+      JSON.stringify({
+        id: "req-thread-cwd",
+        result: {
+          thread: {
+            id: threadId,
+            cwd: "/tmp/stale",
+            turns: [
               {
-                id: "assistant-cwd",
-                type: "message",
-                role: "assistant",
-                content: [{ type: "output_text", text: "Done." }],
+                id: "turn-cwd",
+                items: [
+                  {
+                    id: "assistant-cwd",
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Done." }],
+                  },
+                ],
               },
             ],
           },
-        ],
-      },
-    },
-  }), "thread/read"));
+        },
+      }),
+      "thread/read",
+    ),
+  );
 
   assert.equal(sanitized.result.thread.cwd, cwd);
   assert.equal(sanitized.result.thread.current_working_directory, cwd);
@@ -1441,15 +1529,10 @@ test("sanitizeThreadHistoryImagesForRelay annotates generated image calls with l
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
-  assert.equal(
-    item.saved_path,
-    expectedGeneratedImagePath("thread-generated-image", "ig_123.png")
-  );
+  assert.equal(item.saved_path, expectedGeneratedImagePath("thread-generated-image", "ig_123.png"));
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
 });
@@ -1476,14 +1559,12 @@ test("sanitizeThreadHistoryImagesForRelay annotates image generation items with 
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(
     item.saved_path,
-    expectedGeneratedImagePath("thread-image-generation", "ig_generation.png")
+    expectedGeneratedImagePath("thread-image-generation", "ig_generation.png"),
   );
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
@@ -1512,14 +1593,12 @@ test("sanitizeThreadHistoryImagesForRelay annotates image end history with local
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(
     item.saved_path,
-    expectedGeneratedImagePath("thread-generated-image-end", "ig_end.png")
+    expectedGeneratedImagePath("thread-generated-image-end", "ig_end.png"),
   );
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
@@ -1559,14 +1638,12 @@ test("sanitizeThreadHistoryImagesForRelay uses CODEX_HOME for generated image fa
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(
     item.saved_path,
-    path.join(codexHome, "generated_images", "thread-generated-image-home", "ig_home.png")
+    path.join(codexHome, "generated_images", "thread-generated-image-home", "ig_home.png"),
   );
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
@@ -1595,9 +1672,7 @@ test("sanitizeThreadHistoryImagesForRelay preserves generated image file_path wi
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(item.file_path, "/tmp/real-generated-image.png");
@@ -1621,10 +1696,7 @@ test("sanitizeLiveGeneratedImageMessageForRelay annotates completed image items"
   const sanitized = JSON.parse(sanitizeLiveGeneratedImageMessageForRelay(rawMessage));
   const item = sanitized.params.item;
 
-  assert.equal(
-    item.saved_path,
-    expectedGeneratedImagePath("thread-live-image", "ig_live.png")
-  );
+  assert.equal(item.saved_path, expectedGeneratedImagePath("thread-live-image", "ig_live.png"));
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
 });
@@ -1651,7 +1723,7 @@ test("sanitizeLiveGeneratedImageMessageForRelay elides nested completed image it
 
   assert.equal(
     item.saved_path,
-    expectedGeneratedImagePath("thread-live-nested-image", "ig_nested.png")
+    expectedGeneratedImagePath("thread-live-nested-image", "ig_nested.png"),
   );
   assert.equal(item.result, undefined);
   assert.equal(item.result_elided_for_relay, true);
@@ -1673,7 +1745,7 @@ test("sanitizeLiveGeneratedImageMessageForRelay uses call id for image end event
 
   assert.equal(
     sanitized.params.saved_path,
-    expectedGeneratedImagePath("thread-live-event", "ig_event.png")
+    expectedGeneratedImagePath("thread-live-event", "ig_event.png"),
   );
   assert.equal(sanitized.params.result, undefined);
   assert.equal(sanitized.params.result_elided_for_relay, true);
@@ -1687,10 +1759,7 @@ test("sanitizeThreadHistoryImagesForRelay leaves unrelated RPC payloads unchange
     },
   });
 
-  assert.equal(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "turn/start"),
-    rawMessage
-  );
+  assert.equal(sanitizeThreadHistoryImagesForRelay(rawMessage, "turn/start"), rawMessage);
 });
 
 test("createMacOSBridgeWakeAssertion spawns a macOS caffeinate idle-sleep assertion tied to the bridge pid", () => {
@@ -1714,11 +1783,13 @@ test("createMacOSBridgeWakeAssertion spawns a macOS caffeinate idle-sleep assert
   });
 
   assert.equal(assertion.active, true);
-  assert.deepEqual(spawnCalls, [{
-    command: "/usr/bin/caffeinate",
-    args: ["-i", "-w", "4242"],
-    options: { stdio: "ignore" },
-  }]);
+  assert.deepEqual(spawnCalls, [
+    {
+      command: "/usr/bin/caffeinate",
+      args: ["-i", "-w", "4242"],
+      options: { stdio: "ignore" },
+    },
+  ]);
 
   assertion.stop();
   assert.equal(fakeChild.killed, true);
@@ -1792,14 +1863,16 @@ test("persistBridgePreferences only saves the daemon preference field", () => {
       writeDaemonConfigImpl(config) {
         writes.push(config);
       },
-    }
+    },
   );
 
-  assert.deepEqual(writes, [{
-    relayUrl: "ws://127.0.0.1:9000/relay",
-    refreshEnabled: true,
-    keepMacAwakeEnabled: false,
-  }]);
+  assert.deepEqual(writes, [
+    {
+      relayUrl: "ws://127.0.0.1:9000/relay",
+      refreshEnabled: true,
+      keepMacAwakeEnabled: false,
+    },
+  ]);
 });
 
 test("sanitizeThreadHistoryImagesForRelay strips bulky compaction replacement history", () => {
@@ -1844,9 +1917,7 @@ test("sanitizeThreadHistoryImagesForRelay strips bulky compaction replacement hi
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/resume")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/resume"));
   const items = sanitized.result.thread.turns[0].items;
 
   assert.deepEqual(items[0], {
@@ -1921,18 +1992,18 @@ test("sanitizeThreadHistoryImagesForRelay compacts oversized turns pages", () =>
   });
 
   const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/turns/list")
+    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/turns/list"),
   );
   const item = sanitized.result.items[0].items[0];
 
   assert.equal(sanitized.result.remodexPageCompactedForRelay, true);
   assert.deepEqual(
     sanitized.result.items.map((turn) => turn.id),
-    ["turn-1"]
+    ["turn-1"],
   );
   assert.equal(
     sanitized.result.items.some((turn) => turn.id.startsWith("remodex-history-compacted-")),
-    false
+    false,
   );
   assert.equal(sanitized.result.items[0].remodexPageCompactedForRelay, true);
   assert.equal(item.relayPayloadTruncated, true);
@@ -1968,17 +2039,22 @@ test("sanitizeThreadHistoryImagesForRelay preserves oversized turns pages instea
   assert.equal(Buffer.byteLength(sanitizedRaw, "utf8") <= 4 * 1024 * 1024, true);
   assert.deepEqual(
     sanitized.result.data.map((turn) => turn.id),
-    turns.map((turn) => turn.id)
+    turns.map((turn) => turn.id),
   );
   assert.equal(
     sanitized.result.data.some((turn) => turn.id.startsWith("remodex-history-compacted-")),
-    false
+    false,
   );
   assert.equal(sanitized.result.nextCursor, "cursor-after-huge-page");
-  assert.equal(sanitized.result.data.every((turn) => turn.items.length === 900), true);
   assert.equal(
-    sanitized.result.data.every((turn) => turn.items.every((item) => item.relayPayloadTruncated === true)),
-    true
+    sanitized.result.data.every((turn) => turn.items.length === 900),
+    true,
+  );
+  assert.equal(
+    sanitized.result.data.every((turn) =>
+      turn.items.every((item) => item.relayPayloadTruncated === true),
+    ),
+    true,
   );
 });
 
@@ -2015,9 +2091,7 @@ test("sanitizeThreadHistoryImagesForRelay compacts oversized history before the 
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
 
   assert.equal(sanitized.result.thread.historyTailTruncatedForRelay, true);
   assert.equal(sanitized.result.thread.remodexHistoryCompacted, true);
@@ -2025,11 +2099,11 @@ test("sanitizeThreadHistoryImagesForRelay compacts oversized history before the 
   assert.equal(sanitized.result.thread.remodexKeptTurnCount, 1);
   assert.deepEqual(
     sanitized.result.thread.turns.map((turn) => turn.id),
-    ["remodex-history-compacted-turn-old", "turn-new"]
+    ["remodex-history-compacted-turn-old", "turn-new"],
   );
   assert.equal(
     sanitized.result.thread.turns[0].items[0].text.includes("Older turns omitted: 1"),
-    true
+    true,
   );
 });
 
@@ -2055,19 +2129,14 @@ test("sanitizeThreadHistoryImagesForRelay keeps the newest forty turns when comp
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
 
   assert.equal(sanitized.result.thread.remodexHistoryCompacted, true);
   assert.equal(sanitized.result.thread.remodexOmittedTurnCount, 5);
   assert.equal(sanitized.result.thread.remodexKeptTurnCount, 40);
   assert.deepEqual(
     sanitized.result.thread.turns.map((turn) => turn.id),
-    [
-      "remodex-history-compacted-turn-1",
-      ...turns.slice(5).map((turn) => turn.id),
-    ]
+    ["remodex-history-compacted-turn-1", ...turns.slice(5).map((turn) => turn.id)],
   );
 });
 
@@ -2094,9 +2163,7 @@ test("sanitizeThreadHistoryImagesForRelay truncates the newest oversized text it
     },
   });
 
-  const sanitized = JSON.parse(
-    sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read")
-  );
+  const sanitized = JSON.parse(sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read"));
   const item = sanitized.result.thread.turns[0].items[0];
 
   assert.equal(sanitized.result.thread.historyTailTruncatedForRelay, true);

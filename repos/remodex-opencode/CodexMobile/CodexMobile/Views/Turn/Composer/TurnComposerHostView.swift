@@ -45,24 +45,30 @@ struct TurnComposerHostView: View {
 
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
+        let runtimeState = TurnComposerRuntimeState.resolve(
+            codex: codex,
+            threadId: thread.id,
+            reasoningDisplayOptions: reasoningDisplayOptions
+        )
         let availableForkDestinations = TurnComposerForkDestination.availableDestinations(
             canForkLocally: canForkLocally,
             canCreateWorktree: showsGitControls && !isWorktreeProject && isGitBranchSelectorEnabled
         )
+        let allowsForkCommand = TurnComposerCommandLogic.canOfferForkSlashCommand(
+            in: viewModel.input,
+            mentionedFileCount: viewModel.composerMentionedFiles.count,
+            mentionedSkillCount: viewModel.composerMentionedSkills.count,
+            attachmentCount: viewModel.composerAttachments.count,
+            hasReviewSelection: viewModel.composerReviewSelection != nil,
+            hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
+            isPlanModeArmed: viewModel.isPlanModeArmed
+        ) && !availableForkDestinations.isEmpty
         let autocompleteState = TurnComposerAutocompleteState(
             availableSlashCommands: TurnComposerSlashCommand.availableCommands(
-                supportsThreadFork: codex.supportsThreadFork,
-                allowsForkCommand: TurnComposerCommandLogic.canOfferForkSlashCommand(
-                    in: viewModel.input,
-                    mentionedFileCount: viewModel.composerMentionedFiles.count,
-                    mentionedSkillCount: viewModel.composerMentionedSkills.count,
-                    attachmentCount: viewModel.composerAttachments.count,
-                    hasReviewSelection: viewModel.composerReviewSelection != nil,
-                    hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
-                    isPlanModeArmed: viewModel.isPlanModeArmed
-                )
-                    && !availableForkDestinations.isEmpty
+                allowsForkCommand: allowsForkCommand
             ),
+            supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            supportsThreadFork: runtimeState.capabilities.supportsFork,
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
             isFileAutocompleteVisible: viewModel.isFileAutocompleteVisible,
             isFileAutocompleteLoading: viewModel.isFileAutocompleteLoading,
@@ -100,17 +106,33 @@ struct TurnComposerHostView: View {
             voiceAudioLevels: voiceAudioLevels,
             voiceRecordingDuration: voiceRecordingDuration
         )
-        let runtimeState = TurnComposerRuntimeState.resolve(
-            codex: codex,
-            threadId: thread.id,
-            reasoningDisplayOptions: reasoningDisplayOptions
-        )
         let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex, threadId: thread.id)
         let selectedModelID = codex.visibleSelectedModelIDForComposer(threadId: thread.id)
         let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer(threadId: thread.id)
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
             && !SidebarThreadGrouping.isRootlessChatThread(thread)
 
+        // When the runtime provider is explicitly disabled, replace the entire composer
+        // with an unavailable notice so users see why the controls are missing.
+        if !runtimeState.isRuntimeEnabled, let reason = runtimeState.runtimeUnavailableReason {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 26))
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 4)
+        } else {
         TurnComposerView(
             input: $viewModel.input,
             isInputFocused: isInputFocused,
@@ -306,5 +328,6 @@ struct TurnComposerHostView: View {
             onSend: onSend,
             showsSecondaryBar: showsSecondaryBar
         )
+        }
     }
 }

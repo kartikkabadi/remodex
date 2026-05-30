@@ -22,8 +22,8 @@ repos/remodex-opencode/
 ├── AGENTS.md                     # ← You are here
 ├── preload.js                    # Optional preload script
 ├── phodex-bridge/                # Node.js bridge (remodex npm package)
-│   ├── src/                      # 45 source files (CommonJS, flat)
-│   ├── test/                     # 38 test files (node:test)
+│   ├── src/                      # 44 source files (CommonJS, flat)
+│   ├── test/                     # 41 test files (node:test)
 │   ├── bin/                      # CLI entrypoints (remodex, remodex-jsonl-diagnose)
 │   ├── scripts/                  # npm lifecycle scripts (prepack/postpack)
 │   └── package.json              # npm package config (v1.5.6)

@@ -6,9 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const {
-  createBridgeStatusPublisher,
-} = require("../src/bridge-status");
+const { createBridgeStatusPublisher } = require("../src/bridge-status");
 
 test("status publisher appends current Codex launch state to snapshots", () => {
   const published = [];
@@ -31,10 +29,10 @@ test("status publisher appends current Codex launch state to snapshots", () => {
   codexLaunchState = "connected";
   publisher.publish(publisher.latest());
 
-  assert.deepEqual(published.map((status) => status.codexLaunchState), [
-    "starting",
-    "connected",
-  ]);
+  assert.deepEqual(
+    published.map((status) => status.codexLaunchState),
+    ["starting", "connected"],
+  );
 });
 
 test("status publisher heartbeat emits stale relay downgrade without mutating latest snapshot", async () => {

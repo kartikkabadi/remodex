@@ -8,6 +8,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { resolveCodexHome } = require("./codex-home");
+const { readString } = require("./normalize");
 
 const REGISTRY_SCHEMA_VERSION = 1;
 const REGISTRY_DIRECTORY_NAME = "remodex";
@@ -44,7 +45,8 @@ function getDefaultProjectRegistry() {
 
 function listKnownProjects(storagePath, params = {}, options = {}) {
   const state = readRegistryState(storagePath);
-  const includeUnavailable = params.includeUnavailable === true || params.include_unavailable === true;
+  const includeUnavailable =
+    params.includeUnavailable === true || params.include_unavailable === true;
   const seenKeys = new Set();
 
   return state.projects
@@ -65,15 +67,23 @@ function listKnownProjects(storagePath, params = {}, options = {}) {
       }
       return directoryExists(entry.path);
     })
-    .sort(compareKnownProjects)
+    .toSorted(compareKnownProjects)
     .map(publicKnownProject);
 }
 
 function rememberKnownProjectPath(storagePath, candidatePath, metadata = {}, options = {}) {
-  return rememberKnownProjectEntries(storagePath, [{
-    path: candidatePath,
-    metadata,
-  }], options)[0] || null;
+  return (
+    rememberKnownProjectEntries(
+      storagePath,
+      [
+        {
+          path: candidatePath,
+          metadata,
+        },
+      ],
+      options,
+    )[0] || null
+  );
 }
 
 function rememberKnownProjectsFromThreads(storagePath, threads, metadata = {}, options = {}) {
@@ -92,7 +102,9 @@ function rememberKnownProjectsFromThreads(storagePath, threads, metadata = {}, o
       path: cwd,
       metadata: {
         ...metadata,
-        provider: readString(metadata.provider || thread.modelProvider || thread.model_provider || thread.provider),
+        provider: readString(
+          metadata.provider || thread.modelProvider || thread.model_provider || thread.provider,
+        ),
         lastSeenAt: readThreadLastSeenAt(thread) || metadata.lastSeenAt,
       },
     });
@@ -158,7 +170,9 @@ function rememberKnownProjectEntries(storagePath, candidates, options = {}) {
 
 function mergeProjectEntry(previous, next) {
   const previousSources = Array.isArray(previous?.sources) ? previous.sources : [];
-  const previousProviderHints = Array.isArray(previous?.providerHints) ? previous.providerHints : [];
+  const previousProviderHints = Array.isArray(previous?.providerHints)
+    ? previous.providerHints
+    : [];
   const sources = appendUniqueString(previousSources, next.source);
   const providerHints = appendUniqueString(previousProviderHints, next.provider);
 
@@ -281,26 +295,28 @@ function isGeneratedProjectlessPath(candidatePath, options = {}) {
     path.join(homeDir, "Documents", "Codex"),
   ];
 
-  return knownRootlessRoots.some((rootPath) => samePathOrDescendant(normalizedPath, rootPath))
-    || hasGeneratedProjectlessComponents(normalizedPath);
+  return (
+    knownRootlessRoots.some((rootPath) => samePathOrDescendant(normalizedPath, rootPath)) ||
+    hasGeneratedProjectlessComponents(normalizedPath)
+  );
 }
 
 function hasGeneratedProjectlessComponents(candidatePath) {
   const components = projectPathComponents(candidatePath);
   for (let index = 0; index < components.length; index += 1) {
     if (
-      components[index] === ".codex"
-      && components[index + 1] === "threads"
-      && readString(components[index + 2])
+      components[index] === ".codex" &&
+      components[index + 1] === "threads" &&
+      readString(components[index + 2])
     ) {
       return true;
     }
 
     if (
-      components[index] === "Documents"
-      && components[index + 1] === "Codex"
-      && isISODateFolderName(components[index + 2])
-      && readString(components[index + 3])
+      components[index] === "Documents" &&
+      components[index + 1] === "Codex" &&
+      isISODateFolderName(components[index + 2]) &&
+      readString(components[index + 3])
     ) {
       return true;
     }
@@ -312,7 +328,9 @@ function samePathOrDescendant(candidatePath, rootPath) {
   const normalizedCandidate = path.resolve(candidatePath);
   const normalizedRoot = realpathSyncIfAvailable(path.resolve(rootPath)) || path.resolve(rootPath);
   const relative = path.relative(normalizedRoot, normalizedCandidate);
-  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 function projectIdentityKey(candidatePath) {
@@ -332,16 +350,23 @@ function projectLabelForPath(candidatePath) {
 
 function readThreadProjectPath(thread) {
   if (
-    thread?.metadata?.projectCwdSource === "fallback"
-    || thread?.metadata?.projectRegistrySkipCwd === true
+    thread?.metadata?.projectCwdSource === "fallback" ||
+    thread?.metadata?.projectRegistrySkipCwd === true
   ) {
     return "";
   }
-  return readString(thread?.cwd || thread?.current_working_directory || thread?.workingDirectory || thread?.directory);
+  return readString(
+    thread?.cwd ||
+      thread?.current_working_directory ||
+      thread?.workingDirectory ||
+      thread?.directory,
+  );
 }
 
 function readThreadLastSeenAt(thread) {
-  return readString(thread?.updatedAt || thread?.updated_at || thread?.createdAt || thread?.created_at);
+  return readString(
+    thread?.updatedAt || thread?.updated_at || thread?.createdAt || thread?.created_at,
+  );
 }
 
 function expandHomePath(candidatePath, options = {}) {
@@ -356,12 +381,14 @@ function expandHomePath(candidatePath, options = {}) {
 }
 
 function isLikelyFilesystemPath(value) {
-  return value === "~"
-    || value === "/"
-    || value.startsWith("/")
-    || value.startsWith("~/")
-    || /^[A-Za-z]:[\\/]/u.test(value)
-    || value.startsWith("\\\\");
+  return (
+    value === "~" ||
+    value === "/" ||
+    value.startsWith("/") ||
+    value.startsWith("~/") ||
+    /^[A-Za-z]:[\\/]/u.test(value) ||
+    value.startsWith("\\\\")
+  );
 }
 
 function directoryExists(candidatePath) {
@@ -451,10 +478,6 @@ function projectPathComponents(candidatePath) {
 
 function isISODateFolderName(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value);
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = {

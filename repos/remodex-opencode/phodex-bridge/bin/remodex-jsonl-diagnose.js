@@ -58,15 +58,17 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
-  console.log([
-    "Usage:",
-    "  remodex-jsonl-diagnose /path/to/session.jsonl",
-    "",
-    "Options:",
-    "  --recent-turns N    Number of recent parsed turns to summarize. Default: 5",
-    "  --preview-chars N   Text preview length per item. Default: 180",
-    "  --show-text         Include short text previews in the output",
-  ].join("\n"));
+  console.log(
+    [
+      "Usage:",
+      "  remodex-jsonl-diagnose /path/to/session.jsonl",
+      "",
+      "Options:",
+      "  --recent-turns N    Number of recent parsed turns to summarize. Default: 5",
+      "  --preview-chars N   Text preview length per item. Default: 180",
+      "  --show-text         Include short text previews in the output",
+    ].join("\n"),
+  );
 }
 
 function diagnoseSessionJsonl(filePath, options = {}) {
@@ -174,7 +176,8 @@ function diagnoseSessionJsonl(filePath, options = {}) {
     if (entry?.type === "session_meta") {
       summary.session.sessionMetaCount += 1;
       const payload = objectValue(entry.payload);
-      summary.session.threadId ||= readString(payload?.id) || readString(payload?.thread_id) || readString(payload?.threadId);
+      summary.session.threadId ||=
+        readString(payload?.id) || readString(payload?.thread_id) || readString(payload?.threadId);
       summary.session.cwd ||= readString(payload?.cwd);
       summary.session.originator ||= readString(payload?.originator);
       summary.session.source ||= readString(payload?.source);
@@ -203,29 +206,55 @@ function diagnoseSessionJsonl(filePath, options = {}) {
       increment(summary.observed.eventTypes, eventType);
 
       if (eventType === "task_started") {
-        activeTurnId = readString(payload?.turn_id) || readString(payload?.turnId) || activeTurnId || `turn-line-${lineNumber}`;
+        activeTurnId =
+          readString(payload?.turn_id) ||
+          readString(payload?.turnId) ||
+          activeTurnId ||
+          `turn-line-${lineNumber}`;
         const record = ensureTurn(turns, turnsById, activeTurnId, lineNumber, entry.timestamp);
         record.status ||= "running";
         record.sourceKinds.add("task_started");
         turnIds.add(activeTurnId);
       } else if (eventType === "task_complete") {
-        const turnId = readString(payload?.turn_id) || readString(payload?.turnId) || activeTurnId || `turn-line-${lineNumber}`;
+        const turnId =
+          readString(payload?.turn_id) ||
+          readString(payload?.turnId) ||
+          activeTurnId ||
+          `turn-line-${lineNumber}`;
         const record = ensureTurn(turns, turnsById, turnId, lineNumber, entry.timestamp);
         record.status = "completed";
         record.sourceKinds.add("task_complete");
         turnIds.add(turnId);
-      } else if (eventType === "user_message" || eventType === "agent_message" || eventType === "agent_reasoning") {
-        const turnId = readString(payload?.turn_id) || readString(payload?.turnId) || activeTurnId || `turn-line-${lineNumber}`;
+      } else if (
+        eventType === "user_message" ||
+        eventType === "agent_message" ||
+        eventType === "agent_reasoning"
+      ) {
+        const turnId =
+          readString(payload?.turn_id) ||
+          readString(payload?.turnId) ||
+          activeTurnId ||
+          `turn-line-${lineNumber}`;
         const record = ensureTurn(turns, turnsById, turnId, lineNumber, entry.timestamp);
         record.sourceKinds.add(eventType);
         turnIds.add(turnId);
-        addItem(record, itemFromEventPayload(eventType, payload, lineNumber), lineNumber, includeText, previewChars);
+        addItem(
+          record,
+          itemFromEventPayload(eventType, payload, lineNumber),
+          lineNumber,
+          includeText,
+          previewChars,
+        );
       }
     } else if (entry?.type === "response_item") {
       const payload = objectValue(entry.payload) || {};
       const itemType = normalizeType(readString(payload.type)) || "unknown";
       increment(summary.observed.responseItemTypes, itemType);
-      const turnId = readString(payload.turn_id) || readString(payload.turnId) || activeTurnId || `response-items-line-${lineNumber}`;
+      const turnId =
+        readString(payload.turn_id) ||
+        readString(payload.turnId) ||
+        activeTurnId ||
+        `response-items-line-${lineNumber}`;
       const record = ensureTurn(turns, turnsById, turnId, lineNumber, entry.timestamp);
       record.sourceKinds.add("response_item");
       turnIds.add(turnId);
@@ -233,29 +262,34 @@ function diagnoseSessionJsonl(filePath, options = {}) {
     }
   }
 
-  const sortedTurns = turns.sort((a, b) => a.firstLine - b.firstLine);
-  summary.observed.threadIds = Array.from(threadIds).sort();
-  summary.observed.turnIds = Array.from(turnIds).sort();
+  const sortedTurns = turns.toSorted((a, b) => a.firstLine - b.firstLine);
+  summary.observed.threadIds = Array.from(threadIds).toSorted();
+  summary.observed.turnIds = Array.from(turnIds).toSorted();
   summary.history.turnCount = sortedTurns.length;
   summary.history.itemCount = sortedTurns.reduce((total, turn) => total + turn.items.length, 0);
   summary.history.turnsWithNoItems = sortedTurns.filter((turn) => turn.items.length === 0).length;
-  summary.history.recentTurns = sortedTurns.slice(-recentTurnsLimit).map((turn) => summarizeTurn(turn, includeText));
+  summary.history.recentTurns = sortedTurns
+    .slice(-recentTurnsLimit)
+    .map((turn) => summarizeTurn(turn, includeText));
 
   const recentPage = {
     id: "diagnostic-thread-turns-list",
     result: {
-      data: sortedTurns.slice(-recentTurnsLimit).reverse().map(toWireTurn),
+      data: sortedTurns.slice(-recentTurnsLimit).toReversed().map(toWireTurn),
       nextCursor: sortedTurns.length > recentTurnsLimit ? "diagnostic-has-older-turns" : null,
     },
   };
   const recentPageBytes = Buffer.byteLength(JSON.stringify(recentPage), "utf8");
-  const compactSingleTurn = sortedTurns.length > 0 ? {
-    id: "diagnostic-thread-turns-list",
-    result: {
-      data: [compactTurn(toWireTurn(sortedTurns[sortedTurns.length - 1]))],
-      nextCursor: sortedTurns.length > 1 ? "diagnostic-has-older-turns" : null,
-    },
-  } : null;
+  const compactSingleTurn =
+    sortedTurns.length > 0
+      ? {
+          id: "diagnostic-thread-turns-list",
+          result: {
+            data: [compactTurn(toWireTurn(sortedTurns[sortedTurns.length - 1]))],
+            nextCursor: sortedTurns.length > 1 ? "diagnostic-has-older-turns" : null,
+          },
+        }
+      : null;
   const compactSingleTurnBytes = compactSingleTurn
     ? Buffer.byteLength(JSON.stringify(compactSingleTurn), "utf8")
     : 0;
@@ -263,8 +297,8 @@ function diagnoseSessionJsonl(filePath, options = {}) {
   summary.relaySimulation.recentPageBytes = recentPageBytes;
   summary.relaySimulation.recentPageWithin4MiB = recentPageBytes <= RELAY_SOFT_LIMIT_BYTES;
   summary.relaySimulation.compactSingleTurnBytes = compactSingleTurnBytes;
-  summary.relaySimulation.compactSingleTurnWithin4MiB = compactSingleTurnBytes > 0
-    && compactSingleTurnBytes <= RELAY_SOFT_LIMIT_BYTES;
+  summary.relaySimulation.compactSingleTurnWithin4MiB =
+    compactSingleTurnBytes > 0 && compactSingleTurnBytes <= RELAY_SOFT_LIMIT_BYTES;
   summary.relaySimulation.wouldReturnAtLeastOneTurn = summary.relaySimulation.recentPageWithin4MiB
     ? sortedTurns.length > 0
     : summary.relaySimulation.compactSingleTurnWithin4MiB;
@@ -315,7 +349,11 @@ function addItem(turn, item, lineNumber, includeText, previewChars) {
   }
   const text = firstText(item);
   turn.items.push({
-    id: readString(item.id) || readString(item.item_id) || readString(item.itemId) || `item-line-${lineNumber}-${turn.items.length + 1}`,
+    id:
+      readString(item.id) ||
+      readString(item.item_id) ||
+      readString(item.itemId) ||
+      `item-line-${lineNumber}-${turn.items.length + 1}`,
     type: readString(item.type) || "unknown",
     role: readString(item.role) || null,
     line: lineNumber,
@@ -331,7 +369,8 @@ function itemFromEventPayload(eventType, payload, lineNumber) {
     id: readString(payload.id) || `${eventType}-line-${lineNumber}`,
     type: eventType,
     role,
-    text: readString(payload.message) || readString(payload.text) || readString(payload.summary) || "",
+    text:
+      readString(payload.message) || readString(payload.text) || readString(payload.summary) || "",
   };
 }
 
@@ -341,7 +380,7 @@ function summarizeTurn(turn, includeText) {
     firstLine: turn.firstLine,
     lastLine: turn.lastLine,
     status: turn.status || null,
-    sourceKinds: Array.from(turn.sourceKinds).sort(),
+    sourceKinds: Array.from(turn.sourceKinds).toSorted(),
     itemCount: turn.items.length,
     rawItemBytes: turn.items.reduce((total, item) => total + item.rawBytes, 0),
     textBytes: turn.items.reduce((total, item) => total + item.textBytes, 0),
@@ -454,7 +493,15 @@ function firstText(value, depth = 0) {
   if (typeof value !== "object") {
     return "";
   }
-  for (const key of ["text", "message", "summary", "output", "outputText", "output_text", "content"]) {
+  for (const key of [
+    "text",
+    "message",
+    "summary",
+    "output",
+    "outputText",
+    "output_text",
+    "content",
+  ]) {
     const text = firstText(value[key], depth + 1);
     if (text) {
       return text;
@@ -481,7 +528,9 @@ function increment(record, key) {
 }
 
 function normalizeType(value) {
-  return readString(value).toLowerCase().replace(/[\s_-]+/g, "");
+  return readString(value)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
 function truncateText(value, maxChars) {

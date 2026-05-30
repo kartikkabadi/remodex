@@ -128,7 +128,7 @@ test("watcher falls back to an older thread rollout outside the recent lookback 
     tokensUsed: 555,
     tokenLimit: 1_000,
   });
-  setFileMTime(oldRolloutPath, nowMs - (24 * 60 * 60 * 1000));
+  setFileMTime(oldRolloutPath, nowMs - 24 * 60 * 60 * 1000);
 
   const newerOtherPath = path.join(threadDir, "rollout-2026-03-12T13-29-00-thread-b.jsonl");
   writeRolloutFile(newerOtherPath, {

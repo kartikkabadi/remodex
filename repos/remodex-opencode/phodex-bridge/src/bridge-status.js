@@ -29,10 +29,7 @@ function createBridgeStatusPublisher({
     onBridgeStatus?.(nextStatus);
   }
 
-  function startHeartbeat({
-    shouldPublish = () => true,
-    getLastRelayActivityAt = () => 0,
-  } = {}) {
+  function startHeartbeat({ shouldPublish = () => true, getLastRelayActivityAt = () => 0 } = {}) {
     if (heartbeatTimer) {
       return;
     }
@@ -42,11 +39,11 @@ function createBridgeStatusPublisher({
         return;
       }
 
-      onBridgeStatus?.(buildHeartbeatBridgeStatus(
-        lastPublishedBridgeStatus,
-        getLastRelayActivityAt(),
-        { now: now() }
-      ));
+      onBridgeStatus?.(
+        buildHeartbeatBridgeStatus(lastPublishedBridgeStatus, getLastRelayActivityAt(), {
+          now: now(),
+        }),
+      );
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
   }
@@ -73,14 +70,11 @@ function createBridgeStatusPublisher({
 // Treats silent relay sockets as stale so the daemon can self-heal after sleep/wake.
 function hasRelayConnectionGoneStale(
   lastActivityAt,
-  {
-    now = Date.now(),
-    staleAfterMs = RELAY_WATCHDOG_STALE_AFTER_MS,
-  } = {}
+  { now = Date.now(), staleAfterMs = RELAY_WATCHDOG_STALE_AFTER_MS } = {},
 ) {
-  return Number.isFinite(lastActivityAt)
-    && Number.isFinite(now)
-    && now - lastActivityAt >= staleAfterMs;
+  return (
+    Number.isFinite(lastActivityAt) && Number.isFinite(now) && now - lastActivityAt >= staleAfterMs
+  );
 }
 
 // Keeps persisted daemon status honest by downgrading stale "connected" snapshots.
@@ -91,7 +85,7 @@ function buildHeartbeatBridgeStatus(
     now = Date.now(),
     staleAfterMs = RELAY_WATCHDOG_STALE_AFTER_MS,
     staleMessage = STALE_RELAY_STATUS_MESSAGE,
-  } = {}
+  } = {},
 ) {
   if (!status || typeof status !== "object") {
     return status;

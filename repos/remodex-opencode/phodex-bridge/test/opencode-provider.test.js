@@ -11,10 +11,42 @@ const { createOpenCodeProvider } = require("../src/opencode-provider");
 function fakeServer() {
   let running = false;
   return {
-    get baseUrl() { return running ? "http://127.0.0.1:4291" : ""; },
-    get isRunning() { return running; },
-    start() { running = true; return Promise.resolve(); },
-    stop() { running = false; return Promise.resolve(); },
+    get baseUrl() {
+      return running ? "http://127.0.0.1:4291" : "";
+    },
+    get isRunning() {
+      return running;
+    },
+    start() {
+      running = true;
+      return Promise.resolve();
+    },
+    stop() {
+      running = false;
+      return Promise.resolve();
+    },
+  };
+}
+
+function fakeOwnershipStore() {
+  const store = new Map();
+  return {
+    setOwnership(threadId, providerId) {
+      store.set(threadId, { providerId, assignedAt: new Date().toISOString() });
+      return true;
+    },
+    ownsThread(threadId, providerId) {
+      const entry = store.get(threadId);
+      return entry ? entry.providerId === providerId : false;
+    },
+    removeOwnership(threadId) {
+      return store.delete(threadId);
+    },
+    getAllOwnedBy(providerId) {
+      return Array.from(store.entries())
+        .filter(([, entry]) => entry.providerId === providerId)
+        .map(([threadId, entry]) => ({ threadId, ...entry }));
+    },
   };
 }
 
@@ -34,16 +66,24 @@ function fakeClient() {
     abort: async () => {},
     getMessages: async () => [],
     replyToPermission: async () => {},
-    subscribeToEvents: () => () => {},
+    subscribeToEvents: (handler) => {
+      setImmediate(() => {
+        handler("turn/started", { turnId: "fake-turn-1" });
+        handler("item/agentMessage/delta", { delta: "Hello from test agent." });
+        handler("turn/completed", { status: "completed" });
+      });
+      return () => {};
+    },
   };
 }
 
 function makeProvider(opts = {}) {
   return createOpenCodeProvider({
     sendApplicationMessage: opts.send || (() => {}),
-    env: { REMODEX_ENABLE_OPENCODE: "1", ...(opts.env || {}) },
+    env: { REMODEX_ENABLE_OPENCODE: "1", ...opts.env },
     serverFactory: opts.serverFactory || (() => fakeServer()),
     clientFactory: opts.clientFactory || (() => fakeClient()),
+    ownershipStore: opts.ownershipStore || fakeOwnershipStore(),
   });
 }
 
@@ -66,7 +106,8 @@ test("ownsThread returns false for unknown thread", () => {
 test("threadStart creates thread and records ownership", async () => {
   const provider = makeProvider();
   const result = await provider.handleRequest({
-    id: 1, method: "thread/start",
+    id: 1,
+    method: "thread/start",
     params: { model: "openai/gpt-5.5", title: "Test thread", cwd: "/tmp/test" },
   });
 
@@ -79,8 +120,16 @@ test("threadStart creates thread and records ownership", async () => {
 
 test("threadRead returns thread data", async () => {
   const provider = makeProvider();
-  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: { title: "Read test" } });
-  const read = await provider.handleRequest({ id: 2, method: "thread/read", params: { threadId: start.thread.id } });
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "Read test" },
+  });
+  const read = await provider.handleRequest({
+    id: 2,
+    method: "thread/read",
+    params: { threadId: start.thread.id },
+  });
   assert.ok(read.thread);
   assert.equal(read.thread.id, start.thread.id);
 });
@@ -89,14 +138,18 @@ test("threadRead throws for unknown thread", async () => {
   const provider = makeProvider();
   await assert.rejects(
     () => provider.handleRequest({ id: 1, method: "thread/read", params: { threadId: "nope" } }),
-    { errorCode: "thread_not_found" }
+    { errorCode: "thread_not_found" },
   );
 });
 
 test("threadArchive toggles archived flag", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
-  await provider.handleRequest({ id: 2, method: "thread/archive", params: { threadId: start.thread.id } });
+  await provider.handleRequest({
+    id: 2,
+    method: "thread/archive",
+    params: { threadId: start.thread.id },
+  });
   const list = await provider.listThreads({ includeArchived: true });
   const found = list.data.find((t) => t.id === start.thread.id);
   assert.ok(found);
@@ -105,8 +158,16 @@ test("threadArchive toggles archived flag", async () => {
 test("threadNameSet updates title", async () => {
   const messages = [];
   const provider = makeProvider({ send: (msg) => messages.push(JSON.parse(msg)) });
-  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: { title: "Old name" } });
-  const result = await provider.handleRequest({ id: 2, method: "thread/name/set", params: { threadId: start.thread.id, name: "New name" } });
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "Old name" },
+  });
+  const result = await provider.handleRequest({
+    id: 2,
+    method: "thread/name/set",
+    params: { threadId: start.thread.id, name: "New name" },
+  });
   assert.equal(result.thread.title, "New name");
   assert.ok(messages.some((m) => m.method === "thread/name/updated"));
 });
@@ -115,18 +176,32 @@ test("turnStart requires text input", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
   await assert.rejects(
-    () => provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id } }),
-    { errorCode: "opencode_input_required" }
+    () =>
+      provider.handleRequest({
+        id: 2,
+        method: "turn/start",
+        params: { threadId: start.thread.id },
+      }),
+    { errorCode: "opencode_input_required" },
   );
 });
 
 test("turnStart on already-running thread throws", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
-  await provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id, input: "test" } });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "test" },
+  });
   await assert.rejects(
-    () => provider.handleRequest({ id: 3, method: "turn/start", params: { threadId: start.thread.id, input: "test2" } }),
-    { errorCode: "thread_turn_active" }
+    () =>
+      provider.handleRequest({
+        id: 3,
+        method: "turn/start",
+        params: { threadId: start.thread.id, input: "test2" },
+      }),
+    { errorCode: "thread_turn_active" },
   );
 });
 
@@ -139,8 +214,16 @@ test("turnInterrupt completes running turn", async () => {
     },
   });
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
-  await provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id, input: "test" } });
-  const result = await provider.handleRequest({ id: 3, method: "turn/interrupt", params: { threadId: start.thread.id } });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "test" },
+  });
+  const result = await provider.handleRequest({
+    id: 3,
+    method: "turn/interrupt",
+    params: { threadId: start.thread.id },
+  });
   assert.equal(result.success, true);
   assert.equal(result.interrupted, true);
   assert.equal(completed, true);
@@ -156,10 +239,9 @@ test("listThreads returns created threads", async () => {
 
 test("unsupported method throws error", async () => {
   const provider = makeProvider();
-  await assert.rejects(
-    () => provider.handleRequest({ id: 1, method: "turn/steer", params: {} }),
-    { errorCode: "unsupported_opencode_method" }
-  );
+  await assert.rejects(() => provider.handleRequest({ id: 1, method: "turn/steer", params: {} }), {
+    errorCode: "unsupported_opencode_method",
+  });
 });
 
 test("shutdown cleans up state", async () => {
@@ -179,14 +261,22 @@ test("turnStart emits turn/started notification", async () => {
   const messages = [];
   const provider = makeProvider({ send: (msg) => messages.push(JSON.parse(msg)) });
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
-  await provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id, input: "hello world" } });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello world" },
+  });
   assert.ok(messages.some((m) => m.method === "turn/started"));
 });
 
 test("turnStart returns turnId and status running", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
-  const result = await provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id, input: "test" } });
+  const result = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "test" },
+  });
   assert.ok(result.turnId);
   assert.ok(result.turnId.startsWith("opencode-turn-"));
   assert.equal(result.turn.status, "running");

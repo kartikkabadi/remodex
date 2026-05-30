@@ -1,0 +1,181 @@
+// FILE: opencode-permission.test.js
+// Purpose: Verifies OpenCode provider permission/reply handler (allow, deny, missing ID,
+//          client error, snake_case field).
+// Layer: Unit test
+// Exports: node:test suite
+// Depends on: node:test, node:assert/strict, ../src/opencode-provider
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { createOpenCodeProvider } = require("../src/opencode-provider");
+
+function fakeServer() {
+  let running = false;
+  return {
+    get baseUrl() {
+      return running ? "http://127.0.0.1:4291" : "";
+    },
+    get isRunning() {
+      return running;
+    },
+    start() {
+      running = true;
+      return Promise.resolve();
+    },
+    stop() {
+      running = false;
+      return Promise.resolve();
+    },
+  };
+}
+
+function fakeOwnershipStore() {
+  const store = new Map();
+  return {
+    setOwnership(threadId, providerId) {
+      store.set(threadId, { providerId, assignedAt: new Date().toISOString() });
+      return true;
+    },
+    ownsThread(threadId, providerId) {
+      const entry = store.get(threadId);
+      return entry ? entry.providerId === providerId : false;
+    },
+    removeOwnership(threadId) {
+      return store.delete(threadId);
+    },
+    getAllOwnedBy(providerId) {
+      return Array.from(store.entries())
+        .filter(([, entry]) => entry.providerId === providerId)
+        .map(([threadId, entry]) => ({ threadId, ...entry }));
+    },
+  };
+}
+
+function fakeClient(replyBehavior) {
+  return {
+    listModels: async () => [],
+    listAgents: async () => [],
+    createSession: async () => "ses_fake",
+    getSession: async () => ({}),
+    prompt: async () => Promise.resolve(),
+    setModel: async () => {},
+    setMode: async () => {},
+    setEffort: async () => {},
+    abort: async () => {},
+    getMessages: async () => [],
+    replyToPermission:
+      replyBehavior ||
+      (async (permissionId, allow) => {
+        return { success: true };
+      }),
+    subscribeToEvents: () => () => {},
+  };
+}
+
+function makeProvider(opts = {}) {
+  return createOpenCodeProvider({
+    sendApplicationMessage: opts.send || (() => {}),
+    env: { REMODEX_ENABLE_OPENCODE: "1", ...opts.env },
+    serverFactory: opts.serverFactory || (() => fakeServer()),
+    clientFactory: opts.clientFactory,
+    ownershipStore: opts.ownershipStore || fakeOwnershipStore(),
+  });
+}
+
+test("permission/reply allows a permission", async () => {
+  let receivedId = null;
+  let receivedAllow = null;
+  const replyClient = fakeClient(async (id, allow) => {
+    receivedId = id;
+    receivedAllow = allow;
+    return { success: true };
+  });
+  const provider = makeProvider({ clientFactory: () => replyClient });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_abc123", allow: true },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.permissionId, "perm_abc123");
+  assert.equal(result.allow, true);
+  assert.equal(receivedId, "perm_abc123");
+  assert.equal(receivedAllow, true);
+
+  await provider.shutdown();
+});
+
+test("permission/reply denies a permission", async () => {
+  let receivedAllow = null;
+  const replyClient = fakeClient(async (id, allow) => {
+    receivedAllow = allow;
+    return { success: true };
+  });
+  const provider = makeProvider({ clientFactory: () => replyClient });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_deny", allow: false },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.allow, false);
+  assert.equal(receivedAllow, false);
+
+  await provider.shutdown();
+});
+
+test("permission/reply rejects with missing permission ID", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { allow: true },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "Missing permission ID");
+});
+
+test("permission/reply handles client error", async () => {
+  const errorClient = fakeClient(async () => {
+    throw new Error("SDK permission error");
+  });
+  const provider = makeProvider({ clientFactory: () => errorClient });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_err", allow: true },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "SDK permission error");
+
+  await provider.shutdown();
+});
+
+test("permission/reply accepts permission_id snake_case", async () => {
+  let receivedId = null;
+  const replyClient = fakeClient(async (id, allow) => {
+    receivedId = id;
+    return { success: true };
+  });
+  const provider = makeProvider({ clientFactory: () => replyClient });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permission_id: "perm_snake", allow: true },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.permissionId, "perm_snake");
+  assert.equal(receivedId, "perm_snake");
+
+  await provider.shutdown();
+});
