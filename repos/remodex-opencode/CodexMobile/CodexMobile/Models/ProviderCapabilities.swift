@@ -21,6 +21,34 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsMCP: Bool
     let supportsWorktree: Bool
 
+    init(
+        supportsAgentSelection: Bool,
+        supportsReasoningEffort: Bool,
+        supportsFastMode: Bool,
+        supportsPlanMode: Bool,
+        supportsStreamingTools: Bool,
+        supportsApprovals: Bool,
+        supportsFork: Bool,
+        supportsVoice: Bool,
+        supportsDesktopHandoff: Bool,
+        supportsSlashCommands: Bool,
+        supportsMCP: Bool,
+        supportsWorktree: Bool
+    ) {
+        self.supportsAgentSelection = supportsAgentSelection
+        self.supportsReasoningEffort = supportsReasoningEffort
+        self.supportsFastMode = supportsFastMode
+        self.supportsPlanMode = supportsPlanMode
+        self.supportsStreamingTools = supportsStreamingTools
+        self.supportsApprovals = supportsApprovals
+        self.supportsFork = supportsFork
+        self.supportsVoice = supportsVoice
+        self.supportsDesktopHandoff = supportsDesktopHandoff
+        self.supportsSlashCommands = supportsSlashCommands
+        self.supportsMCP = supportsMCP
+        self.supportsWorktree = supportsWorktree
+    }
+
     enum CodingKeys: String, CodingKey {
         case supportsAgentSelection
         case supportsReasoningEffort

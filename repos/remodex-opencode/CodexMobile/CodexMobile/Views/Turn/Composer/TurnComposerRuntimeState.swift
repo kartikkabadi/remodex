@@ -6,7 +6,7 @@
 
 import Foundation
 
-struct AgentOption: Equatable, Identifiable {
+struct AgentOption: Codable, Hashable, Sendable, Identifiable {
     let id: String
     let displayName: String
 

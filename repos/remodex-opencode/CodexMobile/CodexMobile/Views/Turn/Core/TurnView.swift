@@ -647,15 +647,15 @@ struct TurnView: View {
     }
 
     private var supportsDesktopHandoff: Bool {
-        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsDesktopHandoff ?? false
+        codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsDesktopHandoff ?? false
     }
 
     private var supportsApprovals: Bool {
-        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsApprovals ?? true
+        codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsApprovals ?? true
     }
 
     private var supportsWorktreeCap: Bool {
-        codex.selectedModelOption(threadId: thread.id)?.capabilities?.supportsWorktree ?? false
+        codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsWorktree ?? false
     }
 
     // MARK: - Bindings
