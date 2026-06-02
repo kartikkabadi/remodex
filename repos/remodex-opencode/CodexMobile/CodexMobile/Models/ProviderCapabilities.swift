@@ -21,6 +21,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsMCP: Bool
     let supportsWorktree: Bool
     let supportsSkillAutocomplete: Bool
+    let supportsStructuredSkillInput: Bool
     let supportsSteer: Bool
     let supportsQueue: Bool
 
@@ -38,6 +39,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsMCP: Bool,
         supportsWorktree: Bool,
         supportsSkillAutocomplete: Bool,
+        supportsStructuredSkillInput: Bool = false,
         supportsSteer: Bool,
         supportsQueue: Bool
     ) {
@@ -54,6 +56,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         self.supportsMCP = supportsMCP
         self.supportsWorktree = supportsWorktree
         self.supportsSkillAutocomplete = supportsSkillAutocomplete
+        self.supportsStructuredSkillInput = supportsStructuredSkillInput
         self.supportsSteer = supportsSteer
         self.supportsQueue = supportsQueue
     }
@@ -72,6 +75,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         case supportsMCP
         case supportsWorktree
         case supportsSkillAutocomplete
+        case supportsStructuredSkillInput
         case supportsSteer
         case supportsQueue
     }
@@ -91,6 +95,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsMCP = (try? container.decodeIfPresent(Bool.self, forKey: .supportsMCP)) ?? true
         supportsWorktree = (try? container.decodeIfPresent(Bool.self, forKey: .supportsWorktree)) ?? false
         supportsSkillAutocomplete = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillAutocomplete)) ?? false
+        supportsStructuredSkillInput =
+            (try? container.decodeIfPresent(Bool.self, forKey: .supportsStructuredSkillInput)) ?? false
         supportsSteer = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSteer)) ?? false
         supportsQueue = (try? container.decodeIfPresent(Bool.self, forKey: .supportsQueue)) ?? true
     }
@@ -110,6 +116,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         try container.encode(supportsMCP, forKey: .supportsMCP)
         try container.encode(supportsWorktree, forKey: .supportsWorktree)
         try container.encode(supportsSkillAutocomplete, forKey: .supportsSkillAutocomplete)
+        try container.encode(supportsStructuredSkillInput, forKey: .supportsStructuredSkillInput)
         try container.encode(supportsSteer, forKey: .supportsSteer)
         try container.encode(supportsQueue, forKey: .supportsQueue)
     }
@@ -128,7 +135,27 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsMCP: true,
         supportsWorktree: true,
         supportsSkillAutocomplete: true,
+        supportsStructuredSkillInput: true,
         supportsSteer: true,
+        supportsQueue: true
+    )
+
+    static let defaultOpenCode = ProviderCapabilities(
+        supportsAgentSelection: true,
+        supportsReasoningEffort: false,
+        supportsFastMode: false,
+        supportsPlanMode: false,
+        supportsStreamingTools: true,
+        supportsApprovals: true,
+        supportsFork: true,
+        supportsVoice: false,
+        supportsDesktopHandoff: false,
+        supportsSlashCommands: true,
+        supportsMCP: false,
+        supportsWorktree: false,
+        supportsSkillAutocomplete: true,
+        supportsStructuredSkillInput: false,
+        supportsSteer: false,
         supportsQueue: true
     )
 }

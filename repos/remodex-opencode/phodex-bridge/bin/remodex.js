@@ -45,14 +45,17 @@ if (require.main === module) {
 // ─── ENTRY POINT ─────────────────────────────────────────────
 
 // Runs the CLI process and turns expected configuration failures into readable terminal output.
-async function runCli({ mainImpl = main, consoleImpl = console, exitImpl = process.exit } = {}) {
+async function runCli({
+  mainImpl = main,
+  consoleImpl = console,
+  exitImpl = process.exit,
+} = {}) {
   try {
     await mainImpl();
   } catch (error) {
-    const rawMessage =
-      error && typeof error.message === "string"
-        ? error.message.trim()
-        : String(error || "Command failed");
+    const rawMessage = error && typeof error.message === "string"
+      ? error.message.trim()
+      : String(error || "Command failed");
     const message = rawMessage || "Command failed";
     consoleImpl.error(message.startsWith("[remodex]") ? message : `[remodex] ${message}`);
     exitImpl(1);
@@ -111,7 +114,7 @@ async function main({
         ok: true,
         currentVersion: version,
         plistPath: result?.plistPath,
-        pairingSession: result?.pairingSession,
+        pairingSession: sanitizePairingSessionForOutput(result?.pairingSession),
       },
       message: "[remodex] macOS bridge service is running.",
       jsonOutput,
@@ -132,7 +135,7 @@ async function main({
         ok: true,
         currentVersion: version,
         plistPath: result?.plistPath,
-        pairingSession: result?.pairingSession,
+        pairingSession: sanitizePairingSessionForOutput(result?.pairingSession),
       },
       message: "[remodex] macOS bridge service restarted.",
       jsonOutput,
@@ -147,10 +150,20 @@ async function main({
       consoleImpl,
       exitImpl,
     });
-    consoleImpl.log("[remodex] Refreshing bridge pairing QR...");
     const result = await deps.startMacOSBridgeService({
       waitForPairing: true,
     });
+    if (jsonOutput) {
+      emitJson({
+        ok: true,
+        currentVersion: version,
+        plistPath: result?.plistPath,
+        pairingSession: result?.pairingSession,
+      });
+      return;
+    }
+
+    consoleImpl.log("[remodex] Refreshing bridge pairing QR...");
     deps.printMacOSBridgePairingQr({
       pairingSession: result.pairingSession,
     });
@@ -184,7 +197,7 @@ async function main({
     });
     if (jsonOutput) {
       emitJson({
-        ...deps.getMacOSBridgeServiceStatus(),
+        ...sanitizeBridgeServiceStatusForOutput(deps.getMacOSBridgeServiceStatus()),
         currentVersion: version,
       });
       return;
@@ -203,8 +216,7 @@ async function main({
             currentVersion: version,
             platform: "darwin",
           },
-          message:
-            "[remodex] Stopped the macOS bridge service and cleared the saved pairing state. Run `remodex up` to pair again.",
+          message: "[remodex] Stopped the macOS bridge service and cleared the saved pairing state. Run `remodex up` to pair again.",
           jsonOutput,
           consoleImpl,
         });
@@ -222,9 +234,7 @@ async function main({
         });
       }
     } catch (error) {
-      consoleImpl.error(
-        `[remodex] ${(error && error.message) || "Failed to clear the saved pairing state."}`,
-      );
+      consoleImpl.error(`[remodex] ${(error && error.message) || "Failed to clear the saved pairing state."}`);
       exitImpl(1);
     }
     return;
@@ -245,9 +255,7 @@ async function main({
         consoleImpl,
       });
     } catch (error) {
-      consoleImpl.error(
-        `[remodex] ${(error && error.message) || "Failed to reopen the last thread."}`,
-      );
+      consoleImpl.error(`[remodex] ${(error && error.message) || "Failed to reopen the last thread."}`);
       exitImpl(1);
     }
     return;
@@ -257,9 +265,7 @@ async function main({
     try {
       deps.watchThreadRollout(watchThreadId);
     } catch (error) {
-      consoleImpl.error(
-        `[remodex] ${(error && error.message) || "Failed to watch the thread rollout."}`,
-      );
+      consoleImpl.error(`[remodex] ${(error && error.message) || "Failed to watch the thread rollout."}`);
       exitImpl(1);
     }
     return;
@@ -267,9 +273,9 @@ async function main({
 
   consoleImpl.error(`Unknown command: ${command}`);
   consoleImpl.error(
-    "Usage: remodex up | remodex run | remodex start | remodex restart | remodex qr | remodex pair | remodex stop | remodex status | " +
-      "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | " +
-      "append --json to start/restart/stop/status/reset-pairing/resume for machine-readable output",
+    "Usage: remodex up | remodex run | remodex start | remodex restart | remodex qr | remodex pair | remodex stop | remodex status | "
+    + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | "
+    + "append --json to start/restart/qr/pair/stop/status/reset-pairing/resume for machine-readable output"
   );
   exitImpl(1);
 }
@@ -294,7 +300,10 @@ function parseCliArgs(rawArgs) {
   };
 }
 
-function emitVersion({ jsonOutput = false, consoleImpl = console } = {}) {
+function emitVersion({
+  jsonOutput = false,
+  consoleImpl = console,
+} = {}) {
   if (jsonOutput) {
     emitJson({
       currentVersion: version,
@@ -305,7 +314,12 @@ function emitVersion({ jsonOutput = false, consoleImpl = console } = {}) {
   consoleImpl.log(version);
 }
 
-function emitResult({ payload, message, jsonOutput = false, consoleImpl = console } = {}) {
+function emitResult({
+  payload,
+  message,
+  jsonOutput = false,
+  consoleImpl = console,
+} = {}) {
   if (jsonOutput) {
     emitJson(payload);
     return;
@@ -318,28 +332,62 @@ function emitJson(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-function assertMacOSCommand(
-  name,
-  { platform = process.platform, consoleImpl = console, exitImpl = process.exit } = {},
-) {
+// Keeps machine-readable CLI output useful without exposing relay endpoints or live pairing payloads.
+function sanitizeBridgeServiceStatusForOutput(status = {}) {
+  const sanitized = {
+    ...status,
+    daemonConfig: sanitizeDaemonConfigForOutput(status.daemonConfig),
+    pairingSession: sanitizePairingSessionForOutput(status.pairingSession),
+  };
+  return sanitized;
+}
+
+function sanitizeDaemonConfigForOutput(config) {
+  if (!config || typeof config !== "object") {
+    return config || null;
+  }
+  const { relayUrl, pushServiceUrl, ...rest } = config;
+  return {
+    ...rest,
+    relayConfigured: Boolean(relayUrl),
+    pushServiceConfigured: Boolean(pushServiceUrl),
+  };
+}
+
+function sanitizePairingSessionForOutput(pairingSession) {
+  if (!pairingSession || typeof pairingSession !== "object") {
+    return pairingSession || null;
+  }
+  const payload = pairingSession.pairingPayload || {};
+  return {
+    createdAt: pairingSession.createdAt,
+    pairingCode: pairingSession.pairingCode,
+    pairingPayload: {
+      v: payload.v,
+      expiresAt: payload.expiresAt,
+      hasRelay: Boolean(payload.relay),
+      hasSessionId: Boolean(payload.sessionId),
+      hasMacIdentityPublicKey: Boolean(payload.macIdentityPublicKey),
+      displayName: payload.displayName,
+    },
+  };
+}
+
+function assertMacOSCommand(name, {
+  platform = process.platform,
+  consoleImpl = console,
+  exitImpl = process.exit,
+} = {}) {
   if (platform === "darwin") {
     return;
   }
 
-  consoleImpl.error(
-    `[remodex] \`${name}\` is only available on macOS. Use \`remodex up\` or \`remodex run\` for the foreground bridge on this OS.`,
-  );
+  consoleImpl.error(`[remodex] \`${name}\` is only available on macOS. Use \`remodex up\` or \`remodex run\` for the foreground bridge on this OS.`);
   exitImpl(1);
 }
 
 function isVersionCommand(value) {
-  return (
-    value === "-v" ||
-    value === "--v" ||
-    value === "-V" ||
-    value === "--version" ||
-    value === "version"
-  );
+  return value === "-v" || value === "--v" || value === "-V" || value === "--version" || value === "version";
 }
 
 module.exports = {

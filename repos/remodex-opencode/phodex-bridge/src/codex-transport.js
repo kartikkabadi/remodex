@@ -113,14 +113,12 @@ function createSpawnTransport({ env, appPath, platform, spawnImpl = spawn }) {
 
       if (!didRequestShutdown && !didReportError && code !== 0) {
         didReportError = true;
-        listeners.emitError(
-          createCodexCloseError({
-            code,
-            signal,
-            stderrBuffer,
-            launchDescription: launch.description,
-          }),
-        );
+        listeners.emitError(createCodexCloseError({
+          code,
+          signal,
+          stderrBuffer,
+          launchDescription: launch.description,
+        }));
         return;
       }
 
@@ -157,13 +155,12 @@ function createSpawnTransport({ env, appPath, platform, spawnImpl = spawn }) {
         return;
       }
       stdoutBuffer += chunk.toString("utf8");
-      const lines = stdoutBuffer.split("\n");
-      stdoutBuffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (trimmedLine) {
-          listeners.emitMessage(trimmedLine);
+      let newlineIndex;
+      while ((newlineIndex = stdoutBuffer.indexOf("\n")) !== -1) {
+        const line = stdoutBuffer.substring(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.substring(newlineIndex + 1);
+        if (line) {
+          listeners.emitMessage(line);
         }
       }
     });
@@ -185,27 +182,23 @@ function createCodexLaunchPlans({
   };
 
   if (platform === "win32") {
-    return [
-      {
-        command: env.ComSpec || "cmd.exe",
-        args: ["/d", "/c", "codex app-server"],
-        options: {
-          ...sharedOptions,
-          windowsHide: true,
-        },
-        description: "`cmd.exe /d /c codex app-server`",
+    return [{
+      command: env.ComSpec || "cmd.exe",
+      args: ["/d", "/c", "codex app-server"],
+      options: {
+        ...sharedOptions,
+        windowsHide: true,
       },
-    ];
+      description: "`cmd.exe /d /c codex app-server`",
+    }];
   }
 
-  const launches = [
-    {
-      command: "codex",
-      args: ["app-server"],
-      options: sharedOptions,
-      description: "`codex app-server`",
-    },
-  ];
+  const launches = [{
+    command: "codex",
+    args: ["app-server"],
+    options: sharedOptions,
+    description: "`codex app-server`",
+  }];
 
   const bundledCommand = buildBundledCodexPath(appPath, { fsImpl, pathImpl });
   if (bundledCommand) {
@@ -260,14 +253,11 @@ function shutdownCodexProcess(codex) {
 
 function createCodexCloseError({ code, signal, stderrBuffer, launchDescription }) {
   const details = stderrBuffer.trim();
-  const reason =
-    details || `Process exited with code ${code}${signal ? ` (signal: ${signal})` : ""}.`;
-  return new Error(
-    formatCodexLaunchFailure({
-      launchDescription,
-      reason,
-    }),
-  );
+  const reason = details || `Process exited with code ${code}${signal ? ` (signal: ${signal})` : ""}.`;
+  return new Error(formatCodexLaunchFailure({
+    launchDescription,
+    reason,
+  }));
 }
 
 // Turns common Codex auth/config failures into recovery guidance without handling secrets in Remodex.
@@ -288,9 +278,7 @@ function formatCodexLaunchFailure({ launchDescription, reason }) {
 }
 
 function extractMissingEnvironmentVariable(reason) {
-  const match = String(reason || "").match(
-    /Missing environment variable:\s*`?([A-Za-z_][A-Za-z0-9_]*)`?/i,
-  );
+  const match = String(reason || "").match(/Missing environment variable:\s*`?([A-Za-z_][A-Za-z0-9_]*)`?/i);
   return match ? match[1] : "";
 }
 

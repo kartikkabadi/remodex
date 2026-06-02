@@ -87,7 +87,7 @@ test("spawn launch plans add the bundled Codex app binary as a fallback on macOS
 
     assert.deepEqual(
       launches.map((launch) => launch.command),
-      ["codex", bundledCodexPath],
+      ["codex", bundledCodexPath]
     );
     assert.equal(launches[1].description, `\`${bundledCodexPath} app-server\``);
   } finally {
@@ -182,10 +182,7 @@ test("spawn transport explains Codex API-key environment failures without asking
     reportedError = error;
   });
 
-  children[0].emitStderr(
-    "data",
-    Buffer.from("Error: Missing environment variable: `CODEX_API_KEY`.\n"),
-  );
+  children[0].emitStderr("data", Buffer.from("Error: Missing environment variable: `CODEX_API_KEY`.\n"));
   children[0].emit("close", 1, null);
 
   assert.ok(reportedError);
@@ -198,7 +195,7 @@ test("spawn transport explains Codex API-key environment failures without asking
 test("missing environment variable diagnostics are extracted from Codex stderr", () => {
   assert.equal(
     extractMissingEnvironmentVariable("Error: Missing environment variable: `CODEX_API_KEY`."),
-    "CODEX_API_KEY",
+    "CODEX_API_KEY"
   );
   assert.equal(extractMissingEnvironmentVariable("Process exited with code 1."), "");
 

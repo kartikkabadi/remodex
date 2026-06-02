@@ -116,3 +116,26 @@ test("OpenCode catalog keeps supportsDesktopHandoff false until device E2E (PR8)
     false,
   );
 });
+
+test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR1)", () => {
+  const capabilities = resolveOpenCodeCatalogCapabilities({});
+  const expected = {
+    supportsAgentSelection: true,
+    supportsReasoningEffort: false,
+    supportsFastMode: false,
+    supportsPlanMode: false,
+    supportsVoice: false,
+    supportsDesktopHandoff: false,
+    supportsWorktree: false,
+    supportsFork: true,
+    supportsApprovals: true,
+    supportsStreamingTools: true,
+    supportsSlashCommands: true,
+    supportsMCP: false,
+    supportsSkillAutocomplete: true,
+    supportsStructuredSkillInput: false,
+    supportsSteer: false,
+    supportsQueue: true,
+  };
+  assert.deepEqual(capabilities, expected);
+});

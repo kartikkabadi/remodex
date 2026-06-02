@@ -5,7 +5,6 @@
 // Depends on: ./rollout-watch
 
 const { readLatestContextWindowUsage } = require("./rollout-watch");
-const { readStringOrNull } = require("./normalize");
 
 function handleThreadContextRequest(rawMessage, sendResponse) {
   let parsed;
@@ -38,7 +37,7 @@ function handleThreadContextRequest(rawMessage, sendResponse) {
             message,
             data: { errorCode },
           },
-        }),
+        })
       );
     });
 
@@ -47,12 +46,12 @@ function handleThreadContextRequest(rawMessage, sendResponse) {
 
 // Reads the newest rollout-backed usage snapshot and returns it in the app-facing shape.
 async function handleThreadContextRead(params) {
-  const threadId = readStringOrNull(params.threadId) || readStringOrNull(params.thread_id);
+  const threadId = readString(params.threadId) || readString(params.thread_id);
   if (!threadId) {
     throw threadContextError("missing_thread_id", "thread/contextWindow/read requires a threadId.");
   }
 
-  const turnId = readStringOrNull(params.turnId) || readStringOrNull(params.turn_id);
+  const turnId = readString(params.turnId) || readString(params.turn_id);
   const result = readLatestContextWindowUsage({
     threadId,
     turnId,
@@ -63,6 +62,10 @@ async function handleThreadContextRead(params) {
     usage: result?.usage ?? null,
     rolloutPath: result?.rolloutPath ?? null,
   };
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function threadContextError(errorCode, userMessage) {

@@ -19,25 +19,19 @@ function composeAccountStatus({
   const account = accountRead?.account || null;
   const authToken = normalizeString(authStatus?.authToken);
   const hasAccountLogin = hasExplicitAccountLogin(account);
-  const authMethod =
-    firstNonEmpty([normalizeString(authStatus?.authMethod), normalizeString(account?.type)]) ||
-    null;
+  const authMethod = firstNonEmpty([
+    normalizeString(authStatus?.authMethod),
+    normalizeString(account?.type),
+  ]) || null;
   const tokenReady = Boolean(authToken);
-  const requiresOpenaiAuth = Boolean(
-    accountRead?.requiresOpenaiAuth || authStatus?.requiresOpenaiAuth,
-  );
+  const requiresOpenaiAuth = Boolean(accountRead?.requiresOpenaiAuth || authStatus?.requiresOpenaiAuth);
   const hasPriorLoginContext = hasAccountLogin || Boolean(authMethod);
   const hasUsableChatGPTToken = tokenReady && isChatGPTAuthMethod(authMethod);
-  const needsReauth =
-    !loginInFlight && requiresOpenaiAuth && hasPriorLoginContext && !hasUsableChatGPTToken;
+  const needsReauth = !loginInFlight && requiresOpenaiAuth && hasPriorLoginContext && !hasUsableChatGPTToken;
   const isAuthenticated = !needsReauth && (tokenReady || hasAccountLogin);
   const status = isAuthenticated
     ? "authenticated"
-    : loginInFlight
-      ? "pending_login"
-      : needsReauth
-        ? "expired"
-        : "not_logged_in";
+    : (loginInFlight ? "pending_login" : (needsReauth ? "expired" : "not_logged_in"));
 
   return {
     status,
@@ -49,11 +43,10 @@ function composeAccountStatus({
     tokenReady,
     expiresAt: null,
     requiresOpenaiAuth,
-    bridgeVersion:
-      firstNonEmpty([
-        normalizeString(bridgeVersionInfo?.bridgeVersion),
-        normalizeString(bridgePackageVersion),
-      ]) || null,
+    bridgeVersion: firstNonEmpty([
+      normalizeString(bridgeVersionInfo?.bridgeVersion),
+      normalizeString(bridgePackageVersion),
+    ]) || null,
     bridgeLatestVersion: normalizeString(bridgeVersionInfo?.bridgeLatestVersion) || null,
     codexTransportMode: normalizeString(transportMode) || null,
     hostPlatform: normalizeHostPlatform(hostPlatform),
@@ -130,11 +123,7 @@ function hasExplicitAccountLogin(account) {
     return false;
   }
 
-  if (
-    parseBoolean(account.loggedIn) ||
-    parseBoolean(account.logged_in) ||
-    parseBoolean(account.isLoggedIn)
-  ) {
+  if (parseBoolean(account.loggedIn) || parseBoolean(account.logged_in) || parseBoolean(account.isLoggedIn)) {
     return true;
   }
 

@@ -12,6 +12,7 @@ const assert = require("node:assert/strict");
 const {
   loadOrCreateBridgeDeviceState,
   readBridgeDeviceState,
+  rememberLastSeenClientDeviceKind,
   rememberLastSeenPhoneAppVersion,
   rememberTrustedPhone,
   resetBridgeDeviceState,
@@ -38,9 +39,12 @@ test("resolveBridgeRelaySession always creates a fresh relay session", () => {
 test("rememberTrustedPhone stores the trusted phone identity", () => {
   const state = makeDeviceState();
 
-  const nextState = rememberTrustedPhone(state, "phone-3", "phone-public-key-3", {
-    persist: false,
-  });
+  const nextState = rememberTrustedPhone(
+    state,
+    "phone-3",
+    "phone-public-key-3",
+    { persist: false }
+  );
 
   assert.deepEqual(nextState.trustedPhones, {
     "phone-3": "phone-public-key-3",
@@ -54,9 +58,12 @@ test("rememberTrustedPhone replaces the previous trusted phone identity", () => 
     },
   });
 
-  const nextState = rememberTrustedPhone(state, "phone-new", "phone-public-key-new", {
-    persist: false,
-  });
+  const nextState = rememberTrustedPhone(
+    state,
+    "phone-new",
+    "phone-public-key-new",
+    { persist: false }
+  );
 
   assert.deepEqual(nextState.trustedPhones, {
     "phone-new": "phone-public-key-new",
@@ -66,9 +73,39 @@ test("rememberTrustedPhone replaces the previous trusted phone identity", () => 
 test("rememberLastSeenPhoneAppVersion stores the latest App Store version", () => {
   const state = makeDeviceState();
 
-  const nextState = rememberLastSeenPhoneAppVersion(state, "1.0", { persist: false });
+  const nextState = rememberLastSeenPhoneAppVersion(
+    state,
+    "1.0",
+    { persist: false }
+  );
 
   assert.equal(nextState.lastSeenPhoneAppVersion, "1.0");
+});
+
+test("rememberLastSeenClientDeviceKind stores a normalized companion platform", () => {
+  const state = makeDeviceState();
+
+  const nextState = rememberLastSeenClientDeviceKind(
+    state,
+    "android",
+    { persist: false }
+  );
+
+  assert.equal(nextState.lastSeenDeviceKind, "android");
+});
+
+test("normalizeBridgeDeviceState treats legacy app-version state as iPhone", () => {
+  withTempDeviceStateEnv(() => {
+    const legacyState = makeDeviceState({
+      lastSeenDeviceKind: undefined,
+      lastSeenPhoneAppVersion: "1.6",
+    });
+    writeStateToDisk(legacyState);
+
+    const state = readBridgeDeviceState();
+
+    assert.equal(state.lastSeenDeviceKind, "iphone");
+  });
 });
 
 test("loadOrCreateBridgeDeviceState writes and reloads the canonical file state", () => {
@@ -118,7 +155,7 @@ test("loadOrCreateBridgeDeviceState replaces a corrupted legacy Keychain mirror 
     assert.deepEqual(readCanonicalStateFromDisk(), stripUndefined(loadedState));
     assert.deepEqual(
       JSON.parse(fs.readFileSync(keychainMirrorFile, "utf8")),
-      stripUndefined(loadedState),
+      stripUndefined(loadedState)
     );
     assert.equal(fs.existsSync(canonicalStateFile), true);
   });
@@ -149,16 +186,19 @@ test("loadOrCreateBridgeDeviceState throws when the canonical file is corrupted 
 
     assert.throws(
       () => loadOrCreateBridgeDeviceState(),
-      /saved Remodex pairing state in device-state\.json is unreadable/i,
+      /saved Remodex pairing state in device-state\.json is unreadable/i
     );
   });
 });
 
 test("resolveBridgeRelaySession does not persist the fresh launch session id", () => {
   withTempDeviceStateEnv(() => {
-    const trustedState = rememberTrustedPhone(makeDeviceState(), "phone-5", "phone-public-key-5", {
-      persist: true,
-    });
+    const trustedState = rememberTrustedPhone(
+      makeDeviceState(),
+      "phone-5",
+      "phone-public-key-5",
+      { persist: true }
+    );
 
     const resolved = resolveBridgeRelaySession(trustedState);
     const reloaded = loadOrCreateBridgeDeviceState();
@@ -173,7 +213,11 @@ test("resolveBridgeRelaySession does not persist the fresh launch session id", (
 
 test("rememberLastSeenPhoneAppVersion persists across reloads", () => {
   withTempDeviceStateEnv(() => {
-    rememberLastSeenPhoneAppVersion(makeDeviceState(), "1.1", { persist: true });
+    rememberLastSeenPhoneAppVersion(
+      makeDeviceState(),
+      "1.1",
+      { persist: true }
+    );
 
     const reloaded = loadOrCreateBridgeDeviceState();
     assert.equal(reloaded.lastSeenPhoneAppVersion, "1.1");
@@ -243,6 +287,7 @@ function makeDeviceState(overrides = {}) {
     macIdentityPublicKey: "mac-public-key",
     macIdentityPrivateKey: "mac-private-key",
     trustedPhones: {},
+    lastSeenDeviceKind: null,
     lastSeenPhoneAppVersion: null,
     ...overrides,
   };

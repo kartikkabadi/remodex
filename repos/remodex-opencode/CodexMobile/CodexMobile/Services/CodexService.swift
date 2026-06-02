@@ -465,6 +465,7 @@ final class CodexService {
     var defaultOpenCodeAgentId: String?
     var availableAgents: [AgentOption] = []
     var availableRuntimes: [RuntimeInfo] = []
+    @ObservationIgnored var slashCommandCacheByDirectory: [String: SlashCommandCacheEntry] = [:]
     // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
     var gptAccountSnapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot() {
         didSet {

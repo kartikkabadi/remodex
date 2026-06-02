@@ -169,6 +169,14 @@ function createRuntimeProviderRouter({
       return false;
     }
 
+    const ownershipMismatch = resolveThreadOwnershipMismatch(parsed, threadOwnership);
+    if (ownershipMismatch) {
+      respondAsync(parsed, async () => {
+        throw ownershipMismatch;
+      });
+      return true;
+    }
+
     const provider = providerForRequest(parsed, runtimeProviders);
     if (!provider) {
       return false;
@@ -293,6 +301,38 @@ async function listProviderThreads(providers, params) {
     const payload = result.value;
     return Array.isArray(payload?.data) ? payload.data : [];
   });
+}
+
+function resolveThreadOwnershipMismatch(request, ownershipStore) {
+  const params = request.params || {};
+  const threadId = readThreadId(params);
+  if (!threadId) {
+    return null;
+  }
+
+  const storedProvider = ownershipStore.getOwnership(threadId);
+  if (!storedProvider) {
+    return null;
+  }
+
+  const requestedProvider = readModelProvider(params);
+  if (!requestedProvider) {
+    return null;
+  }
+
+  const normalizedRequested = isOpenCodeProvider(requestedProvider)
+    ? OPENCODE_PROVIDER_ID
+    : CODEX_PROVIDER_ID;
+  if (storedProvider === normalizedRequested) {
+    return null;
+  }
+
+  const error = new Error(
+    `Thread ${threadId} is owned by ${storedProvider}, not ${normalizedRequested}`,
+  );
+  error.errorCode = "thread_provider_mismatch";
+  error.userMessage = `This chat is tied to ${storedProvider}. Start a new chat to switch providers.`;
+  return error;
 }
 
 function providerForRequest(request, providers) {

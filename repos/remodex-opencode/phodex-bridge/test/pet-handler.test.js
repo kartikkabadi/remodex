@@ -37,7 +37,7 @@ test("pet/list reports invalid packages without failing the whole list", async (
   fs.mkdirSync(badRoot, { recursive: true });
   fs.writeFileSync(
     path.join(badRoot, "pet.json"),
-    JSON.stringify({ displayName: "Bad One", spritesheetPath: "../escape.webp" }),
+    JSON.stringify({ displayName: "Bad One", spritesheetPath: "../escape.webp" })
   );
 
   const result = await handlePetMethod("pet/list", {});
@@ -78,9 +78,10 @@ test("pet/read rejects unsafe pet ids", async () => {
   const home = makeTempCodexHome();
   process.env.CODEX_HOME = home;
 
-  await assert.rejects(() => handlePetMethod("pet/read", { id: "custom:../escape" }), {
-    errorCode: "pet_id_invalid",
-  });
+  await assert.rejects(
+    () => handlePetMethod("pet/read", { id: "custom:../escape" }),
+    { errorCode: "pet_id_invalid" }
+  );
 });
 
 test("pet/read rejects valid-dimension spritesheets that are too large", async () => {
@@ -88,9 +89,10 @@ test("pet/read rejects valid-dimension spritesheets that are too large", async (
   process.env.CODEX_HOME = home;
   writePetPackage(home, "too-large", { displayName: "Too Large" }, 16 * 1024 * 1024 + 1);
 
-  await assert.rejects(() => handlePetMethod("pet/read", { id: "custom:too-large" }), {
-    errorCode: "pet_spritesheet_too_large",
-  });
+  await assert.rejects(
+    () => handlePetMethod("pet/read", { id: "custom:too-large" }),
+    { errorCode: "pet_spritesheet_too_large" }
+  );
 });
 
 test("pet/read falls back to a legacy avatar when the matching pet is invalid", async () => {
@@ -101,7 +103,7 @@ test("pet/read falls back to a legacy avatar when the matching pet is invalid", 
   fs.mkdirSync(badRoot, { recursive: true });
   fs.writeFileSync(
     path.join(badRoot, "pet.json"),
-    JSON.stringify({ displayName: "Broken Pet", spritesheetPath: "../escape.webp" }),
+    JSON.stringify({ displayName: "Broken Pet", spritesheetPath: "../escape.webp" })
   );
   writeAvatarPackage(home, "same-name", { displayName: "Legacy Avatar" });
 
@@ -142,12 +144,9 @@ function writePetPackage(home, slug, manifest, spritesheetByteLength) {
       description: "A test pet.",
       spritesheetPath: "spritesheet.png",
       ...manifest,
-    }),
+    })
   );
-  fs.writeFileSync(
-    path.join(root, "spritesheet.png"),
-    fakePngData(1536, 1872, spritesheetByteLength),
-  );
+  fs.writeFileSync(path.join(root, "spritesheet.png"), fakePngData(1536, 1872, spritesheetByteLength));
 }
 
 function writeAvatarPackage(home, slug, manifest) {
@@ -161,7 +160,7 @@ function writeAvatarPackage(home, slug, manifest) {
       description: "A test avatar.",
       spritesheetPath: "spritesheet.png",
       ...manifest,
-    }),
+    })
   );
   fs.writeFileSync(path.join(root, "spritesheet.png"), fakePngData(1536, 1872));
 }

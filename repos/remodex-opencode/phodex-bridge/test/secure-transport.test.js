@@ -61,7 +61,7 @@ test("secure transport rejects plaintext JSON-RPC before the secure handshake", 
       onApplicationMessage() {
         throw new Error("plaintext application payload should not be forwarded");
       },
-    },
+    }
   );
 
   assert.equal(handled, true);
@@ -113,7 +113,7 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
       onApplicationMessage(message) {
         applicationMessages.push(message);
       },
-    },
+    }
   );
 
   const serverHello = controlMessages.find((message) => message.kind === "serverHello");
@@ -150,7 +150,7 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
         x: base64ToBase64Url(phoneIdentity.publicKey),
       },
       format: "jwk",
-    }),
+    })
   );
 
   secureTransport.handleIncomingWireMessage(
@@ -168,7 +168,7 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
       onApplicationMessage(message) {
         applicationMessages.push(message);
       },
-    },
+    }
   );
 
   const secureReady = controlMessages.find((message) => message.kind === "secureReady");
@@ -196,10 +196,10 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
   const salt = createHash("sha256").update(transcriptBytes).digest();
   const infoPrefix = `remodex-e2ee-v1|session-2|mac-2|phone-2|${serverHello.keyEpoch}`;
   const phoneToMacKey = Buffer.from(
-    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|phoneToMac`, "utf8"), 32),
+    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|phoneToMac`, "utf8"), 32)
   );
   const macToPhoneKey = Buffer.from(
-    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32),
+    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32)
   );
 
   secureTransport.handleIncomingWireMessage(
@@ -216,24 +216,21 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
       onApplicationMessage(message) {
         applicationMessages.push(message);
       },
-    },
+    }
   );
 
   secureTransport.queueOutboundApplicationMessage(
     JSON.stringify({ id: "response-1", result: { ok: true } }),
     (message) => {
       wireMessages.push(message);
-    },
+    }
   );
   assert.equal(wireMessages.length, 1);
 
   const outboundEnvelope = JSON.parse(wireMessages[0]);
   const outboundPayload = decryptEnvelope(outboundEnvelope, macToPhoneKey);
   assert.equal(outboundPayload.bridgeOutboundSeq, 1);
-  assert.equal(
-    outboundPayload.payloadText,
-    JSON.stringify({ id: "response-1", result: { ok: true } }),
-  );
+  assert.equal(outboundPayload.payloadText, JSON.stringify({ id: "response-1", result: { ok: true } }));
 
   const inboundEnvelope = encryptEnvelope(
     {
@@ -243,16 +240,19 @@ test("secure transport round-trips encrypted payloads after a trusted reconnect 
     "iphone",
     0,
     "session-2",
-    serverHello.keyEpoch,
+    serverHello.keyEpoch
   );
-  secureTransport.handleIncomingWireMessage(JSON.stringify(inboundEnvelope), {
-    sendControlMessage(message) {
-      controlMessages.push(message);
-    },
-    onApplicationMessage(message) {
-      applicationMessages.push(message);
-    },
-  });
+  secureTransport.handleIncomingWireMessage(
+    JSON.stringify(inboundEnvelope),
+    {
+      sendControlMessage(message) {
+        controlMessages.push(message);
+      },
+      onApplicationMessage(message) {
+        applicationMessages.push(message);
+      },
+    }
+  );
 
   assert.deepEqual(applicationMessages, [
     JSON.stringify({ id: "request-1", method: "thread/list", params: {} }),
@@ -337,7 +337,7 @@ test("qr bootstrap starts a fresh replay window instead of leaking buffered mess
     JSON.stringify({ id: "stale-response", result: { ok: true } }),
     (message) => {
       wireMessages.push(message);
-    },
+    }
   );
   assert.equal(wireMessages.length, 1);
 
@@ -405,13 +405,13 @@ test("rebinding the relay socket replays bridge output from the last phone ack",
   const salt = createHash("sha256").update(transcriptBytes).digest();
   const infoPrefix = `remodex-e2ee-v1|session-5|mac-5|phone-5|${serverHello.keyEpoch}`;
   const macToPhoneKey = Buffer.from(
-    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32),
+    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32)
   );
 
   secureTransport.bindLiveSendWireMessage(() => false);
   secureTransport.queueOutboundApplicationMessage(
     JSON.stringify({ id: "response-5", result: { ok: true } }),
-    () => false,
+    () => false
   );
 
   const firstRecoveryWireMessages = [];
@@ -424,17 +424,14 @@ test("rebinding the relay socket replays bridge output from the last phone ack",
   const outboundEnvelope = JSON.parse(firstRecoveryWireMessages[0]);
   const outboundPayload = decryptEnvelope(outboundEnvelope, macToPhoneKey);
   assert.equal(outboundPayload.bridgeOutboundSeq, 1);
-  assert.equal(
-    outboundPayload.payloadText,
-    JSON.stringify({ id: "response-5", result: { ok: true } }),
-  );
+  assert.equal(outboundPayload.payloadText, JSON.stringify({ id: "response-5", result: { ok: true } }));
 
   const liveWireMessages = [];
   secureTransport.queueOutboundApplicationMessage(
     JSON.stringify({ id: "response-6", result: { ok: true } }),
     () => {
       throw new Error("expected active relay sender to handle resumed output");
-    },
+    }
   );
 
   secureTransport.bindLiveSendWireMessage((message) => {
@@ -449,7 +446,7 @@ test("rebinding the relay socket replays bridge output from the last phone ack",
   });
   assert.deepEqual(
     replayedPayloads.map((payload) => payload.bridgeOutboundSeq),
-    [1, 2],
+    [1, 2]
   );
 });
 
@@ -491,7 +488,7 @@ test("resume replay does not advance the replay watermark before a phone ack", (
     JSON.stringify({ id: "response-6", result: { ok: true } }),
     () => {
       throw new Error("expected bound sender to stay attached after secureReady");
-    },
+    }
   );
 
   secureTransport.handleIncomingWireMessage(
@@ -504,7 +501,7 @@ test("resume replay does not advance the replay watermark before a phone ack", (
     {
       sendControlMessage() {},
       onApplicationMessage() {},
-    },
+    }
   );
 
   const sharedSecret = diffieHellman({
@@ -529,7 +526,7 @@ test("resume replay does not advance the replay watermark before a phone ack", (
   const salt = createHash("sha256").update(transcriptBytes).digest();
   const infoPrefix = `remodex-e2ee-v1|session-6|mac-6|phone-6|${serverHello.keyEpoch}`;
   const macToPhoneKey = Buffer.from(
-    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32),
+    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32)
   );
 
   assert.equal(initialReplayWireMessages.length, 1);
@@ -544,10 +541,7 @@ test("resume replay does not advance the replay watermark before a phone ack", (
   const reboundEnvelope = JSON.parse(reboundWireMessages[0]);
   const reboundPayload = decryptEnvelope(reboundEnvelope, macToPhoneKey);
   assert.equal(reboundPayload.bridgeOutboundSeq, 1);
-  assert.equal(
-    reboundPayload.payloadText,
-    JSON.stringify({ id: "response-6", result: { ok: true } }),
-  );
+  assert.equal(reboundPayload.payloadText, JSON.stringify({ id: "response-6", result: { ok: true } }));
 });
 
 test("resume replay keeps current handshake output when the phone cursor is stale", () => {
@@ -590,7 +584,7 @@ test("resume replay keeps current handshake output when the phone cursor is stal
     JSON.stringify({ id: "initialize", result: { ok: true } }),
     () => {
       throw new Error("expected buffered initialize response to wait for resumeState");
-    },
+    }
   );
 
   secureTransport.handleIncomingWireMessage(
@@ -603,7 +597,7 @@ test("resume replay keeps current handshake output when the phone cursor is stal
     {
       sendControlMessage() {},
       onApplicationMessage() {},
-    },
+    }
   );
 
   const macToPhoneKey = deriveMacToPhoneKey({
@@ -618,10 +612,7 @@ test("resume replay keeps current handshake output when the phone cursor is stal
   const outboundEnvelope = JSON.parse(replayWireMessages[0]);
   const outboundPayload = decryptEnvelope(outboundEnvelope, macToPhoneKey);
   assert.equal(outboundPayload.bridgeOutboundSeq, 1);
-  assert.equal(
-    outboundPayload.payloadText,
-    JSON.stringify({ id: "initialize", result: { ok: true } }),
-  );
+  assert.equal(outboundPayload.payloadText, JSON.stringify({ id: "initialize", result: { ok: true } }));
 });
 
 function finishHandshake({
@@ -658,7 +649,7 @@ function finishHandshake({
       onApplicationMessage(message) {
         applicationMessages.push(message);
       },
-    },
+    }
   );
 
   const serverHello = controlMessages.find((message) => message.kind === "serverHello");
@@ -694,7 +685,7 @@ function finishHandshake({
         x: base64ToBase64Url(phoneIdentity.publicKey),
       },
       format: "jwk",
-    }),
+    })
   );
 
   secureTransport.handleIncomingWireMessage(
@@ -712,7 +703,7 @@ function finishHandshake({
       onApplicationMessage(message) {
         applicationMessages.push(message);
       },
-    },
+    }
   );
 
   const secureReady = controlMessages.find((message) => message.kind === "secureReady");
@@ -733,7 +724,7 @@ function finishHandshake({
         onApplicationMessage(message) {
           applicationMessages.push(message);
         },
-      },
+      }
     );
   }
 
@@ -853,7 +844,7 @@ function deriveMacToPhoneKey({
   const salt = createHash("sha256").update(transcriptBytes).digest();
   const infoPrefix = `remodex-e2ee-v1|${sessionId}|${macDeviceId}|${phoneDeviceId}|${serverHello.keyEpoch}`;
   return Buffer.from(
-    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32),
+    hkdfSync("sha256", sharedSecret, salt, Buffer.from(`${infoPrefix}|macToPhone`, "utf8"), 32)
   );
 }
 

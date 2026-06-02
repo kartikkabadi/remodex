@@ -1,7 +1,7 @@
 // FILE: secure-device-state.js
-// Purpose: Persists canonical bridge identity, trusted-phone state, and last seen iPhone app version for local QR pairing.
+// Purpose: Persists canonical bridge identity, trusted mobile state, and last seen companion metadata for local QR pairing.
 // Layer: CLI helper
-// Exports: loadOrCreateBridgeDeviceState, readBridgeDeviceState, resetBridgeDeviceState, resetBridgeTrustState, rememberTrustedPhone, rememberLastSeenPhoneAppVersion, getTrustedPhonePublicKey, resolveBridgeRelaySession
+// Exports: loadOrCreateBridgeDeviceState, readBridgeDeviceState, resetBridgeDeviceState, resetBridgeTrustState, rememberTrustedPhone, rememberLastSeenPhoneAppVersion, rememberLastSeenClientDeviceKind, getTrustedPhonePublicKey, resolveBridgeRelaySession
 // Depends on: fs, os, path, crypto, child_process
 
 const fs = require("fs");
@@ -11,6 +11,7 @@ const { randomUUID, generateKeyPairSync } = require("crypto");
 const { execFileSync } = require("child_process");
 
 const DEFAULT_STORE_DIR = path.join(os.homedir(), ".remodex");
+const DEFAULT_STORE_FILE = path.join(DEFAULT_STORE_DIR, "device-state.json");
 const KEYCHAIN_SERVICE = "com.remodex.bridge.device-state";
 const KEYCHAIN_ACCOUNT = "default";
 let hasLoggedKeychainMismatch = false;
@@ -28,7 +29,7 @@ function loadOrCreateBridgeDeviceState() {
   if (fileRecord.error) {
     if (keychainRecord.state) {
       warnOnce(
-        "[remodex] Recovering the canonical device-state.json from the legacy Keychain pairing mirror.",
+        "[remodex] Recovering the canonical device-state.json from the legacy Keychain pairing mirror."
       );
       writeBridgeDeviceState(keychainRecord.state);
       return keychainRecord.state;
@@ -38,7 +39,7 @@ function loadOrCreateBridgeDeviceState() {
 
   if (keychainRecord.error) {
     warnOnce(
-      "[remodex] Ignoring unreadable legacy Keychain pairing mirror; generating a fresh canonical device-state.json.",
+      "[remodex] Ignoring unreadable legacy Keychain pairing mirror; generating a fresh canonical device-state.json."
     );
     const nextState = createBridgeDeviceState();
     writeBridgeDeviceState(nextState);
@@ -101,7 +102,7 @@ function resetBridgeTrustState() {
 }
 
 // Generates a fresh relay session for every bridge launch so QR pairing stays explicit per-run.
-function resolveBridgeRelaySession(state, { persist: _persist = true } = {}) {
+function resolveBridgeRelaySession(state, { persist = true } = {}) {
   return {
     deviceState: state,
     isPersistent: false,
@@ -110,12 +111,7 @@ function resolveBridgeRelaySession(state, { persist: _persist = true } = {}) {
 }
 
 // Persists the one trusted mobile identity allowed to reconnect without scanning a new QR code.
-function rememberTrustedPhone(
-  state,
-  phoneDeviceId,
-  phoneIdentityPublicKey,
-  { persist = true } = {},
-) {
+function rememberTrustedPhone(state, phoneDeviceId, phoneIdentityPublicKey, { persist = true } = {}) {
   const normalizedDeviceId = normalizeNonEmptyString(phoneDeviceId);
   const normalizedPublicKey = normalizeNonEmptyString(phoneIdentityPublicKey);
   if (!normalizedDeviceId || !normalizedPublicKey) {
@@ -150,12 +146,32 @@ function rememberLastSeenPhoneAppVersion(state, phoneAppVersion, { persist = tru
   return nextState;
 }
 
+function rememberLastSeenClientDeviceKind(state, deviceKind, { persist = true } = {}) {
+  const normalizedDeviceKind = normalizeDeviceKind(deviceKind);
+  if (!normalizedDeviceKind) {
+    return state;
+  }
+
+  const nextState = normalizeBridgeDeviceState({
+    ...state,
+    lastSeenDeviceKind: normalizedDeviceKind,
+  });
+  if (persist) {
+    writeBridgeDeviceState(nextState);
+  }
+  return nextState;
+}
+
 function getTrustedPhonePublicKey(state, phoneDeviceId) {
   const normalizedDeviceId = normalizeNonEmptyString(phoneDeviceId);
   if (!normalizedDeviceId) {
     return null;
   }
   return state.trustedPhones?.[normalizedDeviceId] || null;
+}
+
+function hasTrustedPhones(state) {
+  return Object.keys(state?.trustedPhones || {}).length > 0;
 }
 
 function createBridgeDeviceState() {
@@ -169,6 +185,7 @@ function createBridgeDeviceState() {
     macIdentityPublicKey: base64UrlToBase64(publicJwk.x),
     macIdentityPrivateKey: base64UrlToBase64(privateJwk.d),
     trustedPhones: {},
+    lastSeenDeviceKind: null,
     lastSeenPhoneAppVersion: null,
   };
 }
@@ -231,10 +248,8 @@ function resolveStoreDir() {
 }
 
 function resolveStoreFile() {
-  return (
-    normalizeNonEmptyString(process.env.REMODEX_DEVICE_STATE_FILE) ||
-    path.join(resolveStoreDir(), "device-state.json")
-  );
+  return normalizeNonEmptyString(process.env.REMODEX_DEVICE_STATE_FILE)
+    || path.join(resolveStoreDir(), "device-state.json");
 }
 
 function resolveKeychainMirrorFile() {
@@ -258,8 +273,15 @@ function readKeychainStateString() {
   try {
     return execFileSync(
       "security",
-      ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      [
+        "find-generic-password",
+        "-s",
+        KEYCHAIN_SERVICE,
+        "-a",
+        KEYCHAIN_ACCOUNT,
+        "-w",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
   } catch {
     return null;
@@ -285,8 +307,17 @@ function writeKeychainStateString(value) {
   try {
     execFileSync(
       "security",
-      ["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", value],
-      { stdio: ["ignore", "ignore", "ignore"] },
+      [
+        "add-generic-password",
+        "-U",
+        "-s",
+        KEYCHAIN_SERVICE,
+        "-a",
+        KEYCHAIN_ACCOUNT,
+        "-w",
+        value,
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] }
     );
     return true;
   } catch {
@@ -313,8 +344,14 @@ function deleteKeychainStateString() {
   try {
     execFileSync(
       "security",
-      ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT],
-      { stdio: ["ignore", "ignore", "ignore"] },
+      [
+        "delete-generic-password",
+        "-s",
+        KEYCHAIN_SERVICE,
+        "-a",
+        KEYCHAIN_ACCOUNT,
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] }
     );
     return true;
   } catch {
@@ -336,9 +373,7 @@ function deleteCanonicalFileState() {
 // Prefers the canonical file, but repairs or warns about stale legacy Keychain mirrors.
 function reconcileLegacyKeychainMirror(canonicalState, keychainRecord) {
   if (keychainRecord.error) {
-    warnOnce(
-      "[remodex] Ignoring unreadable legacy Keychain pairing mirror; using canonical device-state.json.",
-    );
+    warnOnce("[remodex] Ignoring unreadable legacy Keychain pairing mirror; using canonical device-state.json.");
     return;
   }
 
@@ -351,9 +386,7 @@ function reconcileLegacyKeychainMirror(canonicalState, keychainRecord) {
     return;
   }
 
-  warnOnce(
-    "[remodex] Canonical bridge pairing state differs from the legacy Keychain mirror; using device-state.json.",
-  );
+  warnOnce("[remodex] Canonical bridge pairing state differs from the legacy Keychain mirror; using device-state.json.");
   writeKeychainStateString(JSON.stringify(canonicalState, null, 2));
 }
 
@@ -361,8 +394,9 @@ function normalizeBridgeDeviceState(rawState) {
   const macDeviceId = normalizeNonEmptyString(rawState?.macDeviceId);
   const macIdentityPublicKey = normalizeNonEmptyString(rawState?.macIdentityPublicKey);
   const macIdentityPrivateKey = normalizeNonEmptyString(rawState?.macIdentityPrivateKey);
-  const lastSeenPhoneAppVersion =
-    normalizeNonEmptyString(rawState?.lastSeenPhoneAppVersion) || null;
+  const lastSeenPhoneAppVersion = normalizeNonEmptyString(rawState?.lastSeenPhoneAppVersion) || null;
+  const lastSeenDeviceKind = normalizeDeviceKind(rawState?.lastSeenDeviceKind)
+    || inferLegacyDeviceKind({ lastSeenPhoneAppVersion });
 
   if (!macDeviceId || !macIdentityPublicKey || !macIdentityPrivateKey) {
     throw new Error("Bridge device state is incomplete");
@@ -386,8 +420,27 @@ function normalizeBridgeDeviceState(rawState) {
     macIdentityPublicKey,
     macIdentityPrivateKey,
     trustedPhones,
+    lastSeenDeviceKind,
     lastSeenPhoneAppVersion,
   };
+}
+
+function normalizeDeviceKind(value) {
+  const normalized = normalizeNonEmptyString(value).toLowerCase();
+  if (normalized === "ios" || normalized === "iphone") {
+    return "iphone";
+  }
+  if (normalized === "android") {
+    return "android";
+  }
+  if (normalized === "mac" || normalized === "macos" || normalized === "darwin") {
+    return "mac";
+  }
+  return normalized || null;
+}
+
+function inferLegacyDeviceKind({ lastSeenPhoneAppVersion } = {}) {
+  return lastSeenPhoneAppVersion ? "iphone" : null;
 }
 
 function bridgeStatesEqual(left, right) {
@@ -404,9 +457,9 @@ function normalizeNonEmptyString(value) {
 function corruptedStateError(source, error) {
   const detail = normalizeNonEmptyString(error?.message);
   return new Error(
-    `The saved Remodex pairing state in ${source} is unreadable. ` +
-      "Run `remodex reset-pairing` to start fresh." +
-      (detail ? ` (${detail})` : ""),
+    `The saved Remodex pairing state in ${source} is unreadable. `
+      + "Run `remodex reset-pairing` to start fresh."
+      + (detail ? ` (${detail})` : "")
   );
 }
 
@@ -431,6 +484,7 @@ module.exports = {
   getTrustedPhonePublicKey,
   loadOrCreateBridgeDeviceState,
   readBridgeDeviceState,
+  rememberLastSeenClientDeviceKind,
   rememberLastSeenPhoneAppVersion,
   rememberTrustedPhone,
   resetBridgeDeviceState,

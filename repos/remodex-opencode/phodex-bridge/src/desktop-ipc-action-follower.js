@@ -7,7 +7,6 @@
 const net = require("net");
 const os = require("os");
 const path = require("path");
-const { readString } = require("./normalize");
 
 const FRAME_HEADER_BYTES = 4;
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
@@ -156,15 +155,13 @@ function createDesktopIpcActionFollower({
       }
 
       pendingRoutesByRequestId.delete(requestId);
-      sendApplicationResponse(
-        JSON.stringify({
-          method: "serverRequest/resolved",
-          params: {
-            threadId,
-            requestId,
-          },
-        }),
-      );
+      sendApplicationResponse(JSON.stringify({
+        method: "serverRequest/resolved",
+        params: {
+          threadId,
+          requestId,
+        },
+      }));
     }
 
     for (const action of actions) {
@@ -177,13 +174,11 @@ function createDesktopIpcActionFollower({
         method: action.method,
         threadId,
       });
-      sendApplicationResponse(
-        JSON.stringify({
-          id: action.id,
-          method: action.method,
-          params: action.params,
-        }),
-      );
+      sendApplicationResponse(JSON.stringify({
+        id: action.id,
+        method: action.method,
+        params: action.params,
+      }));
     }
   }
 
@@ -199,45 +194,36 @@ function createDesktopIpcActionFollower({
   function submitDesktopActionResponse(route, responseMessage) {
     const payload = desktopFollowerPayloadForResponse(route, responseMessage);
     if (!payload) {
-      sendApplicationResponse(
-        JSON.stringify({
-          id: responseMessage?.id ?? route.requestId,
-          error: {
-            code: -32602,
-            message: "Invalid desktop action response.",
-          },
-        }),
-      );
+      sendApplicationResponse(JSON.stringify({
+        id: responseMessage?.id ?? route.requestId,
+        error: {
+          code: -32602,
+          message: "Invalid desktop action response.",
+        },
+      }));
       return;
     }
 
-    ipc
-      .sendRequest(payload.method, payload.params)
+    ipc.sendRequest(payload.method, payload.params)
       .then(() => {
         pendingRoutesByRequestId.delete(route.requestId);
-        sendApplicationResponse(
-          JSON.stringify({
-            method: "serverRequest/resolved",
-            params: {
-              threadId: route.threadId,
-              requestId: route.requestId,
-            },
-          }),
-        );
+        sendApplicationResponse(JSON.stringify({
+          method: "serverRequest/resolved",
+          params: {
+            threadId: route.threadId,
+            requestId: route.requestId,
+          },
+        }));
       })
       .catch((error) => {
-        console.warn(
-          `${logPrefix} desktop action reply failed for ${route.threadId}: ${error.message}`,
-        );
-        sendApplicationResponse(
-          JSON.stringify({
-            id: responseMessage.id,
-            error: {
-              code: -32000,
-              message: "Could not send this action to Codex on the Mac.",
-            },
-          }),
-        );
+        console.warn(`${logPrefix} desktop action reply failed for ${route.threadId}: ${error.message}`);
+        sendApplicationResponse(JSON.stringify({
+          id: responseMessage.id,
+          error: {
+            code: -32000,
+            message: "Could not send this action to Codex on the Mac.",
+          },
+        }));
       });
   }
 
@@ -252,7 +238,8 @@ function createDesktopIpcActionFollower({
   }
 
   function recoverThreadBaseline(threadId) {
-    if (recoveringThreadIds.has(threadId) || rawStatesByThreadId.has(threadId)) {
+    if (recoveringThreadIds.has(threadId)
+      || rawStatesByThreadId.has(threadId)) {
       return;
     }
 
@@ -268,9 +255,7 @@ function createDesktopIpcActionFollower({
         recoverThreadBaselineFromQueuedChanges(threadId, baselineState);
       })
       .catch((error) => {
-        console.warn(
-          `${logPrefix} desktop IPC baseline recovery failed for ${threadId}: ${error.message}`,
-        );
+        console.warn(`${logPrefix} desktop IPC baseline recovery failed for ${threadId}: ${error.message}`);
         recoverThreadBaselineFromQueuedChanges(threadId, null);
       })
       .finally(() => {
@@ -285,10 +270,9 @@ function createDesktopIpcActionFollower({
     }
 
     queuedChangesByThreadId.delete(threadId);
-    let nextState =
-      baselineState && typeof baselineState === "object"
-        ? cloneJSON(baselineState)
-        : createEmptyConversationState();
+    let nextState = baselineState && typeof baselineState === "object"
+      ? cloneJSON(baselineState)
+      : createEmptyConversationState();
     for (const change of queuedChanges) {
       nextState = applyConversationStateChange(nextState, change) || nextState;
     }
@@ -309,7 +293,7 @@ function createDesktopIpcActionFollower({
       threadId,
       previousState,
       nextState,
-      previousTexts || snapshotAssistantMessageTexts(previousState),
+      previousTexts || snapshotAssistantMessageTexts(previousState)
     );
     if (notifications.length === 0) {
       assistantMessageTextsByThreadId.set(threadId, snapshotAssistantMessageTexts(nextState));
@@ -383,8 +367,7 @@ function createDesktopIpcClient({
     const envelope = {
       type: "request",
       requestId,
-      sourceClientId:
-        method === "initialize" ? "initializing-client" : clientId || "remodex-bridge",
+      sourceClientId: method === "initialize" ? "initializing-client" : clientId || "remodex-bridge",
       version: METHOD_VERSION_BY_NAME.get(method) || 1,
       method,
       params: params || {},
@@ -427,9 +410,7 @@ function createDesktopIpcClient({
         return;
       }
 
-      const payload = readBuffer
-        .slice(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + frameLength)
-        .toString("utf8");
+      const payload = readBuffer.slice(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + frameLength).toString("utf8");
       readBuffer = readBuffer.slice(FRAME_HEADER_BYTES + frameLength);
       const envelope = safeParseJSON(payload);
       if (envelope) {
@@ -605,18 +586,14 @@ function projectDesktopAssistantDeltaNotifications(
   threadId,
   previousState,
   nextState,
-  previousTexts = snapshotAssistantMessageTexts(previousState),
+  previousTexts = snapshotAssistantMessageTexts(previousState)
 ) {
   const nextMessages = collectAssistantMessages(nextState);
   const notifications = [];
 
   for (const message of nextMessages) {
     const previousText = previousTexts.get(message.key) || "";
-    if (
-      !message.text ||
-      !message.text.startsWith(previousText) ||
-      message.text.length <= previousText.length
-    ) {
+    if (!message.text || !message.text.startsWith(previousText) || message.text.length <= previousText.length) {
       continue;
     }
 
@@ -636,9 +613,7 @@ function projectDesktopAssistantDeltaNotifications(
 }
 
 function snapshotAssistantMessageTexts(conversationState) {
-  return new Map(
-    collectAssistantMessages(conversationState).map((message) => [message.key, message.text]),
-  );
+  return new Map(collectAssistantMessages(conversationState).map((message) => [message.key, message.text]));
 }
 
 function collectAssistantMessages(conversationState) {
@@ -685,7 +660,7 @@ function assistantMessageText(item) {
 
   const content = Array.isArray(item?.content) ? item.content : [];
   return content
-    .map((entry) => (entry && typeof entry === "object" ? entry : null))
+    .map((entry) => entry && typeof entry === "object" ? entry : null)
     .filter(Boolean)
     .map((entry) => readString(entry.text) || readString(entry?.data?.text))
     .filter(Boolean)
@@ -695,10 +670,9 @@ function assistantMessageText(item) {
 function projectPendingDesktopAction(threadId, request) {
   const requestId = requestIdKey(request.id);
   const method = readString(request.method);
-  const params =
-    request.params && typeof request.params === "object" && !Array.isArray(request.params)
-      ? request.params
-      : {};
+  const params = request.params && typeof request.params === "object" && !Array.isArray(request.params)
+    ? request.params
+    : {};
   if (!requestId || !method) {
     return null;
   }
@@ -752,18 +726,13 @@ function isPatchChange(change) {
 
 function seedConversationStateFromThreadRead(response) {
   const conversationState = response?.conversationState || response?.conversation_state;
-  if (
-    conversationState &&
-    typeof conversationState === "object" &&
-    !Array.isArray(conversationState)
-  ) {
+  if (conversationState && typeof conversationState === "object" && !Array.isArray(conversationState)) {
     return cloneJSON(conversationState);
   }
 
-  const thread =
-    response?.thread && typeof response.thread === "object" && !Array.isArray(response.thread)
-      ? response.thread
-      : {};
+  const thread = response?.thread && typeof response.thread === "object" && !Array.isArray(response.thread)
+    ? response.thread
+    : {};
   return {
     turns: Array.isArray(thread.turns) ? cloneJSON(thread.turns) : [],
     requests: Array.isArray(thread.requests) ? cloneJSON(thread.requests) : [],
@@ -832,12 +801,10 @@ function resolveDefaultIpcSocketPath() {
 }
 
 function readThreadId(params) {
-  return (
-    readString(params?.threadId) ||
-    readString(params?.thread_id) ||
-    readString(params?.conversationId) ||
-    readString(params?.conversation_id)
-  );
+  return readString(params?.threadId)
+    || readString(params?.thread_id)
+    || readString(params?.conversationId)
+    || readString(params?.conversation_id);
 }
 
 function requestIdKey(value) {
@@ -850,8 +817,14 @@ function requestIdKey(value) {
   return "";
 }
 
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 function normalizeToken(value) {
-  return typeof value === "string" ? value.toLowerCase().replace(/[_-\s]+/g, "") : "";
+  return typeof value === "string"
+    ? value.toLowerCase().replace(/[_-\s]+/g, "")
+    : "";
 }
 
 function cloneJSON(value) {

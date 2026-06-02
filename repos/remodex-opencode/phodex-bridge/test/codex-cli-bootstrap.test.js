@@ -7,7 +7,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { ensureCodexCLI, shouldSkipCodexBootstrap } = require("../src/codex-cli-bootstrap");
+const {
+  ensureCodexCLI,
+  shouldSkipCodexBootstrap,
+} = require("../src/codex-cli-bootstrap");
 
 test("ensureCodexCLI installs Codex when it is missing", () => {
   const commands = [];
@@ -46,11 +49,8 @@ test("ensureCodexCLI installs Codex when it is missing", () => {
     versionAfter: "0.120.0",
   });
   assert.equal(
-    commands.some(
-      ([command, args]) =>
-        command === "npm" && args.join(" ") === "install -g @openai/codex@latest",
-    ),
-    true,
+    commands.some(([command, args]) => command === "npm" && args.join(" ") === "install -g @openai/codex@latest"),
+    true
   );
   assert.deepEqual(messages, [
     "[remodex] Checking Codex CLI...",

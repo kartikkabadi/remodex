@@ -1499,7 +1499,7 @@ extension CodexService {
             messageId: pendingMessageId
         )
 
-        var includeStructuredSkillItems = supportsStructuredSkillInput && !skillMentions.isEmpty
+        var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
         var imageURLKey = "url"
         var effectiveCollaborationMode = supportsTurnCollaborationMode ? collaborationMode : nil
@@ -1792,7 +1792,7 @@ extension CodexService {
             throw error
         }
 
-        var includeStructuredSkillItems = supportsStructuredSkillInput && !skillMentions.isEmpty
+        var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
         var imageURLKey = "url"
         var effectiveCollaborationMode = supportsTurnCollaborationMode ? effectiveRequestedCollaborationMode : nil

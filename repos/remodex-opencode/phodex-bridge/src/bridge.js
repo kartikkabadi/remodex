@@ -2598,6 +2598,12 @@ function augmentRelayHistoryTurnsWithJsonlArtifacts(turns, threadId = "") {
       nextItems = nextItems === items ? [...items] : nextItems;
       nextItems.push(artifacts.progressPlanItem);
     }
+    for (const imageViewItem of artifacts.imageViewItems || []) {
+      if (!hasEquivalentImageViewItem(nextItems, imageViewItem)) {
+        nextItems = nextItems === items ? [...items] : nextItems;
+        nextItems.push(imageViewItem);
+      }
+    }
 
     if (nextItems === items) {
       return turn;
@@ -2704,9 +2710,13 @@ function readAndCacheJsonlArtifactItems(cacheKey, rolloutPath, threadId, stat = 
           normalizeHistoryItemToken(item?.type) === "plan" &&
           item?.remodexJsonlProgressPlan === true,
       );
+      const imageViewItems = turnItems.filter(
+        (item) => normalizeHistoryItemToken(item?.type) === "imageview",
+      );
       const artifacts = {
         fileChangeItem: null,
         progressPlanItem: null,
+        imageViewItems,
       };
 
       const changes = [];
@@ -2731,7 +2741,11 @@ function readAndCacheJsonlArtifactItems(cacheKey, rolloutPath, threadId, stat = 
         };
       }
 
-      if (artifacts.fileChangeItem || artifacts.progressPlanItem) {
+      if (
+        artifacts.fileChangeItem ||
+        artifacts.progressPlanItem ||
+        (artifacts.imageViewItems && artifacts.imageViewItems.length > 0)
+      ) {
         artifactsByTurnId.set(turnId, artifacts);
       }
     }
@@ -2806,6 +2820,20 @@ function hasEquivalentProgressPlanItem(items, incomingItem) {
       item.remodexJsonlProgressPlan === true ||
       (incomingId && normalizeNonEmptyString(item.id) === incomingId)
     );
+  });
+}
+
+function hasEquivalentImageViewItem(items, incomingItem) {
+  const incomingId = normalizeNonEmptyString(incomingItem?.id);
+  const incomingPath = normalizeNonEmptyString(incomingItem?.path);
+  return items.some((item) => {
+    if (normalizeHistoryItemToken(item?.type) !== "imageview") {
+      return false;
+    }
+    if (incomingId && normalizeNonEmptyString(item.id) === incomingId) {
+      return true;
+    }
+    return incomingPath && normalizeNonEmptyString(item.path) === incomingPath;
   });
 }
 
@@ -3542,6 +3570,9 @@ function compactHistoryItemForRelay(item, maxChars) {
     type: typeof item?.type === "string" ? item.type : "relay_truncated_item",
     role: typeof item?.role === "string" ? item.role : undefined,
     itemId: typeof item?.itemId === "string" ? item.itemId : undefined,
+    turnId: typeof item?.turnId === "string" ? item.turnId : undefined,
+    createdAt: typeof item?.createdAt === "string" ? item.createdAt : undefined,
+    timestamp: typeof item?.timestamp === "string" ? item.timestamp : undefined,
     relayPayloadTruncated: true,
   };
   const tailText = maxChars > 0 ? firstRelayTextTail(item, maxChars) : "";

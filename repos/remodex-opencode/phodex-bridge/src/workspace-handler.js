@@ -35,6 +35,7 @@ const IMAGE_MIME_TYPES_BY_EXTENSION = new Map([
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
   [".png", "image/png"],
+  [".svg", "image/svg+xml"],
   [".gif", "image/gif"],
   [".webp", "image/webp"],
   [".heic", "image/heic"],
@@ -75,7 +76,7 @@ function handleWorkspaceRequest(rawMessage, sendResponse) {
             message,
             data: { errorCode },
           },
-        }),
+        })
       );
     });
 
@@ -103,9 +104,7 @@ async function handleWorkspaceMethod(method, params) {
     case "workspace/checkpointRestorePreview":
       return workspaceCheckpointRestorePreview(repoRoot, params);
     case "workspace/checkpointRestoreApply":
-      return withRepoMutationLock(repoRoot, () =>
-        workspaceCheckpointRestoreApply(repoRoot, params),
-      );
+      return withRepoMutationLock(repoRoot, () => workspaceCheckpointRestoreApply(repoRoot, params));
     case "workspace/revertPatchPreview":
       return workspaceRevertPatchPreview(repoRoot, params);
     case "workspace/revertPatchApply":
@@ -133,10 +132,7 @@ async function workspaceReadFile(params) {
     throw workspaceError("file_not_found", "The file no longer exists on this Mac.");
   }
   if (!realWorkspaceRoot || !isPathInside(realFilePath, realWorkspaceRoot)) {
-    throw workspaceError(
-      "file_path_not_allowed",
-      "Only files in the current workspace can be viewed.",
-    );
+    throw workspaceError("file_path_not_allowed", "Only files in the current workspace can be viewed.");
   }
 
   const stat = await fs.promises.stat(realFilePath);
@@ -146,7 +142,7 @@ async function workspaceReadFile(params) {
   if (stat.size > MAX_TEXT_FILE_READ_BYTES) {
     throw workspaceError(
       "file_too_large",
-      "This file is too large to send to the phone. Open it on the Mac or ask for a smaller section.",
+      "This file is too large to send to the phone. Open it on the Mac or ask for a smaller section."
     );
   }
 
@@ -205,14 +201,11 @@ async function workspaceReadImage(params) {
     realTemporaryImageRoots(),
   ]);
   const isAllowed =
-    (realWorkspaceRoot && isPathInside(realImagePath, realWorkspaceRoot)) ||
-    (realGeneratedImagesRoot && isPathInside(realImagePath, realGeneratedImagesRoot)) ||
-    realTempRoots.some((tempRoot) => isPathInside(realImagePath, tempRoot));
+    (realWorkspaceRoot && isPathInside(realImagePath, realWorkspaceRoot))
+    || (realGeneratedImagesRoot && isPathInside(realImagePath, realGeneratedImagesRoot))
+    || realTempRoots.some((tempRoot) => isPathInside(realImagePath, tempRoot));
   if (!isAllowed) {
-    throw workspaceError(
-      "image_path_not_allowed",
-      "Only images in this workspace, Codex generated images, or temporary screenshot files can be previewed.",
-    );
+    throw workspaceError("image_path_not_allowed", "Only images in this workspace, Codex generated images, or temporary screenshot files can be previewed.");
   }
 
   const stat = await fs.promises.stat(realImagePath);
@@ -230,7 +223,7 @@ async function workspaceReadImage(params) {
   if (stat.size > MAX_IMAGE_READ_BYTES && !maxPixelDimension) {
     throw workspaceError(
       "image_too_large",
-      "This image is too large to send to the phone. Open it on the Mac or move a smaller preview into the workspace.",
+      "This image is too large to send to the phone. Open it on the Mac or move a smaller preview into the workspace."
     );
   }
 
@@ -252,7 +245,9 @@ async function workspaceReadImage(params) {
     };
   }
 
-  const data = maxPixelDimension
+  const data = mimeType === "image/svg+xml"
+    ? await readSVGPreviewData(realImagePath, stat.size)
+    : maxPixelDimension
     ? await readPreviewImageData(realImagePath, maxPixelDimension, stat.size)
     : await fs.promises.readFile(realImagePath);
   return {
@@ -269,7 +264,7 @@ function normalizedPreviewPixelDimension(params) {
   }
   return Math.min(
     MAX_IMAGE_PREVIEW_PIXEL_DIMENSION,
-    Math.max(MIN_IMAGE_PREVIEW_PIXEL_DIMENSION, Math.round(requested)),
+    Math.max(MIN_IMAGE_PREVIEW_PIXEL_DIMENSION, Math.round(requested))
   );
 }
 
@@ -278,7 +273,7 @@ async function sniffImageMimeType(filePath) {
   try {
     const handle = await fs.promises.open(filePath, "r");
     try {
-      header = Buffer.alloc(16);
+      header = Buffer.alloc(512);
       const read = await handle.read(header, 0, header.length, 0);
       header = header.subarray(0, read.bytesRead);
     } finally {
@@ -288,54 +283,52 @@ async function sniffImageMimeType(filePath) {
     return null;
   }
 
-  if (
-    header.length >= 8 &&
-    header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  ) {
+  if (header.length >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return "image/png";
   }
   if (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
     return "image/jpeg";
   }
-  if (
-    header.length >= 6 &&
-    (header.subarray(0, 6).toString("ascii") === "GIF87a" ||
-      header.subarray(0, 6).toString("ascii") === "GIF89a")
-  ) {
+  if (header.length >= 6 && (header.subarray(0, 6).toString("ascii") === "GIF87a" || header.subarray(0, 6).toString("ascii") === "GIF89a")) {
     return "image/gif";
   }
-  if (
-    header.length >= 12 &&
-    header.subarray(0, 4).toString("ascii") === "RIFF" &&
-    header.subarray(8, 12).toString("ascii") === "WEBP"
-  ) {
+  if (header.length >= 12 && header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP") {
     return "image/webp";
+  }
+  if (looksLikeSVGHeader(header)) {
+    return "image/svg+xml";
   }
 
   return null;
 }
 
+function looksLikeSVGHeader(header) {
+  const sample = header.toString("utf8").replace(/^\uFEFF/, "").trimStart().toLowerCase();
+  return sample.startsWith("<svg") || (sample.startsWith("<?xml") && sample.includes("<svg"));
+}
+
 async function realTemporaryImageRoots() {
-  const candidates = [os.tmpdir(), process.env.TMPDIR];
+  const candidates = [
+    os.tmpdir(),
+    process.env.TMPDIR,
+  ];
 
   if (process.platform === "darwin") {
     candidates.push("/tmp");
-    candidates.push(
-      path.join(os.homedir(), "Library", "Caches", "com.raycast-x.macos", "clipboard"),
-    );
+    candidates.push(path.join(os.homedir(), "Library", "Caches", "com.raycast-x.macos", "clipboard"));
+    candidates.push(path.join(os.homedir(), "Library", "Application Support", "CleanShot", "media"));
+    candidates.push(path.join(os.homedir(), "Library", "Application Support", "CleanShot X", "media"));
   }
 
   const roots = await Promise.all(
-    Array.from(new Set(candidates.filter(Boolean))).map((candidate) => realpathOrNull(candidate)),
+    Array.from(new Set(candidates.filter(Boolean))).map((candidate) => realpathOrNull(candidate))
   );
   return Array.from(new Set(roots.filter(Boolean)));
 }
 
 // Read-only previews can scope non-git Codex scratch folders to cwd while rejecting broad roots.
 async function resolveReadableWorkspaceRoot(cwd) {
-  const realRepoRoot = await resolveRepoRoot(cwd)
-    .then(realpathOrNull)
-    .catch(() => null);
+  const realRepoRoot = await resolveRepoRoot(cwd).then(realpathOrNull).catch(() => null);
   if (realRepoRoot) {
     return realRepoRoot;
   }
@@ -376,7 +369,7 @@ async function resolveUniqueWorkspaceBasenameMatch(realWorkspaceRoot, requestedF
   if (matches.length > 1) {
     throw workspaceError(
       "file_path_ambiguous",
-      `Multiple files named "${requestedFileName}" exist in this workspace. Use a path with folders.`,
+      `Multiple files named "${requestedFileName}" exist in this workspace. Use a path with folders.`
     );
   }
   return matches[0];
@@ -384,9 +377,7 @@ async function resolveUniqueWorkspaceBasenameMatch(realWorkspaceRoot, requestedF
 
 async function findWorkspaceBasenameMatches(realWorkspaceRoot, requestedFileName) {
   const matches = [];
-  const output = await git(realWorkspaceRoot, "ls-files", "-co", "--exclude-standard").catch(
-    () => "",
-  );
+  const output = await git(realWorkspaceRoot, "ls-files", "-co", "--exclude-standard").catch(() => "");
   const relativePaths = output
     .split("\n")
     .map((line) => line.trim())
@@ -408,16 +399,15 @@ async function findWorkspaceBasenameMatches(realWorkspaceRoot, requestedFileName
 }
 
 function isBareFileName(candidatePath) {
-  return (
-    candidatePath === path.basename(candidatePath) &&
-    candidatePath !== "." &&
-    candidatePath !== ".."
-  );
+  return candidatePath === path.basename(candidatePath)
+    && candidatePath !== "."
+    && candidatePath !== "..";
 }
 
 function isBroadWorkspaceRoot(candidatePath) {
   const normalized = path.resolve(candidatePath);
-  return normalized === path.parse(normalized).root || normalized === path.resolve(os.homedir());
+  return normalized === path.parse(normalized).root
+    || normalized === path.resolve(os.homedir());
 }
 
 function decodeUtf8TextFile(data) {
@@ -449,7 +439,7 @@ async function readPreviewImageData(imagePath, maxPixelDimension, originalByteLe
 
     throw workspaceError(
       "image_preview_unsupported_platform",
-      "This computer cannot resize image previews yet. Try a smaller image or open it on the computer.",
+      "This computer cannot resize image previews yet. Try a smaller image or open it on the computer."
     );
   }
 
@@ -460,7 +450,7 @@ async function readPreviewImageData(imagePath, maxPixelDimension, originalByteLe
     if (remainingTimeoutMs <= 0) {
       throw workspaceError(
         "image_preview_timed_out",
-        "This image preview took too long to resize. Try a smaller image or open it on the computer.",
+        "This image preview took too long to resize. Try a smaller image or open it on the computer."
       );
     }
 
@@ -468,20 +458,16 @@ async function readPreviewImageData(imagePath, maxPixelDimension, originalByteLe
       const previewData = await downsampleImageNative(
         imagePath,
         candidateDimension,
-        Math.min(IMAGE_PREVIEW_TOOL_TIMEOUT_MS, remainingTimeoutMs),
+        Math.min(IMAGE_PREVIEW_TOOL_TIMEOUT_MS, remainingTimeoutMs)
       );
-      if (
-        previewData &&
-        previewData.length > 0 &&
-        previewData.length <= MAX_IMAGE_PREVIEW_READ_BYTES
-      ) {
+      if (previewData && previewData.length > 0 && previewData.length <= MAX_IMAGE_PREVIEW_READ_BYTES) {
         return previewData;
       }
     } catch (err) {
       if (isImagePreviewTimeoutError(err)) {
         throw workspaceError(
           "image_preview_timed_out",
-          "This image preview took too long to resize. Try a smaller image or open it on the computer.",
+          "This image preview took too long to resize. Try a smaller image or open it on the computer."
         );
       }
       sawConversionFailure = true;
@@ -491,14 +477,25 @@ async function readPreviewImageData(imagePath, maxPixelDimension, originalByteLe
   if (sawConversionFailure) {
     throw workspaceError(
       "image_preview_failed",
-      "This image could not be converted into a lightweight phone preview.",
+      "This image could not be converted into a lightweight phone preview."
     );
   }
 
   throw workspaceError(
     "image_preview_too_large",
-    "This image preview is still too large to send to the phone.",
+    "This image preview is still too large to send to the phone."
   );
+}
+
+// SVGs are already compact vector source; send them as-is so the phone can render them in WebKit.
+async function readSVGPreviewData(imagePath, originalByteLength) {
+  if (originalByteLength > MAX_IMAGE_PREVIEW_READ_BYTES) {
+    throw workspaceError(
+      "image_too_large",
+      "This SVG is too large to send to the phone. Open it on the Mac or move a smaller preview into the workspace."
+    );
+  }
+  return fs.promises.readFile(imagePath);
 }
 
 function previewPixelDimensionCandidates(maxPixelDimension) {
@@ -511,7 +508,7 @@ function previewPixelDimensionCandidates(maxPixelDimension) {
     }
     next = Math.max(
       MIN_IMAGE_PREVIEW_PIXEL_DIMENSION,
-      Math.floor(next * IMAGE_PREVIEW_RETRY_SCALE),
+      Math.floor(next * IMAGE_PREVIEW_RETRY_SCALE)
     );
   }
 
@@ -522,56 +519,45 @@ function previewPixelDimensionCandidates(maxPixelDimension) {
     }
   }
 
-  return Array.from(new Set(dimensions)).toSorted((a, b) => b - a);
+  return Array.from(new Set(dimensions)).sort((a, b) => b - a);
 }
 
 function usesNativeImagePreview() {
-  const normalizedPlatform = String(process.platform || "")
-    .trim()
-    .toLowerCase();
-  return (
-    normalizedPlatform === "darwin" ||
-    normalizedPlatform === "macos" ||
-    normalizedPlatform === "mac" ||
-    normalizedPlatform === "win32" ||
-    normalizedPlatform === "windows"
-  );
+  const normalizedPlatform = String(process.platform || "").trim().toLowerCase();
+  return normalizedPlatform === "darwin"
+    || normalizedPlatform === "macos"
+    || normalizedPlatform === "mac"
+    || normalizedPlatform === "win32"
+    || normalizedPlatform === "windows";
 }
 
-async function downsampleImageNative(
-  imagePath,
-  maxPixelDimension,
-  timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS,
-) {
+async function downsampleImageNative(imagePath, maxPixelDimension, timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS) {
   return usesWindowsImagePreview()
     ? downsampleImageWithPowerShell(imagePath, maxPixelDimension, timeoutMs)
     : downsampleImageWithSips(imagePath, maxPixelDimension, timeoutMs);
 }
 
 function usesWindowsImagePreview() {
-  const normalizedPlatform = String(process.platform || "")
-    .trim()
-    .toLowerCase();
+  const normalizedPlatform = String(process.platform || "").trim().toLowerCase();
   return normalizedPlatform === "win32" || normalizedPlatform === "windows";
 }
 
-async function downsampleImageWithSips(
-  imagePath,
-  maxPixelDimension,
-  timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS,
-) {
+async function downsampleImageWithSips(imagePath, maxPixelDimension, timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS) {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "remodex-image-preview-"));
   const outputPath = path.join(tempDir, `preview${path.extname(imagePath) || ".png"}`);
   const command = resolveHostCommand("sips");
   try {
-    await execFileAsync(
-      command.file,
-      [...command.args, "-Z", String(maxPixelDimension), imagePath, "--out", outputPath],
-      {
-        timeout: Math.max(1, Math.floor(timeoutMs)),
-        maxBuffer: 1024 * 1024,
-      },
-    );
+    await execFileAsync(command.file, [
+      ...command.args,
+      "-Z",
+      String(maxPixelDimension),
+      imagePath,
+      "--out",
+      outputPath,
+    ], {
+      timeout: Math.max(1, Math.floor(timeoutMs)),
+      maxBuffer: 1024 * 1024,
+    });
     return await fs.promises.readFile(outputPath);
   } finally {
     await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -595,11 +581,7 @@ function resolveHostCommand(commandName) {
   return { file: commandName, args: [] };
 }
 
-async function downsampleImageWithPowerShell(
-  imagePath,
-  maxPixelDimension,
-  timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS,
-) {
+async function downsampleImageWithPowerShell(imagePath, maxPixelDimension, timeoutMs = IMAGE_PREVIEW_TOOL_TIMEOUT_MS) {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "remodex-image-preview-"));
   const outputPath = path.join(tempDir, `preview${path.extname(imagePath) || ".png"}`);
   const scriptPath = path.join(tempDir, "resize-preview.ps1");
@@ -638,25 +620,21 @@ try {
 `;
   try {
     await fs.promises.writeFile(scriptPath, script, "utf8");
-    await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        scriptPath,
-        imagePath,
-        outputPath,
-        String(maxPixelDimension),
-      ],
-      {
-        timeout: Math.max(1, Math.floor(timeoutMs)),
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-      },
-    );
+    await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      scriptPath,
+      imagePath,
+      outputPath,
+      String(maxPixelDimension),
+    ], {
+      timeout: Math.max(1, Math.floor(timeoutMs)),
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
     return await fs.promises.readFile(outputPath);
   } finally {
     await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -664,41 +642,32 @@ try {
 }
 
 function isImagePreviewTimeoutError(err) {
-  return (
-    err?.code === "ETIMEDOUT" ||
-    (err?.killed === true && err?.signal === "SIGTERM") ||
-    /timed out|timeout/i.test(String(err?.message || ""))
-  );
+  return err?.code === "ETIMEDOUT"
+    || (err?.killed === true && err?.signal === "SIGTERM")
+    || /timed out|timeout/i.test(String(err?.message || ""));
 }
 
 function isUnchangedImageRead(params, stat, maxPixelDimension) {
   const cachedByteLength = Number(params.ifByteLength);
   const cachedMtimeMs = Number(params.ifMtimeMs);
-  const cachedPreviewMaxPixelDimension = Number(
-    params.ifPreviewMaxPixelDimension || params.ifMaxPixelDimension,
-  );
+  const cachedPreviewMaxPixelDimension = Number(params.ifPreviewMaxPixelDimension || params.ifMaxPixelDimension);
   const previewDimensionMatches = maxPixelDimension
-    ? Number.isFinite(cachedPreviewMaxPixelDimension) &&
-      cachedPreviewMaxPixelDimension === maxPixelDimension
+    ? Number.isFinite(cachedPreviewMaxPixelDimension) && cachedPreviewMaxPixelDimension === maxPixelDimension
     : !Number.isFinite(cachedPreviewMaxPixelDimension);
-  return (
-    Number.isFinite(cachedByteLength) &&
-    Number.isFinite(cachedMtimeMs) &&
-    previewDimensionMatches &&
-    cachedByteLength === stat.size &&
-    cachedMtimeMs === stat.mtimeMs
-  );
+  return Number.isFinite(cachedByteLength)
+    && Number.isFinite(cachedMtimeMs)
+    && previewDimensionMatches
+    && cachedByteLength === stat.size
+    && cachedMtimeMs === stat.mtimeMs;
 }
 
 function isUnchangedTextFileRead(params, stat) {
   const cachedByteLength = Number(params.ifByteLength);
   const cachedMtimeMs = Number(params.ifMtimeMs);
-  return (
-    Number.isFinite(cachedByteLength) &&
-    Number.isFinite(cachedMtimeMs) &&
-    cachedByteLength === stat.size &&
-    cachedMtimeMs === stat.mtimeMs
-  );
+  return Number.isFinite(cachedByteLength)
+    && Number.isFinite(cachedMtimeMs)
+    && cachedByteLength === stat.size
+    && cachedMtimeMs === stat.mtimeMs;
 }
 
 // Validates the reverse patch against the current tree without writing repo files.
@@ -753,9 +722,7 @@ async function workspaceRevertPatchApply(repoRoot, params) {
     return {
       success: false,
       revertedFiles: [],
-      conflicts: parseApplyConflicts(
-        applyResult.stderr || applyResult.stdout || "Patch does not apply.",
-      ),
+      conflicts: parseApplyConflicts(applyResult.stderr || applyResult.stdout || "Patch does not apply."),
       unsupportedReasons: [],
       stagedFiles: [],
       status: await gitStatus(repoRoot).catch(() => null),
@@ -779,9 +746,7 @@ async function workspaceRevertPatchBatchPreview(repoRoot, params) {
   const patches = resolveForwardPatchBatch(params);
   const analyses = patches.map((patch) => analyzeUnifiedPatch(patch.forwardPatch));
   const affectedFiles = uniqueSorted(analyses.flatMap((analysis) => analysis.affectedFiles));
-  const unsupportedReasons = uniqueSorted(
-    analyses.flatMap((analysis) => analysis.unsupportedReasons),
-  );
+  const unsupportedReasons = uniqueSorted(analyses.flatMap((analysis) => analysis.unsupportedReasons));
   const stagedFiles = await findStagedTargetedFiles(repoRoot, affectedFiles);
 
   if (unsupportedReasons.length || stagedFiles.length) {
@@ -802,9 +767,7 @@ async function workspaceRevertPatchBatchPreview(repoRoot, params) {
   const sequenceCheck = await previewReversePatchSequence(repoRoot, patches, affectedFiles);
   const conflicts = sequenceCheck.ok
     ? []
-    : parseApplyConflicts(
-        sequenceCheck.stderr || sequenceCheck.stdout || "Patch batch does not apply.",
-      );
+    : parseApplyConflicts(sequenceCheck.stderr || sequenceCheck.stdout || "Patch batch does not apply.");
 
   return {
     canRevert: sequenceCheck.ok && conflicts.length === 0,
@@ -839,9 +802,7 @@ async function workspaceRevertPatchBatchApply(repoRoot, params) {
     return {
       success: false,
       revertedFiles: [],
-      conflicts: parseApplyConflicts(
-        applyResult.stderr || applyResult.stdout || "Patch batch does not apply.",
-      ),
+      conflicts: parseApplyConflicts(applyResult.stderr || applyResult.stdout || "Patch batch does not apply."),
       unsupportedReasons: [],
       stagedFiles: [],
       patchResults: patches.map((patch) => ({
@@ -866,7 +827,8 @@ async function workspaceRevertPatchBatchApply(repoRoot, params) {
 }
 
 function resolveForwardPatch(params) {
-  const forwardPatch = typeof params.forwardPatch === "string" ? params.forwardPatch : "";
+  const forwardPatch =
+    typeof params.forwardPatch === "string" ? params.forwardPatch : "";
 
   if (!forwardPatch.trim()) {
     throw workspaceError("missing_patch", "The request must include a non-empty forwardPatch.");
@@ -877,23 +839,22 @@ function resolveForwardPatch(params) {
 
 function resolveForwardPatchBatch(params) {
   const rawPatches = Array.isArray(params.patches) ? params.patches : [];
-  const patches = rawPatches
-    .map((rawPatch, index) => {
-      if (typeof rawPatch === "string") {
-        return {
-          id: String(index),
-          forwardPatch: rawPatch.endsWith("\n") ? rawPatch : `${rawPatch}\n`,
-        };
-      }
-
-      const forwardPatch =
-        rawPatch && typeof rawPatch.forwardPatch === "string" ? rawPatch.forwardPatch : "";
+  const patches = rawPatches.map((rawPatch, index) => {
+    if (typeof rawPatch === "string") {
       return {
-        id: rawPatch && typeof rawPatch.id === "string" ? rawPatch.id : String(index),
-        forwardPatch: forwardPatch.endsWith("\n") ? forwardPatch : `${forwardPatch}\n`,
+        id: String(index),
+        forwardPatch: rawPatch.endsWith("\n") ? rawPatch : `${rawPatch}\n`,
       };
-    })
-    .filter((patch) => patch.forwardPatch.trim());
+    }
+
+    const forwardPatch = rawPatch && typeof rawPatch.forwardPatch === "string"
+      ? rawPatch.forwardPatch
+      : "";
+    return {
+      id: rawPatch && typeof rawPatch.id === "string" ? rawPatch.id : String(index),
+      forwardPatch: forwardPatch.endsWith("\n") ? forwardPatch : `${forwardPatch}\n`,
+    };
+  }).filter((patch) => patch.forwardPatch.trim());
 
   if (!patches.length) {
     throw workspaceError("missing_patch", "The request must include at least one non-empty patch.");
@@ -937,8 +898,8 @@ function analyzeUnifiedPatch(rawPatch) {
   }
 
   return {
-    affectedFiles: [...new Set(affectedFiles)].toSorted(),
-    unsupportedReasons: [...unsupportedReasons].toSorted(),
+    affectedFiles: [...new Set(affectedFiles)].sort(),
+    unsupportedReasons: [...unsupportedReasons].sort(),
   };
 }
 
@@ -968,20 +929,17 @@ function splitPatchIntoChunks(patch) {
 
 function analyzePatchChunk(lines) {
   const path = extractPatchPath(lines);
-  const isBinary = lines.some(
-    (line) => line.startsWith("Binary files ") || line === "GIT binary patch",
-  );
-  const isRenameOrModeOnly = lines.some(
-    (line) =>
-      line.startsWith("rename from ") ||
-      line.startsWith("rename to ") ||
-      line.startsWith("copy from ") ||
-      line.startsWith("copy to ") ||
-      line.startsWith("old mode ") ||
-      line.startsWith("new mode ") ||
-      line.startsWith("similarity index ") ||
-      line.startsWith("new file mode 120") ||
-      line.startsWith("deleted file mode 120"),
+  const isBinary = lines.some((line) => line.startsWith("Binary files ") || line === "GIT binary patch");
+  const isRenameOrModeOnly = lines.some((line) =>
+    line.startsWith("rename from ")
+      || line.startsWith("rename to ")
+      || line.startsWith("copy from ")
+      || line.startsWith("copy to ")
+      || line.startsWith("old mode ")
+      || line.startsWith("new mode ")
+      || line.startsWith("similarity index ")
+      || line.startsWith("new file mode 120")
+      || line.startsWith("deleted file mode 120")
   );
 
   let additions = 0;
@@ -1001,13 +959,7 @@ function analyzePatchChunk(lines) {
   if (isRenameOrModeOnly) {
     unsupportedReasons.push("Rename, mode-only, or symlink changes are not auto-revertable in v1.");
   }
-  if (
-    !path ||
-    (!additions &&
-      !deletions &&
-      !lines.includes("--- /dev/null") &&
-      !lines.includes("+++ /dev/null"))
-  ) {
+  if (!path || (!additions && !deletions && !lines.includes("--- /dev/null") && !lines.includes("+++ /dev/null"))) {
     if (!isBinary && !isRenameOrModeOnly) {
       unsupportedReasons.push("No exact patch was captured.");
     }
@@ -1061,7 +1013,7 @@ async function findStagedTargetedFiles(cwd, affectedFiles) {
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
-      .toSorted();
+      .sort();
   } catch {
     return [];
   }
@@ -1200,10 +1152,7 @@ async function restorePatchBackup(repoRoot, backup) {
     await fs.promises.copyFile(backupPath, targetPath);
   }
 
-  await resetTargetedFilesIndex(
-    repoRoot,
-    backup.entries.map((entry) => entry.relativePath),
-  );
+  await resetTargetedFilesIndex(repoRoot, backup.entries.map((entry) => entry.relativePath));
 }
 
 async function resetTargetedFilesIndex(cwd, affectedFiles) {
@@ -1249,7 +1198,7 @@ function isIndexMismatch(result) {
 }
 
 function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].toSorted();
+  return [...new Set(values.filter(Boolean))].sort();
 }
 
 async function runGitApply(cwd, args, patchText) {
@@ -1280,7 +1229,7 @@ async function runGitApply(cwd, args, patchText) {
 async function writeTempPatchFile(patchText) {
   const tempPatchPath = path.join(
     os.tmpdir(),
-    `remodex-revert-${Date.now()}-${Math.random().toString(16).slice(2)}.patch`,
+    `remodex-revert-${Date.now()}-${Math.random().toString(16).slice(2)}.patch`
   );
   await fs.promises.writeFile(tempPatchPath, patchText, "utf8");
   return tempPatchPath;
@@ -1342,14 +1291,14 @@ async function resolveWorkspaceCwd(params) {
   if (!requestedCwd) {
     throw workspaceError(
       "missing_working_directory",
-      "Workspace actions require a bound local working directory.",
+      "Workspace actions require a bound local working directory."
     );
   }
 
   if (!isExistingDirectory(requestedCwd)) {
     throw workspaceError(
       "missing_working_directory",
-      "The requested local working directory does not exist on this Mac.",
+      "The requested local working directory does not exist on this Mac."
     );
   }
 
@@ -1370,7 +1319,7 @@ async function resolveRepoRoot(cwd) {
 
   throw workspaceError(
     "missing_working_directory",
-    "The selected local folder is not inside a Git repository.",
+    "The selected local folder is not inside a Git repository."
   );
 }
 

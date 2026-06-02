@@ -44,7 +44,12 @@ function createJsonFileStore({
       typeof value === "object" && !Array.isArray(value) ? value : {};
     const state = { [key]: normalized };
     const directory = path.dirname(resolvedPath);
-    fsImpl.mkdirSync(directory, { recursive: true });
+    fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    try {
+      fsImpl.chmodSync(directory, 0o700);
+    } catch {
+      // Best-effort on platforms that restrict chmod.
+    }
     const tempPath = `${resolvedPath}.${process.pid}.${Date.now()}.tmp`;
     fsImpl.writeFileSync(
       tempPath,

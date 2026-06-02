@@ -473,9 +473,24 @@ extension CodexService {
 
         availableRuntimes = nextRuntimes
         availableAgents = nextAgents
+
+        if let codexRuntime = nextRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == "codex"
+        }) {
+            supportsStructuredSkillInput = codexRuntime.capabilities.supportsStructuredSkillInput
+        }
+
         debugRuntimeLog(
             "runtime/catalog success runtimes=\(nextRuntimes.map(\.id).joined(separator: ","))"
         )
+    }
+
+    func supportsStructuredSkillInput(forThreadId threadId: String?) -> Bool {
+        let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        if provider == "opencode" {
+            return openCodeRuntimeCatalogEntry?.capabilities.supportsStructuredSkillInput ?? false
+        }
+        return supportsStructuredSkillInput
     }
 
     func selectedModelOption() -> CodexModelOption? {

@@ -4,8 +4,6 @@
 // Exports: createPushNotificationCompletionDedupe
 // Depends on: none
 
-const { readString } = require("./normalize");
-
 const DEFAULT_SENT_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_STATUS_FALLBACK_TTL_MS = 5_000;
 
@@ -138,6 +136,10 @@ function createPushNotificationCompletionDedupe({
     hasActiveDedupeKey,
     shouldSuppressThreadStatusFallback,
   };
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = {

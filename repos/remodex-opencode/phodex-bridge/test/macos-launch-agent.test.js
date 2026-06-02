@@ -45,10 +45,7 @@ test("buildLaunchAgentPlist points launchd at run-service with remodex state pat
 
   assert.match(plist, /<string>com\.remodex\.bridge<\/string>/);
   assert.match(plist, /<string>run-service<\/string>/);
-  assert.match(
-    plist,
-    /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/,
-  );
+  assert.match(plist, /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/);
   assert.match(plist, /<key>REMODEX_DEVICE_STATE_DIR<\/key>/);
 });
 
@@ -58,7 +55,7 @@ test("resolveLaunchAgentPlistPath writes into the user's LaunchAgents folder", (
       env: { HOME: "/Users/tester" },
       osImpl: { homedir: () => "/Users/fallback" },
     }),
-    path.join("/Users/tester", "Library", "LaunchAgents", "com.remodex.bridge.plist"),
+    path.join("/Users/tester", "Library", "LaunchAgents", "com.remodex.bridge.plist")
   );
 });
 
@@ -170,7 +167,13 @@ test("stopMacOSBridgeService falls back to label bootout when plist bootout fail
           path.join(process.env.HOME, "Library", "LaunchAgents", "com.remodex.bridge.plist"),
         ],
       ],
-      ["launchctl", ["bootout", `gui/${TEST_UID}/com.remodex.bridge`]],
+      [
+        "launchctl",
+        [
+          "bootout",
+          `gui/${TEST_UID}/com.remodex.bridge`,
+        ],
+      ],
     ]);
   });
 });
@@ -203,21 +206,11 @@ test("startMacOSBridgeService kickstarts the launch agent after bootstrap", () =
     assert.deepEqual(
       calls.map(([command, args]) => [command, args[0], args[1], args[2]]),
       [
-        [
-          "launchctl",
-          "bootout",
-          `gui/${TEST_UID}`,
-          path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist"),
-        ],
+        ["launchctl", "bootout", `gui/${TEST_UID}`, path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist")],
         ["launchctl", "bootout", `gui/${TEST_UID}/com.remodex.bridge`, undefined],
-        [
-          "launchctl",
-          "bootstrap",
-          `gui/${TEST_UID}`,
-          path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist"),
-        ],
+        ["launchctl", "bootstrap", `gui/${TEST_UID}`, path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist")],
         ["launchctl", "kickstart", "-k", `gui/${TEST_UID}/com.remodex.bridge`],
-      ],
+      ]
     );
     assert.equal(readDaemonConfig({ env })?.extraRelaySessions, undefined);
   });
@@ -264,13 +257,10 @@ test("restartMacOSBridgeService can wait for the daemon to publish a fresh pairi
     const plistPath = path.join(rootDir, "Library", "LaunchAgents", "com.remodex.bridge.plist");
     fs.mkdirSync(path.dirname(plistPath), { recursive: true });
     fs.writeFileSync(plistPath, "<plist />", "utf8");
-    writePairingSession(
-      {
-        createdAt: "2000-01-01T00:00:00.000Z",
-        pairingPayload: { sessionId: "stale-session" },
-      },
-      { env },
-    );
+    writePairingSession({
+      createdAt: "2000-01-01T00:00:00.000Z",
+      pairingPayload: { sessionId: "stale-session" },
+    }, { env });
 
     const result = await restartMacOSBridgeService({
       env,
@@ -280,20 +270,17 @@ test("restartMacOSBridgeService can wait for the daemon to publish a fresh pairi
       waitForPairing: true,
       execFileSyncImpl(command, args) {
         calls.push([command, args]);
-        writePairingSession(
-          {
-            pairingPayload: {
-              v: 2,
-              relay: "ws://127.0.0.1:9000/relay",
-              sessionId: "fresh-session",
-              macDeviceId: "mac-1",
-              macIdentityPublicKey: "mac-pub",
-              expiresAt: Date.now() + 60_000,
-            },
-            pairingCode: "PAIRME",
+        writePairingSession({
+          pairingPayload: {
+            v: 2,
+            relay: "ws://127.0.0.1:9000/relay",
+            sessionId: "fresh-session",
+            macDeviceId: "mac-1",
+            macIdentityPublicKey: "mac-pub",
+            expiresAt: Date.now() + 60_000,
           },
-          { env },
-        );
+          pairingCode: "PAIRME",
+        }, { env });
       },
     });
 
@@ -400,7 +387,7 @@ test("mergeBridgeStatusForDaemon keeps the last fatal startup error visible duri
         connectionStatus: "error",
         pid: 27479,
         lastError: "spawn codex ENOENT",
-      },
+      }
     ),
     {
       state: "running",
@@ -408,7 +395,7 @@ test("mergeBridgeStatusForDaemon keeps the last fatal startup error visible duri
       pid: 27479,
       lastError: "spawn codex ENOENT",
       codexLaunchState: "starting",
-    },
+    }
   );
 });
 
@@ -427,7 +414,7 @@ test("mergeBridgeStatusForDaemon clears preserved errors once the bridge is actu
       pid: 27479,
       lastError: "spawn codex ENOENT",
     }),
-    connectedStatus,
+    connectedStatus
   );
 });
 
@@ -448,7 +435,7 @@ test("mergeBridgeStatusForDaemon stops preserving startup errors once Codex has 
       lastError: "spawn codex ENOENT",
       codexLaunchState: "error",
     }),
-    reconnectingStatus,
+    reconnectingStatus
   );
 });
 

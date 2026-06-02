@@ -46,7 +46,7 @@ function handlePetRequest(rawMessage, sendResponse) {
             message,
             data: { errorCode },
           },
-        }),
+        })
       );
     });
 
@@ -107,12 +107,10 @@ async function readPet(params = {}) {
 }
 
 function isPetMethod(method) {
-  return (
-    method === "pet/list" ||
-    method === "custom-avatars" ||
-    method === "pet/read" ||
-    method === "custom-avatar/read"
-  );
+  return method === "pet/list"
+    || method === "custom-avatars"
+    || method === "pet/read"
+    || method === "custom-avatar/read";
 }
 
 // Mirrors Codex desktop's pets-first custom avatar lookup while keeping legacy avatars usable.
@@ -139,12 +137,12 @@ function petFolderNameFromID(rawID) {
 
   const folderName = rawID.startsWith("custom:") ? rawID.slice("custom:".length) : rawID;
   if (
-    !folderName ||
-    folderName === "." ||
-    folderName === ".." ||
-    path.isAbsolute(folderName) ||
-    folderName.includes("/") ||
-    folderName.includes("\\")
+    !folderName
+    || folderName === "."
+    || folderName === ".."
+    || path.isAbsolute(folderName)
+    || folderName.includes("/")
+    || folderName.includes("\\")
   ) {
     throw petError("pet_id_invalid", "The selected pet id is invalid.");
   }
@@ -199,14 +197,10 @@ async function loadCustomAvatar(directory, folderName, { includeData }) {
 
   const spritesheetPath = resolveSpritesheetPath(
     petRoot,
-    typeof manifest.spritesheetPath === "string" ? manifest.spritesheetPath : "spritesheet.webp",
+    typeof manifest.spritesheetPath === "string" ? manifest.spritesheetPath : "spritesheet.webp"
   );
   const image = await readValidatedSpritesheet(spritesheetPath, { includeData });
-  const displayName = firstNonEmptyString([
-    manifest.displayName,
-    manifest.name,
-    displayFromSlug(folderName),
-  ]);
+  const displayName = firstNonEmptyString([manifest.displayName, manifest.name, displayFromSlug(folderName)]);
   const description = firstNonEmptyString([manifest.description]) || "A custom Codex pet.";
 
   return {
@@ -250,10 +244,7 @@ function resolveSpritesheetPath(petRoot, rawSpritesheetPath) {
   const candidate = path.resolve(petRoot, trimmedPath);
   const relative = path.relative(petRoot, candidate);
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw petError(
-      "pet_spritesheet_path_invalid",
-      "Pet spritesheet paths cannot escape the pet folder.",
-    );
+    throw petError("pet_spritesheet_path_invalid", "Pet spritesheet paths cannot escape the pet folder.");
   }
 
   return candidate;
@@ -285,10 +276,7 @@ async function readValidatedSpritesheet(spritesheetPath, { includeData }) {
 
   const dimensions = imageDimensions(data, mimeType);
   if (!dimensions || dimensions.width !== ATLAS_WIDTH || dimensions.height !== ATLAS_HEIGHT) {
-    throw petError(
-      "pet_spritesheet_dimensions_invalid",
-      "Pet spritesheets must be exactly 1536x1872 pixels.",
-    );
+    throw petError("pet_spritesheet_dimensions_invalid", "Pet spritesheets must be exactly 1536x1872 pixels.");
   }
 
   return {
@@ -306,10 +294,7 @@ async function readValidatedSpritesheetMetadata(spritesheetPath, mimeType) {
     assertSpritesheetByteLength(stat.size);
     const dimensions = await readImageDimensionsFromFile(file, mimeType, stat.size);
     if (!dimensions || dimensions.width !== ATLAS_WIDTH || dimensions.height !== ATLAS_HEIGHT) {
-      throw petError(
-        "pet_spritesheet_dimensions_invalid",
-        "Pet spritesheets must be exactly 1536x1872 pixels.",
-      );
+      throw petError("pet_spritesheet_dimensions_invalid", "Pet spritesheets must be exactly 1536x1872 pixels.");
     }
 
     return {
@@ -361,9 +346,9 @@ async function readImageDimensionsFromFile(file, mimeType, fileSize) {
 async function readWebPDimensionsFromFile(file, fileSize) {
   const riffHeader = await readFileSlice(file, 0, 12);
   if (
-    riffHeader.length < 12 ||
-    riffHeader.toString("ascii", 0, 4) !== "RIFF" ||
-    riffHeader.toString("ascii", 8, 12) !== "WEBP"
+    riffHeader.length < 12
+    || riffHeader.toString("ascii", 0, 4) !== "RIFF"
+    || riffHeader.toString("ascii", 8, 12) !== "WEBP"
   ) {
     return null;
   }
@@ -384,11 +369,7 @@ async function readWebPDimensionsFromFile(file, fileSize) {
 
     const dimensionsPayloadLength = webpDimensionsPayloadLength(chunkType);
     if (dimensionsPayloadLength > 0) {
-      const payload = await readFileSlice(
-        file,
-        payloadOffset,
-        Math.min(chunkSize, dimensionsPayloadLength),
-      );
+      const payload = await readFileSlice(file, payloadOffset, Math.min(chunkSize, dimensionsPayloadLength));
       const chunkBuffer = Buffer.concat([chunkHeader, payload]);
       const dimensions = webpChunkDimensions(chunkBuffer, chunkType, 8, chunkSize);
       if (dimensions) {
@@ -432,11 +413,7 @@ function imageDimensions(data, mimeType) {
 }
 
 function pngDimensions(data) {
-  if (
-    data.length < 24 ||
-    data.readUInt32BE(0) !== 0x89504e47 ||
-    data.readUInt32BE(4) !== 0x0d0a1a0a
-  ) {
+  if (data.length < 24 || data.readUInt32BE(0) !== 0x89504e47 || data.readUInt32BE(4) !== 0x0d0a1a0a) {
     return null;
   }
   return {
@@ -447,9 +424,9 @@ function pngDimensions(data) {
 
 function webpDimensions(data) {
   if (
-    data.length < 30 ||
-    data.toString("ascii", 0, 4) !== "RIFF" ||
-    data.toString("ascii", 8, 12) !== "WEBP"
+    data.length < 30
+    || data.toString("ascii", 0, 4) !== "RIFF"
+    || data.toString("ascii", 8, 12) !== "WEBP"
   ) {
     return null;
   }
@@ -493,9 +470,9 @@ function webpChunkDimensions(data, chunkType, payloadOffset, chunkSize) {
   if (chunkType === "VP8 " && chunkSize >= 10) {
     const startCodeOffset = payloadOffset + 3;
     if (
-      data[startCodeOffset] !== 0x9d ||
-      data[startCodeOffset + 1] !== 0x01 ||
-      data[startCodeOffset + 2] !== 0x2a
+      data[startCodeOffset] !== 0x9d
+      || data[startCodeOffset + 1] !== 0x01
+      || data[startCodeOffset + 2] !== 0x2a
     ) {
       return null;
     }
@@ -522,9 +499,7 @@ function mergeCustomAvatars(avatars) {
       byID.set(avatar.id, avatar);
     }
   }
-  return Array.from(byID.values()).toSorted((left, right) =>
-    left.displayName.localeCompare(right.displayName),
-  );
+  return Array.from(byID.values()).sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
 function firstNonEmptyString(candidates) {
@@ -541,13 +516,11 @@ function firstNonEmptyString(candidates) {
 }
 
 function displayFromSlug(slug) {
-  return (
-    slug
-      .split(/[^a-zA-Z0-9]+/)
-      .filter(Boolean)
-      .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1))
-      .join(" ") || slug
-  );
+  return slug
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1))
+    .join(" ") || slug;
 }
 
 function petError(errorCode, userMessage) {

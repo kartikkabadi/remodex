@@ -5,7 +5,6 @@
 // Depends on: path
 
 const path = require("path");
-const { readString } = require("./normalize");
 
 function buildApplyPatchFileChangeItem({
   callId = "",
@@ -115,13 +114,12 @@ function parseApplyPatchChanges(patchText, { cwd = "" } = {}) {
   }
 
   flushCurrentChange();
-  return changes.filter(
-    (change) =>
-      change.additions > 0 ||
-      change.deletions > 0 ||
-      change.kind === "rename" ||
-      change.kind === "delete",
-  );
+  return changes.filter((change) => (
+    change.additions > 0
+    || change.deletions > 0
+    || change.kind === "rename"
+    || change.kind === "delete"
+  ));
 }
 
 function buildUnifiedDiffForApplyPatchChange(change) {
@@ -132,11 +130,7 @@ function buildUnifiedDiffForApplyPatchChange(change) {
   if (change.kind === "add") {
     diffLines.push("new file mode 100644", "--- /dev/null", `+++ ${gitPatchPath("b", newPath)}`);
   } else if (change.kind === "delete") {
-    diffLines.push(
-      "deleted file mode 100644",
-      `--- ${gitPatchPath("a", oldPath)}`,
-      "+++ /dev/null",
-    );
+    diffLines.push("deleted file mode 100644", `--- ${gitPatchPath("a", oldPath)}`, "+++ /dev/null");
   } else if (change.kind === "rename") {
     diffLines.push(`rename from ${oldPath}`, `rename to ${newPath}`);
     if (change.bodyLines.length > 0) {
@@ -179,6 +173,10 @@ function normalizePatchPath(rawPath, cwd) {
   }
 
   return relativePath;
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 module.exports = {

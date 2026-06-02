@@ -9,7 +9,6 @@ const fs = require("fs");
 const path = require("path");
 const { readDaemonConfig } = require("./daemon-state");
 const { createThreadRolloutActivityWatcher } = require("./rollout-watch");
-const { readString } = require("./normalize");
 
 const DEFAULT_BUNDLE_ID = "com.openai.codex";
 const DEFAULT_APP_PATH = "/Applications/Codex.app";
@@ -53,9 +52,8 @@ class CodexDesktopRefresher {
     this.now = now;
     this.refreshExecutor = refreshExecutor;
     this.watchThreadRolloutFactory = watchThreadRolloutFactory;
-    this.refreshBackend =
-      refreshBackend ||
-      (this.refreshCommand ? "command" : this.refreshExecutor ? "command" : "applescript");
+    this.refreshBackend = refreshBackend
+      || (this.refreshCommand ? "command" : (this.refreshExecutor ? "command" : "applescript"));
     this.customRefreshFailureThreshold = customRefreshFailureThreshold;
 
     this.mode = "idle";
@@ -263,16 +261,16 @@ class CodexDesktopRefresher {
     }
     this.refreshRunning = true;
     this.log(
-      `refresh running: ${Array.from(pendingRefreshKinds).join("+")}${targetThreadId ? ` thread=${targetThreadId}` : ""}`,
+      `refresh running: ${Array.from(pendingRefreshKinds).join("+")}${targetThreadId ? ` thread=${targetThreadId}` : ""}`
     );
 
     let didRefresh = false;
     try {
       const refreshSignature = `${targetUrl || "app"}|${targetThreadId || "no-thread"}`;
       if (
-        !shouldForceCompletionRefresh &&
-        refreshSignature === this.lastRefreshSignature &&
-        this.now() - this.lastRefreshAt < this.debounceMs
+        !shouldForceCompletionRefresh
+        && refreshSignature === this.lastRefreshSignature
+        && this.now() - this.lastRefreshAt < this.debounceMs
       ) {
         this.log(`refresh skipped (duplicate target): ${refreshSignature}`);
       } else {
@@ -290,9 +288,9 @@ class CodexDesktopRefresher {
     } finally {
       this.refreshRunning = false;
       if (
-        didRefresh &&
-        stopWatcherAfterRefreshThreadId &&
-        stopWatcherAfterRefreshThreadId === this.activeWatchedThreadId
+        didRefresh
+        && stopWatcherAfterRefreshThreadId
+        && stopWatcherAfterRefreshThreadId === this.activeWatchedThreadId
       ) {
         this.stopWatcher();
         this.mode = this.pendingNewThread ? "pending_new_thread" : "idle";
@@ -439,14 +437,10 @@ class CodexDesktopRefresher {
     });
 
     if (event.reason === "materialized") {
-      this.queueRefresh(
-        "rollout_materialized",
-        {
-          threadId: event.threadId,
-          url: buildThreadDeepLink(event.threadId),
-        },
-        `rollout ${event.reason}`,
-      );
+      this.queueRefresh("rollout_materialized", {
+        threadId: event.threadId,
+        url: buildThreadDeepLink(event.threadId),
+      }, `rollout ${event.reason}`);
       return;
     }
 
@@ -455,14 +449,10 @@ class CodexDesktopRefresher {
     }
 
     if (previousSize == null) {
-      this.queueRefresh(
-        "rollout_growth",
-        {
-          threadId: event.threadId,
-          url: buildThreadDeepLink(event.threadId),
-        },
-        "rollout first-growth",
-      );
+      this.queueRefresh("rollout_growth", {
+        threadId: event.threadId,
+        url: buildThreadDeepLink(event.threadId),
+      }, "rollout first-growth");
       this.lastMidRunRefreshAt = this.now();
       return;
     }
@@ -472,14 +462,10 @@ class CodexDesktopRefresher {
     }
 
     this.lastMidRunRefreshAt = this.now();
-    this.queueRefresh(
-      "rollout_growth",
-      {
-        threadId: event.threadId,
-        url: buildThreadDeepLink(event.threadId),
-      },
-      "rollout mid-run",
-    );
+    this.queueRefresh("rollout_growth", {
+      threadId: event.threadId,
+      url: buildThreadDeepLink(event.threadId),
+    }, "rollout mid-run");
   }
 
   log(message) {
@@ -533,52 +519,67 @@ class CodexDesktopRefresher {
 
 function readBridgeConfig({
   env = process.env,
-  _platform = process.platform,
+  platform = process.platform,
   runtimeRoot = path.resolve(__dirname, ".."),
   fsImpl = fs,
 } = {}) {
   const daemonConfig = readDaemonConfig({ env, fsImpl }) || {};
   const privateDefaults = readPrivatePackageDefaults({ runtimeRoot, fsImpl });
   const sourceCheckout = isSourceCheckout(runtimeRoot, fsImpl);
-  const defaultRelayUrl = sourceCheckout ? "" : privateDefaults.relayUrl;
-  const explicitRelayUrl = readFirstDefinedEnv(["REMODEX_RELAY", "PHODEX_RELAY"], "", env);
-  const relayUrl = readFirstDefinedEnv(["REMODEX_RELAY", "PHODEX_RELAY"], defaultRelayUrl, env);
-  const defaultPushServiceUrl =
-    sourceCheckout || explicitRelayUrl ? "" : privateDefaults.pushServiceUrl;
+  const defaultRelayUrl = sourceCheckout
+    ? ""
+    : privateDefaults.relayUrl;
+  const explicitRelayUrl = readFirstDefinedEnv(
+    ["REMODEX_RELAY", "PHODEX_RELAY"],
+    "",
+    env
+  );
+  const relayUrl = readFirstDefinedEnv(
+    ["REMODEX_RELAY", "PHODEX_RELAY"],
+    defaultRelayUrl,
+    env
+  );
+  const defaultPushServiceUrl = sourceCheckout || explicitRelayUrl
+    ? ""
+    : privateDefaults.pushServiceUrl;
   const codexEndpoint = readFirstDefinedEnv(
     ["REMODEX_CODEX_ENDPOINT", "PHODEX_CODEX_ENDPOINT"],
     "",
-    env,
+    env
   );
   const refreshCommand = readFirstDefinedEnv(
     ["REMODEX_REFRESH_COMMAND", "PHODEX_ON_PHONE_MESSAGE"],
     "",
-    env,
+    env
   );
   const explicitRefreshEnabled = readOptionalBooleanEnv(["REMODEX_REFRESH_ENABLED"], env);
   const explicitKeepMacAwakeEnabled = readOptionalBooleanEnv(["REMODEX_KEEP_MAC_AWAKE"], env);
-  const persistedKeepMacAwakeEnabled =
-    typeof daemonConfig.keepMacAwakeEnabled === "boolean" ? daemonConfig.keepMacAwakeEnabled : null;
+  const persistedKeepMacAwakeEnabled = typeof daemonConfig.keepMacAwakeEnabled === "boolean"
+    ? daemonConfig.keepMacAwakeEnabled
+    : null;
   // Desktop refresh is opt-in for now because Codex.app still lacks true live updates.
   const defaultRefreshEnabled = false;
   return {
     relayUrl,
-    pushServiceUrl: readFirstDefinedEnv(["REMODEX_PUSH_SERVICE_URL"], defaultPushServiceUrl, env),
+    pushServiceUrl: readFirstDefinedEnv(
+      ["REMODEX_PUSH_SERVICE_URL"],
+      defaultPushServiceUrl,
+      env
+    ),
     pushPreviewMaxChars: parseIntegerEnv(
       readFirstDefinedEnv(["REMODEX_PUSH_PREVIEW_MAX_CHARS"], "160", env),
-      160,
+      160
     ),
-    refreshEnabled: explicitRefreshEnabled == null ? defaultRefreshEnabled : explicitRefreshEnabled,
+    refreshEnabled: explicitRefreshEnabled == null
+      ? defaultRefreshEnabled
+      : explicitRefreshEnabled,
     refreshDebounceMs: parseIntegerEnv(
       readFirstDefinedEnv(["REMODEX_REFRESH_DEBOUNCE_MS"], String(DEFAULT_DEBOUNCE_MS), env),
-      DEFAULT_DEBOUNCE_MS,
+      DEFAULT_DEBOUNCE_MS
     ),
-    keepMacAwakeEnabled:
-      explicitKeepMacAwakeEnabled == null
-        ? persistedKeepMacAwakeEnabled == null
-          ? false
-          : persistedKeepMacAwakeEnabled
-        : explicitKeepMacAwakeEnabled,
+    keepMacAwakeEnabled: explicitKeepMacAwakeEnabled == null
+      ? (persistedKeepMacAwakeEnabled == null ? false : persistedKeepMacAwakeEnabled)
+      : explicitKeepMacAwakeEnabled,
     codexEndpoint,
     desktopIpcSocketPath: readFirstDefinedEnv(["REMODEX_DESKTOP_IPC_SOCKET"], "", env),
     refreshCommand,
@@ -613,9 +614,8 @@ function readPrivatePackageDefaults({ runtimeRoot, fsImpl }) {
 // Keeps repo checkouts local-first while published npm installs can stay ready-to-run.
 function isSourceCheckout(runtimeRoot, fsImpl) {
   const repoRoot = path.resolve(runtimeRoot, "..");
-  return (
-    path.basename(runtimeRoot) === "phodex-bridge" && fsImpl.existsSync(path.join(repoRoot, ".git"))
-  );
+  return path.basename(runtimeRoot) === "phodex-bridge"
+    && fsImpl.existsSync(path.join(repoRoot, ".git"));
 }
 
 function execFilePromise(command, args) {
@@ -638,6 +638,10 @@ function safeParseJSON(value) {
   } catch {
     return null;
   }
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function extractTurnId(message) {
@@ -743,10 +747,10 @@ function parseIntegerEnv(value, fallback) {
 
 function extractErrorMessage(error) {
   return (
-    error?.stderr?.toString("utf8") ||
-    error?.stdout?.toString("utf8") ||
-    error?.message ||
-    "unknown refresh error"
+    error?.stderr?.toString("utf8")
+    || error?.stdout?.toString("utf8")
+    || error?.message
+    || "unknown refresh error"
   ).trim();
 }
 

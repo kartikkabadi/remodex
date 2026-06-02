@@ -3,7 +3,6 @@
 // Layer: Bridge handler
 // Exports: createNotificationsHandler
 // Depends on: none
-const { readStringOrNull } = require("./normalize");
 
 function createNotificationsHandler({ pushServiceClient, logPrefix = "[remodex]" } = {}) {
   function handleNotificationsRequest(rawMessage, sendResponse) {
@@ -28,18 +27,16 @@ function createNotificationsHandler({ pushServiceClient, logPrefix = "[remodex]"
       })
       .catch((error) => {
         console.error(`${logPrefix} push registration failed: ${error.message}`);
-        sendResponse(
-          JSON.stringify({
-            id,
-            error: {
-              code: -32000,
-              message: error.userMessage || error.message || "Push registration failed.",
-              data: {
-                errorCode: error.errorCode || "push_registration_failed",
-              },
+        sendResponse(JSON.stringify({
+          id,
+          error: {
+            code: -32000,
+            message: error.userMessage || error.message || "Push registration failed.",
+            data: {
+              errorCode: error.errorCode || "push_registration_failed",
             },
-          }),
-        );
+          },
+        }));
       });
 
     return true;
@@ -50,13 +47,13 @@ function createNotificationsHandler({ pushServiceClient, logPrefix = "[remodex]"
       return { ok: false, skipped: true };
     }
 
-    const deviceToken = readStringOrNull(params.deviceToken);
+    const deviceToken = readString(params.deviceToken);
     const alertsEnabled = Boolean(params.alertsEnabled);
     const apnsEnvironment = readAPNsEnvironment(params.appEnvironment);
     if (!deviceToken) {
       throw notificationsError(
         "missing_device_token",
-        "notifications/push/register requires a deviceToken.",
+        "notifications/push/register requires a deviceToken."
       );
     }
 
@@ -76,6 +73,10 @@ function createNotificationsHandler({ pushServiceClient, logPrefix = "[remodex]"
   return {
     handleNotificationsRequest,
   };
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function readAPNsEnvironment(value) {

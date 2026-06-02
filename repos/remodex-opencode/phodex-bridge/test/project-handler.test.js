@@ -16,13 +16,10 @@ const {
   projectCreateRootlessChatRoot,
   projectListDirectory,
   projectProjectlessRoots,
-  projectKnownProjects,
-  projectRememberKnownProject,
   projectSearchDirectories,
   projectValidatePath,
   rootlessChatSlugFromPromptHint,
 } = require("../src/project-handler");
-const { createProjectRegistry } = require("../src/project-registry");
 
 function makeTempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "remodex-project-handler-"));
@@ -36,7 +33,7 @@ test("project/quickLocations only returns existing allowed folders", async () =>
 
   assert.deepEqual(
     result.locations.map((location) => location.id),
-    ["home", "developer"],
+    ["home", "developer"]
   );
 });
 
@@ -54,44 +51,6 @@ test("project/projectlessRoots returns host-side Codex chat roots", async () => 
   ]);
 });
 
-test("project/rememberKnownProject stores a validated folder for picker reuse", async () => {
-  const homeDir = makeTempHome();
-  const projectPath = path.join(homeDir, "Developer", "App");
-  fs.mkdirSync(projectPath, { recursive: true });
-  const projectRegistry = createProjectRegistry({
-    homeDir,
-    codexHome: path.join(homeDir, ".codex"),
-    storagePath: path.join(homeDir, ".codex", "remodex", "known-projects.json"),
-  });
-
-  const remembered = await projectRememberKnownProject(
-    { path: projectPath, provider: "opencode" },
-    { homeDir, projectRegistry },
-  );
-  const listed = await projectKnownProjects({}, { projectRegistry });
-
-  assert.equal(remembered.project.path, fs.realpathSync(projectPath));
-  assert.deepEqual(
-    listed.projects.map((project) => project.path),
-    [fs.realpathSync(projectPath)],
-  );
-  assert.deepEqual(listed.projects[0].providerHints, ["opencode"]);
-});
-
-test("project/rememberKnownProject rejects folders outside allowed local roots", async () => {
-  const homeDir = makeTempHome();
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-known-outside-"));
-  const projectRegistry = createProjectRegistry({
-    homeDir,
-    storagePath: path.join(homeDir, ".codex", "remodex", "known-projects.json"),
-  });
-
-  await assert.rejects(
-    () => projectRememberKnownProject({ path: outsideDir }, { homeDir, projectRegistry }),
-    /outside the allowed local project locations/,
-  );
-});
-
 test("project/listDirectory returns sorted child folders and skips files or hidden folders by default", async () => {
   const homeDir = makeTempHome();
   fs.mkdirSync(path.join(homeDir, "Zoo"));
@@ -106,20 +65,17 @@ test("project/listDirectory returns sorted child folders and skips files or hidd
   assert.equal(result.parentPath, null);
   assert.deepEqual(
     result.entries.map((entry) => entry.name),
-    ["app", "Zoo"],
+    ["app", "Zoo"]
   );
 });
 
 test("project/createDirectory creates one child folder under an allowed parent", async () => {
   const homeDir = makeTempHome();
 
-  const result = await projectCreateDirectory(
-    {
-      parentPath: homeDir,
-      name: "New App",
-    },
-    { homeDir },
-  );
+  const result = await projectCreateDirectory({
+    parentPath: homeDir,
+    name: "New App",
+  }, { homeDir });
 
   assert.equal(result.path, path.join(fs.realpathSync(homeDir), "New App"));
   assert.equal(fs.statSync(result.path).isDirectory(), true);
@@ -133,18 +89,15 @@ test("project/searchDirectories finds matching child folders recursively", async
   fs.mkdirSync(path.join(homeDir, "Developer", "Other"));
   fs.writeFileSync(path.join(homeDir, "Developer", "client-notes.txt"), "hello");
 
-  const result = await projectSearchDirectories(
-    {
-      path: path.join(homeDir, "Developer"),
-      query: "client",
-    },
-    { homeDir },
-  );
+  const result = await projectSearchDirectories({
+    path: path.join(homeDir, "Developer"),
+    query: "client",
+  }, { homeDir });
 
   assert.equal(result.path, fs.realpathSync(path.join(homeDir, "Developer")));
   assert.deepEqual(
     result.entries.map((entry) => entry.name),
-    ["ClientApp"],
+    ["ClientApp"]
   );
 });
 
@@ -154,34 +107,24 @@ test("project/searchDirectories respects depth and hidden folder bounds", async 
   fs.mkdirSync(path.join(homeDir, "Visible", "DeepMatch"));
   fs.mkdirSync(path.join(homeDir, ".match-hidden"));
 
-  const result = await projectSearchDirectories(
-    {
-      path: homeDir,
-      query: "match",
-      maxDepth: 0,
-    },
-    { homeDir },
-  );
+  const result = await projectSearchDirectories({
+    path: homeDir,
+    query: "match",
+    maxDepth: 0,
+  }, { homeDir });
 
-  assert.deepEqual(
-    result.entries.map((entry) => entry.name),
-    [],
-  );
+  assert.deepEqual(result.entries.map((entry) => entry.name), []);
 });
 
 test("project/createDirectory rejects names that escape the selected parent", async () => {
   const homeDir = makeTempHome();
 
   await assert.rejects(
-    () =>
-      projectCreateDirectory(
-        {
-          parentPath: homeDir,
-          name: "../escape",
-        },
-        { homeDir },
-      ),
-    /Folder names cannot contain path separators/,
+    () => projectCreateDirectory({
+      parentPath: homeDir,
+      name: "../escape",
+    }, { homeDir }),
+    /Folder names cannot contain path separators/
   );
 });
 
@@ -190,7 +133,7 @@ test("project/listDirectory rejects relative paths so bridge cwd never decides b
 
   await assert.rejects(
     () => projectListDirectory({ path: "." }, { homeDir }),
-    /Use an absolute folder path/,
+    /Use an absolute folder path/
   );
 });
 
@@ -222,11 +165,11 @@ test("project/validatePath rejects folders outside the allowed home root", async
 test("rootlessChatSlugFromPromptHint mirrors Codex Desktop's kebab-case slug shape", () => {
   assert.equal(
     rootlessChatSlugFromPromptHint("mi dici la pwd corrente?"),
-    "mi-dici-la-pwd-corrente",
+    "mi-dici-la-pwd-corrente"
   );
   assert.equal(
     rootlessChatSlugFromPromptHint("  Mi FAI un cwd di dove siamo davvero, grazie!"),
-    "mi-fai-un-cwd-di-dove",
+    "mi-fai-un-cwd-di-dove"
   );
   assert.equal(rootlessChatSlugFromPromptHint(""), "new-chat");
   assert.equal(rootlessChatSlugFromPromptHint("   ¿¿¿ !!! "), "new-chat");
@@ -237,7 +180,7 @@ test("project/createRootlessChatRoot materializes a dated Documents/Codex slug f
   const homeDir = makeTempHome();
   const result = await projectCreateRootlessChatRoot(
     { promptHint: "Mi dici la pwd corrente?", dateFolder: "2026-05-19" },
-    { homeDir },
+    { homeDir }
   );
 
   const expectedRoot = path.join(homeDir, "Documents", "Codex");
@@ -257,11 +200,11 @@ test("project/createRootlessChatRoot dedupes colliding slugs in the same day", a
   const homeDir = makeTempHome();
   const firstResult = await projectCreateRootlessChatRoot(
     { promptHint: "Same idea twice", dateFolder: "2026-05-19" },
-    { homeDir },
+    { homeDir }
   );
   const secondResult = await projectCreateRootlessChatRoot(
     { promptHint: "Same idea twice", dateFolder: "2026-05-19" },
-    { homeDir },
+    { homeDir }
   );
 
   assert.equal(path.basename(firstResult.path), "same-idea-twice");
@@ -272,9 +215,11 @@ test("project/createRootlessChatRoot rejects malformed date folders", async () =
   const homeDir = makeTempHome();
 
   await assert.rejects(
-    () =>
-      projectCreateRootlessChatRoot({ promptHint: "hello", dateFolder: "2026/05/19" }, { homeDir }),
-    /chat date folder must be in YYYY-MM-DD format/,
+    () => projectCreateRootlessChatRoot(
+      { promptHint: "hello", dateFolder: "2026/05/19" },
+      { homeDir }
+    ),
+    /chat date folder must be in YYYY-MM-DD format/
   );
 });
 
@@ -298,7 +243,7 @@ test("handleProjectRequest responds to project JSON-RPC requests", async () => {
       (payload) => {
         response = payload;
         resolveResponse();
-      },
+      }
     );
 
     assert.equal(handled, true);

@@ -20,9 +20,11 @@ const GITHUB_CLI_TIMEOUT_MS = 120_000;
 const GIT_DRAFT_PATCH_MAX_BYTES = 80_000;
 const EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const DEFAULT_GIT_WRITER_MODEL = "gpt-5.4-mini";
+const STATUS_UPSTREAM_FETCH_TTL_MS = 15_000;
 
 let runStructuredCodexJsonImpl = runStructuredCodexJson;
 let runGitHubCliImpl = runGitHubCli;
+const statusUpstreamFetchCache = new Map();
 
 function resolveGitWriterModel(rawModel) {
   const trimmed = typeof rawModel === "string" ? rawModel.trim() : "";
@@ -56,12 +58,10 @@ function handleGitRequest(rawMessage, sendResponse, options = {}) {
     if (typeof notificationMethod !== "string" || !notificationMethod) {
       return;
     }
-    sendResponse(
-      JSON.stringify({
-        method: notificationMethod,
-        params: notificationParams ?? {},
-      }),
-    );
+    sendResponse(JSON.stringify({
+      method: notificationMethod,
+      params: notificationParams ?? {},
+    }));
   };
 
   const methodOptions = { ...options, sendNotification };
@@ -84,7 +84,7 @@ function handleGitRequest(rawMessage, sendResponse, options = {}) {
             message,
             data: { errorCode },
           },
-        }),
+        })
       );
     });
 
@@ -155,12 +155,8 @@ async function handleGitMethod(method, params, options = {}) {
 
 // Owns mobile thread renames locally so they do not fall through to unsupported Codex RPC.
 function threadNameSet(params) {
-  const threadId = normalizeNonEmptyLine(
-    params.threadId || params.thread_id || params.conversationId || params.conversation_id,
-  );
-  const name = normalizeNonEmptyLine(
-    params.name || params.threadName || params.thread_name || params.title,
-  );
+  const threadId = normalizeNonEmptyLine(params.threadId || params.thread_id || params.conversationId || params.conversation_id);
+  const name = normalizeNonEmptyLine(params.name || params.threadName || params.thread_name || params.title);
   if (!threadId) {
     throw gitError("missing_thread_id", "A thread ID is required to rename a thread.");
   }
@@ -178,44 +174,26 @@ async function gitStatus(cwd) {
     return nonRepositoryStatus(cwd);
   }
 
-  const [porcelain, branchInfo, repoRoot] = await Promise.all([
-    git(cwd, "status", "--porcelain=v1", "-b"),
-    revListCounts(cwd).catch(() => ({ ahead: 0, behind: 0 })),
-    resolveRepoRoot(cwd).catch(() => null),
-  ]);
-
-  const lines = porcelain.trim().split("\n").filter(Boolean);
-  const branchLine = lines[0] || "";
-  const fileLines = lines.slice(1);
-
-  const branch = parseBranchFromStatus(branchLine);
-  const tracking = parseTrackingFromStatus(branchLine);
-  const files = fileLines.map((line) => ({
-    path: line.substring(3).trim(),
-    status: line.substring(0, 2).trim(),
-  }));
-
-  const dirty = files.length > 0;
-  const { ahead, behind } = branchInfo;
-  const detached = branchLine.includes("HEAD detached") || branchLine.includes("no branch");
-  const noUpstream = tracking === null && !detached;
+  const snapshot = await readGitStatusSnapshot(cwd);
+  const { ahead, behind } = await freshBranchInfoForStatus(cwd, snapshot);
+  const dirty = snapshot.files.length > 0;
+  const noUpstream = snapshot.tracking === null && !snapshot.detached;
   const hasHeadCommit = await refExists(cwd, "HEAD").catch(() => false);
-  const hasPushRemote = await pushRemoteAvailable(cwd, tracking).catch(() => false);
-  const publishedToRemote =
-    !detached && !!branch && (await remoteBranchExists(cwd, branch).catch(() => false));
-  const localOnlyCommitCount = await countLocalOnlyCommits(cwd, { detached }).catch(() => 0);
-  const state = computeState(dirty, ahead, behind, detached, noUpstream);
-  const canPush = hasPushRemote && hasHeadCommit && (ahead > 0 || noUpstream) && !detached;
+  const hasPushRemote = await pushRemoteAvailable(cwd, snapshot.tracking).catch(() => false);
+  const publishedToRemote = !snapshot.detached && !!snapshot.branch && await remoteBranchExists(cwd, snapshot.branch).catch(() => false);
+  const localOnlyCommitCount = await countLocalOnlyCommits(cwd, { detached: snapshot.detached }).catch(() => 0);
+  const state = computeState(dirty, ahead, behind, snapshot.detached, noUpstream);
+  const canPush = hasPushRemote && hasHeadCommit && (ahead > 0 || noUpstream) && !snapshot.detached;
   const diff = await repoDiffTotals(cwd, {
-    tracking,
-    fileLines,
+    tracking: snapshot.tracking,
+    fileLines: snapshot.fileLines,
   }).catch(() => ({ additions: 0, deletions: 0, binaryFiles: 0 }));
 
   return {
     isRepo: true,
-    repoRoot,
-    branch,
-    tracking,
+    repoRoot: snapshot.repoRoot,
+    branch: snapshot.branch,
+    tracking: snapshot.tracking,
     dirty,
     hasHeadCommit,
     hasPushRemote,
@@ -225,9 +203,42 @@ async function gitStatus(cwd) {
     state,
     canPush,
     publishedToRemote,
-    files,
+    files: snapshot.files,
     diff,
   };
+}
+
+async function readGitStatusSnapshot(cwd) {
+  const [porcelain, repoRoot] = await Promise.all([
+    git(cwd, "status", "--porcelain=v1", "-b"),
+    resolveRepoRoot(cwd).catch(() => null),
+  ]);
+
+  const lines = porcelain.trim().split("\n").filter(Boolean);
+  const branchLine = lines[0] || "";
+  const fileLines = lines.slice(1);
+
+  const branch = parseBranchFromStatus(branchLine);
+  const tracking = parseTrackingFromStatus(branchLine);
+  const detached = branchLine.includes("HEAD detached") || branchLine.includes("no branch");
+  const files = fileLines.map((line) => ({
+    path: line.substring(3).trim(),
+    status: line.substring(0, 2).trim(),
+  }));
+
+  return {
+    repoRoot,
+    branch,
+    tracking,
+    detached,
+    fileLines,
+    files,
+  };
+}
+
+async function freshBranchInfoForStatus(cwd, snapshot) {
+  await refreshStatusUpstreamIfNeeded(cwd, snapshot.tracking, snapshot.repoRoot).catch(() => false);
+  return await revListCounts(cwd).catch(() => ({ ahead: 0, behind: 0 }));
 }
 
 async function gitInit(cwd) {
@@ -369,10 +380,7 @@ async function threadGenerateTitle(params, options = {}) {
   const model = resolveGitWriterModel(params.model);
   const message = normalizeNonEmptyMultilineString(params.message || params.prompt);
   if (!message) {
-    throw gitError(
-      "missing_thread_title_message",
-      "A first message is required to generate a thread title.",
-    );
+    throw gitError("missing_thread_title_message", "A first message is required to generate a thread title.");
   }
 
   try {
@@ -425,7 +433,7 @@ async function gitPush(cwd) {
 
     // Try normal push first; if no upstream, set it
     try {
-      await git(cwd, "push");
+        await git(cwd, "push");
     } catch (pushErr) {
       if (
         pushErr.message?.includes("no upstream") ||
@@ -476,14 +484,12 @@ async function gitBranches(cwd) {
     resolveLocalCheckoutRoot(cwd).catch(() => null),
   ]);
   const projectRelativePath = resolveProjectRelativePath(cwd, repoRoot);
-  const worktreePathByBranch = await gitWorktreePathByBranch(cwd, { projectRelativePath }).catch(
-    () => ({}),
-  );
-  const localCheckoutPath = scopedLocalCheckoutPath(
-    localCheckoutRoot || repoRoot,
-    projectRelativePath,
-  );
-  const lines = output.trim().split("\n").filter(Boolean);
+  const worktreePathByBranch = await gitWorktreePathByBranch(cwd, { projectRelativePath }).catch(() => ({}));
+  const localCheckoutPath = scopedLocalCheckoutPath(localCheckoutRoot || repoRoot, projectRelativePath);
+  const lines = output
+    .trim()
+    .split("\n")
+    .filter(Boolean);
 
   let current = "";
   const branchSet = new Set();
@@ -519,12 +525,12 @@ async function gitBranches(cwd) {
       }
     }
   }
-  const resolvedBranches = [...branchSet].toSorted();
+  const resolvedBranches = [...branchSet].sort();
   const defaultBranch = await detectDefaultBranch(cwd, resolvedBranches);
 
   return {
     branches: resolvedBranches,
-    branchesCheckedOutElsewhere: [...branchesCheckedOutElsewhere].toSorted(),
+    branchesCheckedOutElsewhere: [...branchesCheckedOutElsewhere].sort(),
     worktreePathByBranch,
     localCheckoutPath,
     current,
@@ -547,22 +553,19 @@ async function gitCheckout(cwd, params) {
     if (err.message?.includes("untracked working tree files would be overwritten")) {
       throw gitError(
         "checkout_conflict_untracked_collision",
-        "Cannot switch branches: untracked files would be overwritten.",
+        "Cannot switch branches: untracked files would be overwritten."
       );
     }
     if (err.message?.includes("local changes to the following files would be overwritten")) {
       throw gitError(
         "checkout_conflict_dirty_tree",
-        "Cannot switch branches: tracked local changes would be overwritten.",
+        "Cannot switch branches: tracked local changes would be overwritten."
       );
     }
-    if (
-      err.message?.includes("already used by worktree") ||
-      err.message?.includes("already checked out at")
-    ) {
+    if (err.message?.includes("already used by worktree") || err.message?.includes("already checked out at")) {
       throw gitError(
         "checkout_branch_in_other_worktree",
-        "Cannot switch branches: this branch is already open in another worktree.",
+        "Cannot switch branches: this branch is already open in another worktree."
       );
     }
     if (err.message?.includes("invalid reference") || err.message?.includes("unknown revision")) {
@@ -578,7 +581,12 @@ async function gitCheckout(cwd, params) {
 // ─── Git Log ──────────────────────────────────────────────────
 
 async function gitLog(cwd) {
-  const output = await git(cwd, "log", "-20", "--format=%H%x00%s%x00%an%x00%aI");
+  const output = await git(
+    cwd,
+    "log",
+    "-20",
+    "--format=%H%x00%s%x00%an%x00%aI"
+  );
 
   const commits = output
     .trim()
@@ -607,10 +615,10 @@ async function gitCreateBranch(cwd, params) {
   await assertValidCreatedBranchName(cwd, name);
 
   // Keep create-branch local-first so we never fork history under a remote-only name.
-  if (!(await localBranchExists(cwd, name)) && (await remoteBranchExists(cwd, name))) {
+  if (!(await localBranchExists(cwd, name)) && await remoteBranchExists(cwd, name)) {
     throw gitError(
       "branch_exists",
-      `Branch '${name}' already exists on origin. Check it out locally instead of creating a new branch.`,
+      `Branch '${name}' already exists on origin. Check it out locally instead of creating a new branch.`
     );
   }
 
@@ -647,7 +655,7 @@ async function gitCreateWorktree(cwd, params) {
   if (!(await localBranchExists(cwd, baseBranch))) {
     throw gitError(
       "missing_base_branch",
-      `Base branch '${baseBranch}' is not available locally. Create or check out that branch first.`,
+      `Base branch '${baseBranch}' is not available locally. Create or check out that branch first.`
     );
   }
 
@@ -658,7 +666,7 @@ async function gitCreateWorktree(cwd, params) {
     const transferVerb = changeTransfer === "copy" ? "copy" : "move";
     throw gitError(
       "dirty_worktree_base_mismatch",
-      `Uncommitted changes can ${transferVerb} into a new worktree only from ${currentBranchLabel}. Switch the base branch to match or clean up local changes first.`,
+      `Uncommitted changes can ${transferVerb} into a new worktree only from ${currentBranchLabel}. Switch the base branch to match or clean up local changes first.`
     );
   }
 
@@ -667,7 +675,7 @@ async function gitCreateWorktree(cwd, params) {
     if (sameFilePath(existingWorktreePath, cwd)) {
       throw gitError(
         "branch_already_open_here",
-        `Branch '${branch}' is already open in this project.`,
+        `Branch '${branch}' is already open in this project.`
       );
     }
 
@@ -682,7 +690,7 @@ async function gitCreateWorktree(cwd, params) {
   if (branchExists) {
     throw gitError(
       "branch_exists",
-      `Branch '${branch}' already exists locally. Choose another name or open that branch instead.`,
+      `Branch '${branch}' already exists locally. Choose another name or open that branch instead.`
     );
   }
 
@@ -694,10 +702,7 @@ async function gitCreateWorktree(cwd, params) {
   try {
     if (canCarryLocalChanges) {
       if (changeTransfer === "copy") {
-        copiedLocalChangesPatch = await captureLocalChangesPatch(
-          repoRoot,
-          changeScope.pathspecArgs,
-        );
+        copiedLocalChangesPatch = await captureLocalChangesPatch(repoRoot, changeScope.pathspecArgs);
       } else if (changeTransfer === "move") {
         handoffStashRef = await stashChangesForWorktreeHandoff(repoRoot, changeScope.pathspecArgs);
       }
@@ -729,13 +734,10 @@ async function gitCreateWorktree(cwd, params) {
     if (err.message?.includes("already exists")) {
       throw gitError("branch_exists", `Branch '${branch}' already exists.`);
     }
-    if (
-      err.message?.includes("already used by worktree") ||
-      err.message?.includes("already checked out at")
-    ) {
+    if (err.message?.includes("already used by worktree") || err.message?.includes("already checked out at")) {
       throw gitError(
         "branch_in_other_worktree",
-        `Branch '${branch}' is already open in another worktree.`,
+        `Branch '${branch}' is already open in another worktree.`
       );
     }
     throw gitError("create_worktree_failed", err.message || "Failed to create worktree.");
@@ -763,7 +765,7 @@ async function gitCreateManagedWorktree(cwd, params) {
   if (!(await localBranchExists(cwd, baseBranch))) {
     throw gitError(
       "missing_base_branch",
-      `Base branch '${baseBranch}' is not available locally. Create or check out that branch first.`,
+      `Base branch '${baseBranch}' is not available locally. Create or check out that branch first.`
     );
   }
 
@@ -774,7 +776,7 @@ async function gitCreateManagedWorktree(cwd, params) {
     const transferVerb = changeTransfer === "copy" ? "copy" : "move";
     throw gitError(
       "dirty_worktree_base_mismatch",
-      `Uncommitted changes can ${transferVerb} into a managed worktree only from ${currentBranchLabel}. Switch the base branch to match or clean up local changes first.`,
+      `Uncommitted changes can ${transferVerb} into a managed worktree only from ${currentBranchLabel}. Switch the base branch to match or clean up local changes first.`
     );
   }
 
@@ -786,10 +788,7 @@ async function gitCreateManagedWorktree(cwd, params) {
   try {
     if (canCarryLocalChanges) {
       if (changeTransfer === "copy") {
-        copiedLocalChangesPatch = await captureLocalChangesPatch(
-          repoRoot,
-          changeScope.pathspecArgs,
-        );
+        copiedLocalChangesPatch = await captureLocalChangesPatch(repoRoot, changeScope.pathspecArgs);
       } else if (changeTransfer === "move") {
         handoffStashRef = await stashChangesForWorktreeHandoff(repoRoot, changeScope.pathspecArgs);
       }
@@ -839,30 +838,29 @@ async function gitTransferManagedHandoff(cwd, params) {
   if (!isExistingDirectory(cwd)) {
     throw gitError(
       "missing_handoff_source",
-      "The current handoff source is not available on this Mac.",
+      "The current handoff source is not available on this Mac."
     );
   }
   if (!isExistingDirectory(targetPath)) {
     throw gitError(
       "missing_handoff_target",
-      "The destination for this handoff is not available on this Mac.",
+      "The destination for this handoff is not available on this Mac."
     );
   }
 
-  const [sourceRepoRoot, sourceLocalCheckoutRoot, targetRepoRoot, targetLocalCheckoutRoot] =
-    await Promise.all([
-      resolveRepoRoot(cwd),
-      resolveLocalCheckoutRoot(cwd),
-      resolveRepoRoot(targetPath),
-      resolveLocalCheckoutRoot(targetPath),
-    ]);
+  const [sourceRepoRoot, sourceLocalCheckoutRoot, targetRepoRoot, targetLocalCheckoutRoot] = await Promise.all([
+    resolveRepoRoot(cwd),
+    resolveLocalCheckoutRoot(cwd),
+    resolveRepoRoot(targetPath),
+    resolveLocalCheckoutRoot(targetPath),
+  ]);
 
   const sourceCheckoutRoot = sourceLocalCheckoutRoot || sourceRepoRoot;
   const targetCheckoutRoot = targetLocalCheckoutRoot || targetRepoRoot;
   if (!sameFilePath(sourceCheckoutRoot, targetCheckoutRoot)) {
     throw gitError(
       "handoff_target_mismatch",
-      "The selected handoff destination belongs to a different checkout.",
+      "The selected handoff destination belongs to a different checkout."
     );
   }
 
@@ -892,14 +890,11 @@ async function gitTransferManagedHandoff(cwd, params) {
   if (targetChangeScope.dirty) {
     throw gitError(
       "handoff_target_dirty",
-      "The handoff destination already has uncommitted changes. Clean it up before moving this thread there.",
+      "The handoff destination already has uncommitted changes. Clean it up before moving this thread there."
     );
   }
 
-  const stashRef = await stashChangesForWorktreeHandoff(
-    sourceRepoRoot,
-    sourceChangeScope.pathspecArgs,
-  );
+  const stashRef = await stashChangesForWorktreeHandoff(sourceRepoRoot, sourceChangeScope.pathspecArgs);
   if (!stashRef) {
     return {
       success: true,
@@ -915,9 +910,7 @@ async function gitTransferManagedHandoff(cwd, params) {
     await restoreWorktreeHandoffStash(sourceRepoRoot, stashRef);
     throw gitError(
       "handoff_transfer_failed",
-      err.userMessage ||
-        err.message ||
-        "Could not move local changes into the handoff destination.",
+      err.userMessage || err.message || "Could not move local changes into the handoff destination."
     );
   }
 
@@ -934,10 +927,7 @@ async function gitRemoveWorktree(cwd, params) {
   const branch = typeof params.branch === "string" ? params.branch.trim() : "";
 
   if (!worktreeRootPath || !localCheckoutRoot) {
-    throw gitError(
-      "missing_working_directory",
-      "Could not resolve the worktree roots for cleanup.",
-    );
+    throw gitError("missing_working_directory", "Could not resolve the worktree roots for cleanup.");
   }
   if (sameFilePath(worktreeRootPath, localCheckoutRoot)) {
     throw gitError("cannot_remove_local_checkout", "Cannot remove the main local checkout.");
@@ -947,10 +937,10 @@ async function gitRemoveWorktree(cwd, params) {
   }
 
   await cleanupManagedWorktree(localCheckoutRoot, worktreeRootPath, branch || null);
-  if (branch && (await localBranchExists(localCheckoutRoot, branch))) {
+  if (branch && await localBranchExists(localCheckoutRoot, branch)) {
     throw gitError(
       "worktree_cleanup_failed",
-      `The temporary worktree was removed, but branch '${branch}' could not be deleted automatically.`,
+      `The temporary worktree was removed, but branch '${branch}' could not be deleted automatically.`
     );
   }
   return { success: true };
@@ -981,7 +971,7 @@ async function gitResetToRemote(cwd, params) {
   if (params.confirm !== "discard_runtime_changes") {
     throw gitError(
       "confirmation_required",
-      'This action requires params.confirm === "discard_runtime_changes".',
+      'This action requires params.confirm === "discard_runtime_changes".'
     );
   }
 
@@ -1017,16 +1007,14 @@ async function gitRemoteUrl(cwd) {
 async function gitRunStackedAction(cwd, params, options = {}) {
   const action = normalizeStackedGitAction(params.action);
   const initialStatus = await gitStatus(cwd);
-  const wantsCommit =
-    action === "commit" || action === "commit_push" || action === "commit_push_pr";
+  const wantsCommit = action === "commit" || action === "commit_push" || action === "commit_push_pr";
   const wantsPr = action === "create_pr" || action === "commit_push_pr";
 
   // Emits phase progress events on the same wire used by JSON-RPC responses
   // so the iOS toast can reflect the live step (commit/push/PR) of a stacked action.
-  const progressId =
-    typeof params.progressId === "string" && params.progressId.trim()
-      ? params.progressId.trim()
-      : null;
+  const progressId = typeof params.progressId === "string" && params.progressId.trim()
+    ? params.progressId.trim()
+    : null;
   const emitPhase = (phase, status) => {
     if (!progressId || typeof options.sendNotification !== "function") {
       return;
@@ -1097,11 +1085,7 @@ async function gitRunStackedAction(cwd, params, options = {}) {
     if (action === "push" && !statusBeforePush.canPush) {
       throw gitError("nothing_to_push", "Nothing to push.");
     }
-    if (
-      action === "commit_push" &&
-      result.commit.status === "skipped_clean" &&
-      !statusBeforePush.canPush
-    ) {
+    if (action === "commit_push" && result.commit.status === "skipped_clean" && !statusBeforePush.canPush) {
       throw gitError("nothing_to_commit", "Nothing to commit or push.");
     }
     if (statusBeforePush.dirty) {
@@ -1117,14 +1101,10 @@ async function gitRunStackedAction(cwd, params, options = {}) {
 
   if (wantsPr) {
     emitPhase("createPR", "started");
-    result.pr = await gitCreatePullRequest(
-      cwd,
-      {
-        ...params,
-        pushBeforeCreate: false,
-      },
-      options,
-    );
+    result.pr = await gitCreatePullRequest(cwd, {
+      ...params,
+      pushBeforeCreate: false,
+    }, options);
     emitPhase("createPR", "completed");
   }
 
@@ -1138,7 +1118,7 @@ async function gitCreatePullRequest(cwd, params, options = {}) {
     throw gitError("dirty_worktree", "Commit local changes before creating a PR.");
   }
 
-  const branch = status.branch || (await currentBranchName(cwd));
+  const branch = status.branch || await currentBranchName(cwd);
   if (!branch || branch === "HEAD") {
     throw gitError("no_branch", "No current branch found.");
   }
@@ -1148,17 +1128,14 @@ async function gitCreatePullRequest(cwd, params, options = {}) {
   }
 
   const branchResult = await gitBranches(cwd);
-  const baseBranch = resolveBaseBranchName(
-    params.baseBranch,
-    branchResult.default || branchResult.defaultBranch,
-  );
+  const baseBranch = resolveBaseBranchName(params.baseBranch, branchResult.default || branchResult.defaultBranch);
   if (!baseBranch) {
     throw gitError("no_default_branch", "Could not determine the repository default branch.");
   }
   if (baseBranch === branch) {
     throw gitError(
       "pull_request_same_branch",
-      `Cannot create a pull request from '${branch}' into itself. Create or switch to a feature branch first.`,
+      `Cannot create a pull request from '${branch}' into itself. Create or switch to a feature branch first.`
     );
   }
 
@@ -1169,10 +1146,7 @@ async function gitCreatePullRequest(cwd, params, options = {}) {
   }
 
   const draft = await generatePullRequestDraftOrFallback(cwd, params, options, baseBranch, branch);
-  const bodyFile = path.join(
-    os.tmpdir(),
-    `remodex-pr-body-${process.pid}-${Date.now()}-${randomBytes(4).toString("hex")}.md`,
-  );
+  const bodyFile = path.join(os.tmpdir(), `remodex-pr-body-${process.pid}-${Date.now()}-${randomBytes(4).toString("hex")}.md`);
   fs.writeFileSync(bodyFile, draft.body, "utf8");
 
   let createOutput = null;
@@ -1192,13 +1166,7 @@ async function gitCreatePullRequest(cwd, params, options = {}) {
   } catch (error) {
     const existingFromError = await findOpenPullRequest(cwd, branch).catch(() => null);
     if (existingFromError || isPullRequestAlreadyExistsMessage(error.message)) {
-      return pullRequestResult(
-        "opened_existing",
-        existingFromError,
-        baseBranch,
-        branch,
-        draft.title,
-      );
+      return pullRequestResult("opened_existing", existingFromError, baseBranch, branch, draft.title);
     }
     throw error;
   } finally {
@@ -1206,9 +1174,7 @@ async function gitCreatePullRequest(cwd, params, options = {}) {
   }
 
   const created = await findOpenPullRequest(cwd, branch).catch(() => null);
-  const createdUrl = parsePullRequestUrlFromText(
-    `${createOutput?.stdout || ""}\n${createOutput?.stderr || ""}`,
-  );
+  const createdUrl = parsePullRequestUrlFromText(`${createOutput?.stdout || ""}\n${createOutput?.stderr || ""}`);
   return pullRequestResult("created", created, baseBranch, branch, draft.title, createdUrl);
 }
 
@@ -1222,7 +1188,7 @@ function normalizeStackedGitAction(rawAction) {
 
 async function gitCreateFeatureBranch(cwd, params) {
   const requestedName = normalizeNonEmptyLine(params.featureBranchName || params.branchName);
-  const branchName = requestedName || (await defaultFeatureBranchName(cwd, params));
+  const branchName = requestedName || await defaultFeatureBranchName(cwd, params);
   await assertValidCreatedBranchName(cwd, branchName);
   if (await branchExists(cwd, branchName)) {
     throw gitError("branch_exists", `Branch '${branchName}' already exists.`);
@@ -1233,10 +1199,7 @@ async function gitCreateFeatureBranch(cwd, params) {
 
 async function defaultFeatureBranchName(cwd, params) {
   const prefix = normalizeNonEmptyLine(params.featureBranchPrefix) || "remodex/mobile-pr";
-  const timestamp = new Date()
-    .toISOString()
-    .replace(/[-:T.Z]/g, "")
-    .slice(0, 14);
+  const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
   const base = `${prefix}-${timestamp}`;
   let candidate = base;
   for (let index = 2; await branchExists(cwd, candidate); index += 1) {
@@ -1313,14 +1276,7 @@ async function findOpenPullRequest(cwd, branch) {
   return Array.isArray(pullRequests) ? pullRequests[0] || null : null;
 }
 
-function pullRequestResult(
-  status,
-  pullRequest,
-  baseBranch,
-  branch,
-  fallbackTitle = "",
-  fallbackUrl = null,
-) {
+function pullRequestResult(status, pullRequest, baseBranch, branch, fallbackTitle = "", fallbackUrl = null) {
   return {
     status,
     url: pullRequest?.url || fallbackUrl || null,
@@ -1332,10 +1288,7 @@ function pullRequestResult(
 }
 
 function isPullRequestAlreadyExistsMessage(message) {
-  return (
-    typeof message === "string" &&
-    /pull request .*already exists|already exists.*pull request/i.test(message)
-  );
+  return typeof message === "string" && /pull request .*already exists|already exists.*pull request/i.test(message);
 }
 
 function parsePullRequestUrlFromText(text) {
@@ -1360,7 +1313,7 @@ async function buildCommitDraftContext(cwd) {
     throw gitError("nothing_to_commit", "Nothing to commit.");
   }
 
-  const trackedBase = (await refExists(cwd, "HEAD")) ? "HEAD" : EMPTY_TREE_HASH;
+  const trackedBase = await refExists(cwd, "HEAD") ? "HEAD" : EMPTY_TREE_HASH;
   const trackedPatch = await git(cwd, "diff", "--binary", "--find-renames", trackedBase);
   const untrackedPaths = statusResult.files
     .filter((file) => file.status === "??")
@@ -1368,7 +1321,7 @@ async function buildCommitDraftContext(cwd) {
     .filter(Boolean);
   const untrackedPatch = await diffPatchForUntrackedFiles(cwd, untrackedPaths);
   const patch = truncateDraftPatch(
-    [trackedPatch.trim(), untrackedPatch.trim()].filter(Boolean).join("\n\n").trim(),
+    [trackedPatch.trim(), untrackedPatch.trim()].filter(Boolean).join("\n\n").trim()
   );
 
   if (!patch) {
@@ -1387,10 +1340,7 @@ async function buildCommitDraftContext(cwd) {
 async function buildPullRequestDraftContext(cwd, params) {
   const branchResult = await gitBranches(cwd);
   const currentBranch = (branchResult.current || "").trim();
-  const baseBranch = resolveBaseBranchName(
-    params.baseBranch,
-    branchResult.default || branchResult.defaultBranch,
-  );
+  const baseBranch = resolveBaseBranchName(params.baseBranch, branchResult.default || branchResult.defaultBranch);
 
   if (!currentBranch) {
     throw gitError("no_branch", "No current branch found.");
@@ -1403,11 +1353,13 @@ async function buildPullRequestDraftContext(cwd, params) {
   const baseRef = await resolvePullRequestBaseRef(cwd, baseBranch);
   const mergeBase = (await git(cwd, "merge-base", "HEAD", baseRef)).trim();
   const patch = truncateDraftPatch(
-    (await git(cwd, "diff", "--binary", "--find-renames", `${mergeBase}..HEAD`)).trim(),
+    (await git(cwd, "diff", "--binary", "--find-renames", `${mergeBase}..HEAD`)).trim()
   );
   const numstatOutput = await git(cwd, "diff", "--numstat", `${mergeBase}..HEAD`);
   const diff = parseNumstatTotals(numstatOutput);
-  const commitList = (await git(cwd, "log", "--format=%h %s", `${mergeBase}..HEAD`))
+  const commitList = (
+    await git(cwd, "log", "--format=%h %s", `${mergeBase}..HEAD`)
+  )
     .trim()
     .split("\n")
     .map((line) => line.trim())
@@ -1504,10 +1456,7 @@ function truncateDraftPatch(patch) {
 }
 
 function buildPullRequestDraftPrompt(context) {
-  const commitLines =
-    context.commitList.length > 0
-      ? context.commitList.map((line) => `- ${line}`).join("\n")
-      : "- None";
+  const commitLines = context.commitList.length > 0 ? context.commitList.map((line) => `- ${line}`).join("\n") : "- None";
 
   return [
     "Write a pull request title and body from the repository context below.",
@@ -1535,10 +1484,9 @@ function buildPullRequestDraftPrompt(context) {
 }
 
 function buildThreadTitlePrompt(context) {
-  const attachmentLine =
-    context.attachmentCount > 0
-      ? `Attachments: ${context.attachmentCount} image${context.attachmentCount === 1 ? "" : "s"}`
-      : "Attachments: none";
+  const attachmentLine = context.attachmentCount > 0
+    ? `Attachments: ${context.attachmentCount} image${context.attachmentCount === 1 ? "" : "s"}`
+    : "Attachments: none";
 
   return [
     "Write a short chat thread title from the user's first message.",
@@ -1593,9 +1541,7 @@ function normalizePullRequestDraft(draft) {
 }
 
 function normalizeThreadTitleDraft(draft, fallbackMessage) {
-  const title = sanitizeGeneratedThreadTitle(
-    draft?.title || buildPromptThreadTitleFallback(fallbackMessage),
-  );
+  const title = sanitizeGeneratedThreadTitle(draft?.title || buildPromptThreadTitleFallback(fallbackMessage));
   return { title };
 }
 
@@ -1610,11 +1556,7 @@ function buildPromptThreadTitleFallback(message) {
 function sanitizeGeneratedThreadTitle(rawTitle) {
   const words = tokenizeThreadTitleWords(rawTitle);
   const title = words.slice(0, 4).join(" ");
-  return (
-    titleCaseThreadTitle(title || "New Thread")
-      .slice(0, 50)
-      .trim() || "New Thread"
-  );
+  return titleCaseThreadTitle(title || "New Thread").slice(0, 50).trim() || "New Thread";
 }
 
 function tokenizeThreadTitleWords(value) {
@@ -1658,7 +1600,9 @@ function normalizeNonEmptyLine(rawValue) {
     return "";
   }
 
-  return rawValue.split("\n")[0].trim();
+  return rawValue
+    .split("\n")[0]
+    .trim();
 }
 
 function normalizeNonEmptyMultilineString(rawValue) {
@@ -1675,47 +1619,35 @@ function wrapDraftGenerationError(error, kind) {
   if (kind === "commit") {
     return gitError(
       "commit_message_generation_failed",
-      detail
-        ? `Could not generate a commit message. ${detail}`
-        : "Could not generate a commit message.",
+      detail ? `Could not generate a commit message. ${detail}` : "Could not generate a commit message."
     );
   }
 
   if (kind === "thread_title") {
     return gitError(
       "thread_title_generation_failed",
-      detail
-        ? `Could not generate a thread title. ${detail}`
-        : "Could not generate a thread title.",
+      detail ? `Could not generate a thread title. ${detail}` : "Could not generate a thread title."
     );
   }
 
   return gitError(
     "pull_request_draft_generation_failed",
-    detail
-      ? `Could not generate a pull request draft. ${detail}`
-      : "Could not generate a pull request draft.",
+    detail ? `Could not generate a pull request draft. ${detail}` : "Could not generate a pull request draft."
   );
 }
 
 function normalizeDraftErrorDetail(error) {
-  const rawMessage =
-    typeof error?.userMessage === "string"
-      ? error.userMessage
-      : typeof error?.message === "string"
-        ? error.message
-        : "";
+  const rawMessage = typeof error?.userMessage === "string"
+    ? error.userMessage
+    : typeof error?.message === "string"
+      ? error.message
+      : "";
   const trimmed = rawMessage.trim();
   if (!trimmed) {
     return "";
   }
 
-  const singleLine =
-    trimmed
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .pop() || trimmed;
+  const singleLine = trimmed.split("\n").map((line) => line.trim()).filter(Boolean).pop() || trimmed;
   return singleLine.endsWith(".") ? singleLine : `${singleLine}.`;
 }
 
@@ -1817,7 +1749,14 @@ function spawnCodexExecJson({
   skipGitRepoCheck = false,
   sandboxMode = null,
 }) {
-  const args = ["exec", "--ephemeral", "-C", cwd, "-m", model];
+  const args = [
+    "exec",
+    "--ephemeral",
+    "-C",
+    cwd,
+    "-m",
+    model,
+  ];
   if (skipGitRepoCheck) {
     args.push("--skip-git-repo-check");
   }
@@ -1894,7 +1833,7 @@ function createCodexExecFailure(code, signal, stdout, stderr) {
   const error = new Error(
     signal
       ? `Codex CLI was interrupted while generating the draft.${suffix}`
-      : `Codex CLI exited with code ${code} while generating the draft.${suffix}`,
+      : `Codex CLI exited with code ${code} while generating the draft.${suffix}`
   );
   error.code = code;
   error.signal = signal;
@@ -1923,7 +1862,10 @@ async function gitBranchesWithStatus(cwd) {
     };
   }
 
-  const [branchResult, statusResult] = await Promise.all([gitBranches(cwd), gitStatus(cwd)]);
+  const [branchResult, statusResult] = await Promise.all([
+    gitBranches(cwd),
+    gitStatus(cwd),
+  ]);
   return { ...branchResult, status: statusResult };
 }
 
@@ -1941,7 +1883,7 @@ async function stashChangesForWorktreeHandoff(cwd, pathspecArgs = []) {
     "--include-untracked",
     "--message",
     stashLabel,
-    ...pathspecArgs,
+    ...pathspecArgs
   );
   if (output.includes("No local changes")) {
     return null;
@@ -1949,24 +1891,14 @@ async function stashChangesForWorktreeHandoff(cwd, pathspecArgs = []) {
 
   const stashRef = await findStashRefByLabel(cwd, stashLabel);
   if (!stashRef) {
-    throw gitError(
-      "create_worktree_failed",
-      "Could not prepare local changes for the worktree handoff.",
-    );
+    throw gitError("create_worktree_failed", "Could not prepare local changes for the worktree handoff.");
   }
 
   return stashRef;
 }
 
 async function captureLocalChangesPatch(cwd, pathspecArgs = []) {
-  const trackedPatch = await git(
-    cwd,
-    "diff",
-    "--binary",
-    "--find-renames",
-    "HEAD",
-    ...pathspecArgs,
-  );
+  const trackedPatch = await git(cwd, "diff", "--binary", "--find-renames", "HEAD", ...pathspecArgs);
   const porcelain = await git(cwd, "status", "--porcelain=v1", ...pathspecArgs);
   const untrackedPaths = porcelain
     .trim()
@@ -2011,7 +1943,7 @@ async function applyWorktreeHandoffStash(cwd, stashRef, options = {}) {
   } catch (err) {
     throw gitError(
       "create_worktree_failed",
-      err.message || "Could not apply local changes in the new worktree.",
+      err.message || "Could not apply local changes in the new worktree."
     );
   }
 }
@@ -2021,10 +1953,7 @@ async function applyCopiedLocalChangesToWorktree(cwd, patch) {
     return;
   }
 
-  const patchFilePath = path.join(
-    os.tmpdir(),
-    `remodex-worktree-copy-${randomBytes(6).toString("hex")}.patch`,
-  );
+  const patchFilePath = path.join(os.tmpdir(), `remodex-worktree-copy-${randomBytes(6).toString("hex")}.patch`);
   fs.writeFileSync(patchFilePath, ensureTrailingNewline(patch), "utf8");
 
   try {
@@ -2032,7 +1961,7 @@ async function applyCopiedLocalChangesToWorktree(cwd, patch) {
   } catch (err) {
     throw gitError(
       "create_worktree_failed",
-      err.message || "Could not copy local changes into the new worktree.",
+      err.message || "Could not copy local changes into the new worktree."
     );
   } finally {
     fs.rmSync(patchFilePath, { force: true });
@@ -2097,8 +2026,9 @@ async function cleanupManagedWorktree(repoRoot, worktreeRootPath, branchName = n
 function parseWorktreePathByBranch(output, options = {}) {
   const worktreePathByBranch = {};
   const records = typeof output === "string" ? output.split("\n\n") : [];
-  const projectRelativePath =
-    typeof options.projectRelativePath === "string" ? options.projectRelativePath : "";
+  const projectRelativePath = typeof options.projectRelativePath === "string"
+    ? options.projectRelativePath
+    : "";
 
   for (const record of records) {
     const lines = record
@@ -2288,12 +2218,7 @@ function isManagedWorktreePath(candidatePath) {
   }
 
   const relativePath = path.relative(normalizedRoot, normalizedCandidate);
-  return (
-    !!relativePath &&
-    relativePath !== "." &&
-    !relativePath.startsWith("..") &&
-    !path.isAbsolute(relativePath)
-  );
+  return !!relativePath && relativePath !== "." && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
 }
 
 function resolveProjectRelativePath(cwd, repoRoot) {
@@ -2322,9 +2247,7 @@ function scopedWorktreePath(worktreeRootPath, projectRelativePath) {
   }
 
   const candidatePath = path.join(normalizedWorktreeRootPath, projectRelativePath);
-  return isExistingDirectory(candidatePath)
-    ? (normalizeExistingPath(candidatePath) ?? candidatePath)
-    : normalizedWorktreeRootPath;
+  return isExistingDirectory(candidatePath) ? normalizeExistingPath(candidatePath) ?? candidatePath : normalizedWorktreeRootPath;
 }
 
 // Resolves a Local checkout path only when the matching subpath actually exists there.
@@ -2338,9 +2261,7 @@ function scopedLocalCheckoutPath(checkoutRootPath, projectRelativePath) {
   }
 
   const candidatePath = path.join(normalizedCheckoutRootPath, projectRelativePath);
-  return isExistingDirectory(candidatePath)
-    ? (normalizeExistingPath(candidatePath) ?? candidatePath)
-    : null;
+  return isExistingDirectory(candidatePath) ? normalizeExistingPath(candidatePath) ?? candidatePath : null;
 }
 
 // Computes the local repo delta that still exists on this machine and is not on the remote.
@@ -2410,7 +2331,7 @@ async function diffTotalsForUntrackedFiles(cwd, filePaths) {
     filePaths.map(async (filePath) => {
       const output = await gitDiffNoIndexNumstat(cwd, filePath);
       return parseNumstatTotals(output);
-    }),
+    })
   );
 
   return totals.reduce(
@@ -2419,7 +2340,7 @@ async function diffTotalsForUntrackedFiles(cwd, filePaths) {
       deletions: aggregate.deletions + current.deletions,
       binaryFiles: aggregate.binaryFiles + current.binaryFiles,
     }),
-    { additions: 0, deletions: 0, binaryFiles: 0 },
+    { additions: 0, deletions: 0, binaryFiles: 0 }
   );
 }
 
@@ -2430,12 +2351,12 @@ async function countLocalOnlyCommits(cwd, context) {
   }
 
   const remoteRefs = await git(cwd, "for-each-ref", "--format=%(refname)", "refs/remotes");
-  const hasAnyRemoteRefs =
-    remoteRefs
-      .trim()
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean).length > 0;
+  const hasAnyRemoteRefs = remoteRefs
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .length > 0;
 
   if (!hasAnyRemoteRefs) {
     return 0;
@@ -2463,7 +2384,7 @@ function parseNumstatTotals(output) {
           binaryFiles: aggregate.binaryFiles + (isBinary ? 1 : 0),
         };
       },
-      { additions: 0, deletions: 0, binaryFiles: 0 },
+      { additions: 0, deletions: 0, binaryFiles: 0 }
     );
 }
 
@@ -2481,7 +2402,10 @@ function resolveWorktreeChangeTransfer(rawValue) {
 async function scopedProjectChanges(repoRoot, projectRelativePath) {
   const pathspecArgs = gitPathspecArgs(projectRelativePath);
   const porcelain = await git(repoRoot, "status", "--porcelain=v1", ...pathspecArgs);
-  const fileLines = porcelain.trim().split("\n").filter(Boolean);
+  const fileLines = porcelain
+    .trim()
+    .split("\n")
+    .filter(Boolean);
 
   return {
     dirty: fileLines.length > 0,
@@ -2521,7 +2445,7 @@ async function gitDiffNoIndexNumstat(cwd, filePath) {
     const { stdout } = await execFileAsync(
       "git",
       ["diff", "--no-index", "--numstat", "--", "/dev/null", filePath],
-      { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_EXEC_MAX_BUFFER_BYTES },
+      { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_EXEC_MAX_BUFFER_BYTES }
     );
     return stdout;
   } catch (err) {
@@ -2529,7 +2453,7 @@ async function gitDiffNoIndexNumstat(cwd, filePath) {
       return err.stdout || "";
     }
     const msg = (err.stderr || err.message || "").trim();
-    throw new Error(msg || "git diff --no-index failed", { cause: err });
+    throw new Error(msg || "git diff --no-index failed");
   }
 }
 
@@ -2538,9 +2462,7 @@ async function diffPatchForUntrackedFiles(cwd, filePaths) {
     return "";
   }
 
-  const patches = await Promise.all(
-    filePaths.map((filePath) => gitDiffNoIndexPatch(cwd, filePath)),
-  );
+  const patches = await Promise.all(filePaths.map((filePath) => gitDiffNoIndexPatch(cwd, filePath)));
   return patches.filter(Boolean).join("\n\n");
 }
 
@@ -2549,7 +2471,7 @@ async function gitDiffNoIndexPatch(cwd, filePath) {
     const { stdout } = await execFileAsync(
       "git",
       ["diff", "--no-index", "--binary", "--", "/dev/null", filePath],
-      { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_EXEC_MAX_BUFFER_BYTES },
+      { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_EXEC_MAX_BUFFER_BYTES }
     );
     return stdout;
   } catch (err) {
@@ -2557,7 +2479,7 @@ async function gitDiffNoIndexPatch(cwd, filePath) {
       return err.stdout || "";
     }
     const msg = (err.stderr || err.message || "").trim();
-    throw new Error(msg || "git diff --no-index failed", { cause: err });
+    throw new Error(msg || "git diff --no-index failed");
   }
 }
 
@@ -2584,16 +2506,10 @@ function runGitHubCli(cwd, args) {
     .catch((err) => {
       const detail = (err.stderr || err.message || "").trim();
       if (err.code === "ENOENT") {
-        throw gitError(
-          "github_cli_unavailable",
-          "GitHub CLI (`gh`) is required but is not available on PATH.",
-        );
+        throw gitError("github_cli_unavailable", "GitHub CLI (`gh`) is required but is not available on PATH.");
       }
       if (/not logged into|not authenticated|gh auth login/i.test(detail)) {
-        throw gitError(
-          "github_cli_unauthenticated",
-          "GitHub CLI is not authenticated. Run `gh auth login` on this Mac and retry.",
-        );
+        throw gitError("github_cli_unauthenticated", "GitHub CLI is not authenticated. Run `gh auth login` on this Mac and retry.");
       }
       throw gitError("github_cli_failed", detail || "GitHub CLI command failed.");
     });
@@ -2605,6 +2521,52 @@ async function revListCounts(cwd) {
   return {
     ahead: parseInt(parts[0], 10) || 0,
     behind: parseInt(parts[1], 10) || 0,
+  };
+}
+
+// Keeps Update eligibility based on the current upstream ref, not stale local fetch data.
+async function refreshStatusUpstreamIfNeeded(cwd, tracking, repoRoot) {
+  const parsedTracking = parseTrackingRef(tracking);
+  if (!parsedTracking) {
+    return false;
+  }
+
+  const cacheKey = `${repoRoot || cwd}\0${parsedTracking.remote}\0${parsedTracking.branch}`;
+  const now = Date.now();
+  const lastFetchAt = statusUpstreamFetchCache.get(cacheKey) || 0;
+  if (now - lastFetchAt < STATUS_UPSTREAM_FETCH_TTL_MS) {
+    return false;
+  }
+
+  statusUpstreamFetchCache.set(cacheKey, now);
+  if (statusUpstreamFetchCache.size > 200) {
+    statusUpstreamFetchCache.clear();
+    statusUpstreamFetchCache.set(cacheKey, now);
+  }
+
+  await git(
+    cwd,
+    "fetch",
+    "--quiet",
+    parsedTracking.remote,
+    `+refs/heads/${parsedTracking.branch}:refs/remotes/${parsedTracking.remote}/${parsedTracking.branch}`
+  );
+  return true;
+}
+
+function parseTrackingRef(tracking) {
+  if (typeof tracking !== "string") {
+    return null;
+  }
+
+  const separatorIndex = tracking.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex === tracking.length - 1) {
+    return null;
+  }
+
+  return {
+    remote: tracking.slice(0, separatorIndex),
+    branch: tracking.slice(separatorIndex + 1),
   };
 }
 
@@ -2666,7 +2628,7 @@ function gitError(errorCode, userMessage) {
   return err;
 }
 
-function nonRepositoryStatus(_cwd) {
+function nonRepositoryStatus(cwd) {
   return {
     isRepo: false,
     repoRoot: null,
@@ -2703,11 +2665,9 @@ async function currentBranchFromStatus(cwd) {
 
 function gitInitBranchFlagUnsupported(error) {
   const message = error?.message || "";
-  return (
-    message.includes("unknown switch `b'") ||
-    message.includes("unknown option `b'") ||
-    message.includes("usage: git init")
-  );
+  return message.includes("unknown switch `b'")
+    || message.includes("unknown option `b'")
+    || message.includes("usage: git init");
 }
 
 // Resolves git commands to a concrete local directory.
@@ -2717,14 +2677,14 @@ async function resolveGitCwd(params) {
   if (!requestedCwd) {
     throw gitError(
       "missing_working_directory",
-      "Git actions require a bound local working directory.",
+      "Git actions require a bound local working directory."
     );
   }
 
   if (!isExistingDirectory(requestedCwd)) {
     throw gitError(
       "missing_working_directory",
-      "The requested local working directory does not exist on this Mac.",
+      "The requested local working directory does not exist on this Mac."
     );
   }
 

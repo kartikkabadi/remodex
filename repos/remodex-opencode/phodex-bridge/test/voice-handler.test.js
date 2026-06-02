@@ -41,21 +41,18 @@ test("voice/transcribe returns transcribed text without exposing auth tokens", a
     },
   });
 
-  const handled = handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-1",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 1_200,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  const handled = handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-1",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 1_200,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   assert.equal(handled, true);
   await tick();
@@ -65,14 +62,12 @@ test("voice/transcribe returns transcribed text without exposing auth tokens", a
   assert.equal(fetchCalls[0].options.method, "POST");
   assert.equal(fetchCalls[0].options.headers.Authorization.startsWith("Bearer "), true);
   assert.equal(fetchCalls[0].options.headers["ChatGPT-Account-Id"], undefined);
-  assert.deepEqual(responses, [
-    {
-      id: "voice-1",
-      result: {
-        text: "hello world",
-      },
+  assert.deepEqual(responses, [{
+    id: "voice-1",
+    result: {
+      text: "hello world",
     },
-  ]);
+  }]);
 });
 
 test("voice/resolveAuth returns a ChatGPT token for legacy phone clients", async () => {
@@ -112,19 +107,16 @@ test("voice/transcribe normalizes bearer-prefixed ChatGPT tokens", async () => {
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-normalized-bearer",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 800,
-      },
-    }),
-    () => {},
-  );
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-normalized-bearer",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 800,
+    },
+  }), () => {});
 
   await tick();
 
@@ -144,17 +136,16 @@ test("voice/resolveAuth normalizes bearer-prefixed tokens for legacy clients", a
 
 test("voice/resolveAuth rejects API-key auth for legacy direct upload clients", async () => {
   await assert.rejects(
-    () =>
-      resolveVoiceAuth(async () => ({
-        authMethod: "apiKey",
-        authToken: "sk-test",
-        requiresOpenaiAuth: false,
-      })),
+    () => resolveVoiceAuth(async () => ({
+      authMethod: "apiKey",
+      authToken: "sk-test",
+      requiresOpenaiAuth: false,
+    })),
     (error) => {
       assert.equal(error.errorCode, "not_chatgpt");
       assert.match(error.message, /ChatGPT account/);
       return true;
-    },
+    }
   );
 });
 
@@ -197,21 +188,18 @@ test("voice/transcribe retries once after a 401 response", async () => {
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-2",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 800,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-2",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 800,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -259,21 +247,18 @@ test("voice/transcribe retries once after a 403 response", async () => {
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-403",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 800,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-403",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 800,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -299,21 +284,18 @@ test("voice/transcribe accepts valid WAV files with metadata chunks before fmt",
     }),
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-chunked-wav",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64({ includeJunkChunk: true }),
-        sampleRateHz: 24_000,
-        durationMs: 800,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-chunked-wav",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64({ includeJunkChunk: true }),
+      sampleRateHz: 24_000,
+      durationMs: 800,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -341,21 +323,18 @@ test("voice/transcribe uses official API endpoint for API-key auth", async () =>
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-4",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-4",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -386,21 +365,18 @@ test("voice/transcribe reports API-key rejection distinctly after refresh", asyn
     }),
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-api-key-rejected",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-api-key-rejected",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -443,21 +419,18 @@ test("voice/transcribe falls back to Mac OPENAI_API_KEY when ChatGPT auth is rej
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-chatgpt-api-fallback",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-chatgpt-api-fallback",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -483,21 +456,18 @@ test("voice/transcribe returns a user-facing auth error when Mac auth is missing
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-3",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-3",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -516,21 +486,18 @@ test("voice/transcribe maps auth status read failures to reconnect guidance", as
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-auth-unavailable",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-auth-unavailable",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -567,21 +534,18 @@ test("voice/transcribe rejects malformed or non-WAV audio before contacting the 
       },
     });
 
-    handler.handleVoiceRequest(
-      JSON.stringify({
-        id: `voice-invalid-${testCase.name}`,
-        method: "voice/transcribe",
-        params: {
-          mimeType: "audio/wav",
-          audioBase64: testCase.audioBase64,
-          sampleRateHz: 24_000,
-          durationMs: 300,
-        },
-      }),
-      (response) => {
-        responses.push(JSON.parse(response));
+    handler.handleVoiceRequest(JSON.stringify({
+      id: `voice-invalid-${testCase.name}`,
+      method: "voice/transcribe",
+      params: {
+        mimeType: "audio/wav",
+        audioBase64: testCase.audioBase64,
+        sampleRateHz: 24_000,
+        durationMs: 300,
       },
-    );
+    }), (response) => {
+      responses.push(JSON.parse(response));
+    });
 
     await tick();
 
@@ -607,21 +571,18 @@ test("voice/transcribe rejects unsupported WAV metadata before contacting auth",
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-unsupported-wav",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64({ sampleRateHz: 16_000 }),
-        sampleRateHz: 24_000,
-        durationMs: 300,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-unsupported-wav",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64({ sampleRateHz: 16_000 }),
+      sampleRateHz: 24_000,
+      durationMs: 300,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
@@ -631,7 +592,47 @@ test("voice/transcribe rejects unsupported WAV metadata before contacting auth",
   assert.match(responses[0].error?.message || "", /24 kHz mono WAV/);
 });
 
-test("voice/transcribe rejects clips longer than two minutes before contacting the provider", async () => {
+test("voice/transcribe accepts large clips without overflowing base64 validation", async () => {
+  const responses = [];
+  let fetchCalls = 0;
+  const handler = createVoiceHandler({
+    sendCodexRequest: async () => ({
+      authMethod: "chatgpt",
+      authToken: "chatgpt-token",
+      requiresOpenaiAuth: false,
+    }),
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { text: "long clip transcript" };
+        },
+      };
+    },
+  });
+
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-large-valid",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64({ durationSeconds: 150 }),
+      sampleRateHz: 24_000,
+      durationMs: 150_000,
+    },
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
+
+  await tick();
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(responses[0].result?.text, "long clip transcript");
+});
+
+test("voice/transcribe rejects clips longer than 150 seconds before contacting the provider", async () => {
   const responses = [];
   let authRequests = 0;
   let fetchCalls = 0;
@@ -646,28 +647,25 @@ test("voice/transcribe rejects clips longer than two minutes before contacting t
     },
   });
 
-  handler.handleVoiceRequest(
-    JSON.stringify({
-      id: "voice-too-long",
-      method: "voice/transcribe",
-      params: {
-        mimeType: "audio/wav",
-        audioBase64: makeTestWavBase64(),
-        sampleRateHz: 24_000,
-        durationMs: 120_100,
-      },
-    }),
-    (response) => {
-      responses.push(JSON.parse(response));
+  handler.handleVoiceRequest(JSON.stringify({
+    id: "voice-too-long",
+    method: "voice/transcribe",
+    params: {
+      mimeType: "audio/wav",
+      audioBase64: makeTestWavBase64(),
+      sampleRateHz: 24_000,
+      durationMs: 150_100,
     },
-  );
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  });
 
   await tick();
 
   assert.equal(authRequests, 0);
   assert.equal(fetchCalls, 0);
   assert.equal(responses[0].error?.data?.errorCode, "duration_too_long");
-  assert.match(responses[0].error?.message || "", /120 seconds/);
+  assert.match(responses[0].error?.message || "", /150 seconds/);
 });
 
 function makeJWT(payload) {
@@ -676,7 +674,7 @@ function makeJWT(payload) {
   return `${header}.${body}.signature`;
 }
 
-function makeTestWavBase64({ sampleRateHz = 24_000, includeJunkChunk = false } = {}) {
+function makeTestWavBase64({ sampleRateHz = 24_000, includeJunkChunk = false, durationSeconds = null } = {}) {
   const chunks = [];
   if (includeJunkChunk) {
     const junk = Buffer.alloc(12);
@@ -697,9 +695,12 @@ function makeTestWavBase64({ sampleRateHz = 24_000, includeJunkChunk = false } =
   fmt.writeUInt16LE(16, 22);
   chunks.push(fmt);
 
-  const data = Buffer.alloc(10);
+  const dataByteCount = durationSeconds == null
+    ? 2
+    : Math.max(2, Math.floor(durationSeconds * sampleRateHz * 2));
+  const data = Buffer.alloc(8 + dataByteCount);
   data.write("data", 0, "ascii");
-  data.writeUInt32LE(2, 4);
+  data.writeUInt32LE(dataByteCount, 4);
   data.writeInt16LE(0, 8);
   chunks.push(data);
 

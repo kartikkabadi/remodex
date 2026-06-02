@@ -36,7 +36,7 @@ test("completion dedupe suppresses thread-status fallback until a new run starts
       threadId: "thread-1",
       result: "completed",
     }),
-    true,
+    true
   );
 
   dedupe.clearForNewRun("thread-1");
@@ -45,7 +45,7 @@ test("completion dedupe suppresses thread-status fallback until a new run starts
       threadId: "thread-1",
       result: "completed",
     }),
-    false,
+    false
   );
 });
 
@@ -64,7 +64,7 @@ test("completion dedupe removes pending suppression if the send fails", () => {
       threadId: "thread-2",
       result: "failed",
     }),
-    true,
+    true
   );
 
   dedupe.abortNotification({
@@ -79,7 +79,7 @@ test("completion dedupe removes pending suppression if the send fails", () => {
       threadId: "thread-2",
       result: "failed",
     }),
-    false,
+    false
   );
 });
 

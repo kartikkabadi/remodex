@@ -8,6 +8,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
 
+const activeProviders = [];
+
+test.afterEach(async () => {
+  while (activeProviders.length > 0) {
+    const provider = activeProviders.pop();
+    await provider.shutdown?.();
+  }
+});
+
 function fakeServer() {
   let running = false;
   return {
@@ -79,13 +88,15 @@ function fakeClient() {
 }
 
 function makeProvider(opts = {}) {
-  return createOpenCodeProvider({
+  const provider = createOpenCodeProvider({
     sendApplicationMessage: opts.send || (() => {}),
     env: { REMODEX_ENABLE_OPENCODE: "1", ...opts.env },
     serverFactory: opts.serverFactory || (() => fakeServer()),
     clientFactory: opts.clientFactory || (() => fakeClient()),
     ownershipStore: opts.ownershipStore || fakeOwnershipStore(),
   });
+  activeProviders.push(provider);
+  return provider;
 }
 
 test("provider has expected API surface", () => {

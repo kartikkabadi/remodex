@@ -46,6 +46,15 @@ const HEALTH_RESTART_WINDOW_MS = 5 * 60 * 1000;
 const HEALTH_MAX_RESTARTS = 3;
 const HEALTH_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
 
+function assertOwnershipPersisted(ok, threadId) {
+  if (ok) {
+    return;
+  }
+  const error = new Error(`Failed to persist thread ownership for ${threadId}`);
+  error.errorCode = "thread_ownership_persist_failed";
+  throw error;
+}
+
 function createOpenCodeProvider({
   sendApplicationMessage,
   env = process.env,
@@ -396,7 +405,10 @@ function createOpenCodeProvider({
       sessionId: resolvedSessionId || "",
     };
     threads.set(threadId, thread);
-    ownership.setOwnership(threadId, OPENCODE_PROVIDER_ID);
+    assertOwnershipPersisted(
+      ownership.setOwnership(threadId, OPENCODE_PROVIDER_ID),
+      threadId,
+    );
     if (resolvedSessionId) {
       thread.sessionId = resolvedSessionId;
       persistSessionRecord(thread);
@@ -510,7 +522,10 @@ function createOpenCodeProvider({
       completed: false,
     };
     activeTurns.set(turnId, active);
-    ownership.setOwnership(thread.id, OPENCODE_PROVIDER_ID);
+    assertOwnershipPersisted(
+      ownership.setOwnership(thread.id, OPENCODE_PROVIDER_ID),
+      thread.id,
+    );
 
     emit("turn/started", { threadId: thread.id, turnId, turn: { id: turnId, status: "running" } });
 
@@ -740,6 +755,10 @@ function createOpenCodeProvider({
         });
       }
     }, HEALTH_IDLE_SHUTDOWN_MS);
+    // Unit tests create many short-lived providers; do not hold the process open for 10 minutes.
+    if (readString(process.env.REMODEX_TEST) === "1" && typeof idleTimer?.unref === "function") {
+      idleTimer.unref();
+    }
   }
 
   function stopIdleTimer() {

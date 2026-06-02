@@ -110,7 +110,7 @@ test("readThreadTurnsListPageFromSessionJsonl builds a recent turns page from ro
     [
       ["user_message", "user", "please fix this"],
       ["message", "assistant", "fixed"],
-    ],
+    ]
   );
 });
 
@@ -147,6 +147,150 @@ test("parseSessionJsonlTurns attaches pre-task user messages to following task",
   assert.equal(turns[0].id, "turn-jsonl-prelude");
   assert.equal(turns[0].items[0].type, "user_message");
   assert.equal(turns[0].items[0].text, "from mac");
+});
+
+test("parseSessionJsonlTurns deduplicates mirrored mobile user messages", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-05-24T19:30:07.522Z",
+      type: "session_meta",
+      payload: {
+        id: "thread-jsonl-mobile",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T19:30:10.900Z",
+      type: "event_msg",
+      payload: {
+        type: "task_started",
+        turn_id: "turn-jsonl-mobile",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T19:30:10.911Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "review these changes" }],
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T19:30:10.915Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "review these changes",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T19:30:12.000Z",
+      type: "response_item",
+      payload: {
+        id: "assistant-final",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "done" }],
+      },
+    }),
+  ].join("\n");
+
+  const turns = parseSessionJsonlTurns(content, { threadId: "thread-jsonl-mobile" });
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].id, "turn-jsonl-mobile");
+  const userItems = turns[0].items.filter((item) => item.role === "user");
+  assert.equal(userItems.length, 1);
+  assert.equal(userItems[0].type, "user_message");
+  assert.equal(userItems[0].text, "review these changes");
+  assert.equal(userItems[0].createdAt, "2026-05-24T19:30:10.915Z");
+  assert.equal(userItems[0].timestamp, "2026-05-24T19:30:10.915Z");
+});
+
+test("parseSessionJsonlTurns deduplicates raw skill text against structured skill input", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:47.000Z",
+      type: "session_meta",
+      payload: {
+        id: "thread-jsonl-skill",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:51.100Z",
+      type: "event_msg",
+      payload: {
+        type: "task_started",
+        turn_id: "turn-jsonl-skill",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:51.133Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "one last time" },
+          { type: "skill", id: "check-code", name: "check-code" },
+        ],
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:51.133Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "$check-code one last time",
+      },
+    }),
+  ].join("\n");
+
+  const turns = parseSessionJsonlTurns(content, { threadId: "thread-jsonl-skill" });
+  const userItems = turns[0].items.filter((item) => item.role === "user");
+
+  assert.equal(userItems.length, 1);
+  assert.equal(userItems[0].type, "message");
+  assert.equal(userItems[0].content[0].text, "one last time");
+  assert.deepEqual(userItems[0].content[1], { type: "skill", id: "check-code", name: "check-code" });
+  assert.equal(userItems[0].createdAt, "2026-05-24T21:52:51.133Z");
+});
+
+test("parseSessionJsonlTurns preserves explicit timestamp aliases over entry timestamp", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:51.900Z",
+      type: "session_meta",
+      payload: {
+        id: "thread-jsonl-timestamps",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:52.000Z",
+      type: "event_msg",
+      payload: {
+        type: "task_started",
+        turn_id: "turn-jsonl-timestamps",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-24T21:52:53.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        created_at: "2026-05-24T21:52:51.133Z",
+        content: [{ type: "input_text", text: "timed prompt" }],
+      },
+    }),
+  ].join("\n");
+
+  const turns = parseSessionJsonlTurns(content, { threadId: "thread-jsonl-timestamps" });
+  const userItems = turns[0].items.filter((item) => item.role === "user");
+
+  assert.equal(userItems.length, 1);
+  assert.equal(userItems[0].createdAt, "2026-05-24T21:52:51.133Z");
+  assert.equal(userItems[0].timestamp, "2026-05-24T21:52:51.133Z");
 });
 
 test("readThreadTurnsListPageFromSessionJsonl caps fallback pages to five turns", () => {
@@ -186,7 +330,7 @@ test("readThreadTurnsListPageFromSessionJsonl caps fallback pages to five turns"
   assert.equal(page.data.length, 5);
   assert.deepEqual(
     page.data.map((turn) => turn.id),
-    ["turn-8", "turn-7", "turn-6", "turn-5", "turn-4"],
+    ["turn-8", "turn-7", "turn-6", "turn-5", "turn-4"]
   );
   assert.equal(page.nextCursor, "remodex-jsonl-fallback-older-unavailable");
 });
@@ -248,8 +392,8 @@ test("parseSessionJsonlTurns restores desktop custom apply_patch as fileChange",
     "*** Begin Patch",
     "*** Update File: Sources/App.swift",
     "@@",
-    '-let title = "Old"',
-    '+let title = "New"',
+    "-let title = \"Old\"",
+    "+let title = \"New\"",
     "*** End Patch",
     "",
   ].join("\n");
@@ -281,22 +425,17 @@ test("parseSessionJsonlTurns restores desktop custom apply_patch as fileChange",
   assert.equal(turns[0].items.length, 1);
   assert.equal(turns[0].items[0].type, "fileChange");
   assert.equal(turns[0].items[0].id, "call-patch");
-  assert.deepEqual(
-    turns[0].items[0].changes.map((change) => ({
-      path: change.path,
-      kind: change.kind,
-      additions: change.additions,
-      deletions: change.deletions,
-    })),
-    [
-      {
-        path: "Sources/App.swift",
-        kind: "update",
-        additions: 1,
-        deletions: 1,
-      },
-    ],
-  );
+  assert.deepEqual(turns[0].items[0].changes.map((change) => ({
+    path: change.path,
+    kind: change.kind,
+    additions: change.additions,
+    deletions: change.deletions,
+  })), [{
+    path: "Sources/App.swift",
+    kind: "update",
+    additions: 1,
+    deletions: 1,
+  }]);
 });
 
 test("parseSessionJsonlTurns restores update_plan calls as progress plan items", () => {
@@ -425,28 +564,77 @@ test("parseSessionJsonlTurns adds readable messages for generic tool calls", () 
   const turns = parseSessionJsonlTurns(content, { threadId: "thread-tools" });
 
   assert.equal(turns.length, 1);
-  assert.deepEqual(
-    turns[0].items.map((item) => ({
-      id: item.id,
-      type: item.type,
-      message: item.message,
-      toolName: item.tool_name,
-    })),
-    [
-      {
-        id: "call-stdin",
-        type: "tool_call",
-        message: "Write to terminal",
-        toolName: "write_stdin",
+  assert.deepEqual(turns[0].items.map((item) => ({
+    id: item.id,
+    type: item.type,
+    message: item.message,
+    toolName: item.tool_name,
+  })), [
+    {
+      id: "call-stdin",
+      type: "tool_call",
+      message: "Write to terminal",
+      toolName: "write_stdin",
+    },
+    {
+      id: "call-image",
+      type: "tool_call",
+      message: "Open image …/screenshots/detail.png",
+      toolName: "view_image",
+    },
+  ]);
+});
+
+test("parseSessionJsonlTurns restores view_image tool output as imageView without inline data", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-05-22T14:52:03.000Z",
+      type: "event_msg",
+      payload: {
+        type: "task_started",
+        turn_id: "turn-view-image",
       },
-      {
-        id: "call-image",
-        type: "tool_call",
-        message: "Open image …/screenshots/detail.png",
-        toolName: "view_image",
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-22T14:52:04.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "view_image",
+        call_id: "call-view-image",
+        arguments: JSON.stringify({
+          path: "/Users/test/Library/Application Support/CleanShot/media/screenshot.png",
+        }),
       },
-    ],
+    }),
+    JSON.stringify({
+      timestamp: "2026-05-22T14:52:05.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-view-image",
+        output: [
+          {
+            type: "input_image",
+            image_url: "data:image/png;base64,AAAA",
+          },
+        ],
+      },
+    }),
+  ].join("\n");
+
+  const turns = parseSessionJsonlTurns(content, { threadId: "thread-view-image" });
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].items.length, 2);
+  assert.deepEqual(turns[0].items.map((item) => item.type), ["tool_call", "imageView"]);
+  assert.equal(turns[0].items[1].id, "call-view-image-image-view");
+  assert.equal(
+    turns[0].items[1].path,
+    "/Users/test/Library/Application Support/CleanShot/media/screenshot.png"
   );
+  assert.equal(Object.hasOwn(turns[0].items[1], "output"), false);
+  assert.equal(turns[0].items[1].remodexJsonlToolOutputImage, true);
 });
 
 test("parseSessionJsonlTurns restores completed desktop Plan items without duplicating proposed_plan messages", () => {
@@ -485,12 +673,10 @@ test("parseSessionJsonlTurns restores completed desktop Plan items without dupli
       payload: {
         type: "message",
         role: "assistant",
-        content: [
-          {
-            type: "output_text",
-            text: "<proposed_plan>\n# Improve Dashboard\n\n- Tighten validation\n</proposed_plan>",
-          },
-        ],
+        content: [{
+          type: "output_text",
+          text: "<proposed_plan>\n# Improve Dashboard\n\n- Tighten validation\n</proposed_plan>",
+        }],
       },
     }),
     JSON.stringify({
@@ -557,12 +743,10 @@ test("parseSessionJsonlTurns hides subagent orchestration transcript internals",
       payload: {
         type: "message",
         role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: '<subagent_notification>\n{"status":{"completed":"done"}}',
-          },
-        ],
+        content: [{
+          type: "input_text",
+          text: "<subagent_notification>\n{\"status\":{\"completed\":\"done\"}}",
+        }],
       },
     }),
     JSON.stringify({
@@ -588,15 +772,10 @@ test("parseSessionJsonlTurns hides subagent orchestration transcript internals",
 
   assert.equal(turns.length, 1);
   assert.deepEqual(
-    turns[0].items.map((item) => [
-      item.type,
-      item.role,
-      item.name,
-      item.text || item.content?.[0]?.text,
-    ]),
+    turns[0].items.map((item) => [item.type, item.role, item.name, item.text || item.content?.[0]?.text]),
     [
       ["user_message", "user", undefined, "Compare these codebases"],
       ["message", "assistant", undefined, "Final synthesis"],
-    ],
+    ]
   );
 });

@@ -7,9 +7,9 @@
 const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 const CHATGPT_TRANSCRIPTIONS_URL = "https://chatgpt.com/backend-api/transcribe";
 const DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
-const { readStringOrNull } = require("./normalize");
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
-const MAX_DURATION_MS = 120_000;
+const MAX_DURATION_SECONDS = 150;
+const MAX_DURATION_MS = MAX_DURATION_SECONDS * 1_000;
 
 function createVoiceHandler({
   sendCodexRequest,
@@ -47,18 +47,16 @@ function createVoiceHandler({
       })
       .catch((error) => {
         console.error(`${logPrefix} voice transcription failed: ${error.message}`);
-        sendResponse(
-          JSON.stringify({
-            id,
-            error: {
-              code: -32000,
-              message: error.userMessage || error.message || "Voice transcription failed.",
-              data: {
-                errorCode: error.errorCode || "voice_transcription_failed",
-              },
+        sendResponse(JSON.stringify({
+          id,
+          error: {
+            code: -32000,
+            message: error.userMessage || error.message || "Voice transcription failed.",
+            data: {
+              errorCode: error.errorCode || "voice_transcription_failed",
             },
-          }),
-        );
+          },
+        }));
       });
 
     return true;
@@ -74,32 +72,23 @@ function createVoiceHandler({
 // Validates iPhone-owned audio input and proxies it to the official transcription endpoint.
 async function transcribeVoice(
   params,
-  { sendCodexRequest, fetchImpl, FormDataImpl, BlobImpl, env = process.env },
+  { sendCodexRequest, fetchImpl, FormDataImpl, BlobImpl, env = process.env }
 ) {
   if (typeof sendCodexRequest !== "function") {
     throw voiceError("bridge_not_ready", "Voice transcription is not available right now.");
   }
   if (typeof fetchImpl !== "function" || !FormDataImpl || !BlobImpl) {
-    throw voiceError(
-      "transcription_unavailable",
-      "Voice transcription is unavailable on this bridge.",
-    );
+    throw voiceError("transcription_unavailable", "Voice transcription is unavailable on this bridge.");
   }
 
-  const mimeType = readStringOrNull(params.mimeType);
+  const mimeType = readString(params.mimeType);
   if (mimeType !== "audio/wav") {
-    throw voiceError(
-      "unsupported_mime_type",
-      "Only WAV audio is supported for voice transcription.",
-    );
+    throw voiceError("unsupported_mime_type", "Only WAV audio is supported for voice transcription.");
   }
 
   const sampleRateHz = readPositiveNumber(params.sampleRateHz);
   if (sampleRateHz !== 24_000) {
-    throw voiceError(
-      "unsupported_sample_rate",
-      "Voice transcription requires 24 kHz mono WAV audio.",
-    );
+    throw voiceError("unsupported_sample_rate", "Voice transcription requires 24 kHz mono WAV audio.");
   }
 
   const durationMs = readPositiveNumber(params.durationMs);
@@ -107,7 +96,7 @@ async function transcribeVoice(
     throw voiceError("invalid_duration", "Voice messages must include a positive duration.");
   }
   if (durationMs > MAX_DURATION_MS) {
-    throw voiceError("duration_too_long", "Voice messages are limited to 120 seconds.");
+    throw voiceError("duration_too_long", `Voice messages are limited to ${MAX_DURATION_SECONDS} seconds.`);
   }
 
   const audioBuffer = decodeAudioBase64(params.audioBase64);
@@ -118,16 +107,11 @@ async function transcribeVoice(
   if (!wavInfo) {
     throw voiceError("invalid_audio", "The recorded audio is not a valid WAV file.");
   }
-  if (
-    wavInfo.audioFormat !== 1 ||
-    wavInfo.channelCount !== 1 ||
-    wavInfo.sampleRateHz !== 24_000 ||
-    wavInfo.bitsPerSample !== 16
-  ) {
-    throw voiceError(
-      "unsupported_sample_rate",
-      "Voice transcription requires 24 kHz mono WAV audio.",
-    );
+  if (wavInfo.audioFormat !== 1
+    || wavInfo.channelCount !== 1
+    || wavInfo.sampleRateHz !== 24_000
+    || wavInfo.bitsPerSample !== 16) {
+    throw voiceError("unsupported_sample_rate", "Voice transcription requires 24 kHz mono WAV audio.");
   }
 
   const authContext = await loadAuthContext(sendCodexRequest, { env });
@@ -176,11 +160,9 @@ async function requestTranscription({
   if (response.status === 401 || response.status === 403) {
     activeAuthContext = await loadAuthContext(sendCodexRequest, { env });
     response = await makeAttempt(activeAuthContext);
-    if (
-      !response.ok &&
-      (response.status === 401 || response.status === 403) &&
-      activeAuthContext.isChatGPT
-    ) {
+    if (!response.ok
+      && (response.status === 401 || response.status === 403)
+      && activeAuthContext.isChatGPT) {
       const apiKeyContext = loadEnvApiKeyAuthContext(env);
       if (apiKeyContext) {
         activeAuthContext = apiKeyContext;
@@ -193,8 +175,7 @@ async function requestTranscription({
     let errorMessage = `Transcription failed with status ${response.status}.`;
     try {
       const errorPayload = await response.json();
-      const providerMessage =
-        readStringOrNull(errorPayload?.error?.message) || readStringOrNull(errorPayload?.message);
+      const providerMessage = readString(errorPayload?.error?.message) || readString(errorPayload?.message);
       if (providerMessage) {
         errorMessage = providerMessage;
       }
@@ -213,12 +194,9 @@ async function requestTranscription({
   }
 
   const payload = await response.json().catch(() => null);
-  const text = readStringOrNull(payload?.text) || readStringOrNull(payload?.transcript);
+  const text = readString(payload?.text) || readString(payload?.transcript);
   if (!text) {
-    throw voiceError(
-      "transcription_invalid_response",
-      "The transcription response did not include any text.",
-    );
+    throw voiceError("transcription_invalid_response", "The transcription response did not include any text.");
   }
 
   return { text };
@@ -228,7 +206,7 @@ async function requestTranscription({
 async function loadAuthContext(sendCodexRequest, { env = process.env } = {}) {
   const authStatus = await readVoiceAuthStatus(sendCodexRequest);
 
-  const authMethod = readStringOrNull(authStatus?.authMethod);
+  const authMethod = readString(authStatus?.authMethod);
   const token = normalizeBearerToken(authStatus?.authToken);
   const isChatGPT = isChatGPTAuthMethod(authMethod);
 
@@ -237,10 +215,7 @@ async function loadAuthContext(sendCodexRequest, { env = process.env } = {}) {
     if (apiKeyContext) {
       return apiKeyContext;
     }
-    throw voiceError(
-      "not_authenticated",
-      "Sign in with ChatGPT or configure an OpenAI API key before using voice transcription.",
-    );
+    throw voiceError("not_authenticated", "Sign in with ChatGPT or configure an OpenAI API key before using voice transcription.");
   }
 
   return {
@@ -273,10 +248,7 @@ async function readVoiceAuthStatus(sendCodexRequest) {
     });
   } catch (err) {
     console.error(`[remodex] voice auth: getAuthStatus RPC failed: ${err.message}`);
-    throw voiceError(
-      "auth_unavailable",
-      "Could not read OpenAI auth from the Mac runtime. Is the bridge running?",
-    );
+    throw voiceError("auth_unavailable", "Could not read OpenAI auth from the Mac runtime. Is the bridge running?");
   }
 }
 
@@ -312,15 +284,42 @@ function normalizeBase64(value) {
 }
 
 function isLikelyBase64(value) {
-  return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+  if (typeof value !== "string" || value.length === 0 || value.length % 4 !== 0) {
+    return false;
+  }
+
+  const paddingStart = value.indexOf("=");
+  if (paddingStart !== -1) {
+    const paddingLength = value.length - paddingStart;
+    if (paddingLength > 2) {
+      return false;
+    }
+    for (let i = paddingStart; i < value.length; i += 1) {
+      if (value[i] !== "=") {
+        return false;
+      }
+    }
+  }
+
+  // Avoid one giant regex: V8 can overflow its stack on multi-MB voice clips.
+  const dataEnd = paddingStart === -1 ? value.length : paddingStart;
+  for (let i = 0; i < dataEnd; i += 1) {
+    const code = value.charCodeAt(i);
+    const isUppercase = code >= 65 && code <= 90;
+    const isLowercase = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+    if (!isUppercase && !isLowercase && !isDigit && value[i] !== "+" && value[i] !== "/") {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function hasRiffWaveHeader(buffer) {
-  return (
-    buffer.length >= 44 &&
-    buffer.toString("ascii", 0, 4) === "RIFF" &&
-    buffer.toString("ascii", 8, 12) === "WAVE"
-  );
+  return buffer.length >= 44
+    && buffer.toString("ascii", 0, 4) === "RIFF"
+    && buffer.toString("ascii", 8, 12) === "WAVE";
 }
 
 // Parses chunked WAV metadata so extra chunks before fmt/data do not break valid clips.
@@ -361,8 +360,12 @@ function readWavInfo(buffer) {
   return info && hasData ? info : null;
 }
 
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function normalizeBearerToken(value) {
-  const token = readStringOrNull(value);
+  const token = readString(value);
   if (!token) {
     return null;
   }
@@ -371,10 +374,7 @@ function normalizeBearerToken(value) {
 }
 
 function isChatGPTAuthMethod(value) {
-  const normalized =
-    readStringOrNull(value)
-      ?.toLowerCase()
-      .replace(/[^a-z0-9]/g, "") || "";
+  const normalized = readString(value)?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
   return normalized.includes("chatgpt");
 }
 
@@ -397,7 +397,7 @@ async function resolveVoiceAuth(sendCodexRequest) {
   }
 
   const authStatus = await readVoiceAuthStatus(sendCodexRequest);
-  const authMethod = readStringOrNull(authStatus?.authMethod);
+  const authMethod = readString(authStatus?.authMethod);
   const token = normalizeBearerToken(authStatus?.authToken);
   const isChatGPT = isChatGPTAuthMethod(authMethod);
 
@@ -406,10 +406,7 @@ async function resolveVoiceAuth(sendCodexRequest) {
   }
 
   if (!token) {
-    throw voiceError(
-      "token_missing",
-      "No ChatGPT session token available. Sign in to ChatGPT on the Mac.",
-    );
+    throw voiceError("token_missing", "No ChatGPT session token available. Sign in to ChatGPT on the Mac.");
   }
 
   throw voiceError("not_chatgpt", "Voice transcription requires a ChatGPT account.");

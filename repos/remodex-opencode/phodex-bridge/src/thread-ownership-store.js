@@ -24,6 +24,7 @@ function createThreadOwnershipStore({
   });
 
   let ownership = store.read();
+  pruneStaleEntries();
 
   function setOwnership(threadId, providerId) {
     const normalizedThreadId = readString(threadId);

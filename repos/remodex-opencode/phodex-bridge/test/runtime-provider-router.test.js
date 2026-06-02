@@ -820,3 +820,48 @@ test("runtime/catalog clears reasonCode when OpenCode is enabled with agents", a
     process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
   }
 });
+
+test("rejects explicit provider switches on owned threads", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-ownership-"));
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned", "opencode");
+
+    const responses = [];
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ items: [] }),
+      sendApplicationResponse: (message) => {
+        responses.push(JSON.parse(message));
+      },
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [makeProvider(["thread-owned"])],
+    });
+
+    const handled = router.handleApplicationMessage(
+      JSON.stringify({
+        id: "ownership-mismatch",
+        method: "turn/start",
+        params: {
+          threadId: "thread-owned",
+          modelProvider: "codex",
+        },
+      }),
+    );
+
+    assert.equal(handled, true);
+    await waitOneTick();
+    const response = responses.find((entry) => entry.id === "ownership-mismatch");
+    assert.equal(response?.error?.data?.errorCode, "thread_provider_mismatch");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

@@ -18,10 +18,8 @@ const BRIDGE_STDERR_LOG_FILE = "bridge.stderr.log";
 
 // Reuses the existing Remodex state root so daemon mode keeps the same local-first storage model.
 function resolveRemodexStateDir({ env = process.env, osImpl = os } = {}) {
-  return (
-    normalizeNonEmptyString(env.REMODEX_DEVICE_STATE_DIR) ||
-    path.join(osImpl.homedir(), DEFAULT_STATE_DIR_NAME)
-  );
+  return normalizeNonEmptyString(env.REMODEX_DEVICE_STATE_DIR)
+    || path.join(osImpl.homedir(), DEFAULT_STATE_DIR_NAME);
 }
 
 function resolveDaemonConfigPath(options = {}) {
@@ -61,14 +59,10 @@ function writePairingSession(pairingSessionOrPayload, { now = () => Date.now(), 
   const pairingSession = pairingSessionOrPayload?.pairingPayload
     ? pairingSessionOrPayload
     : { pairingPayload: pairingSessionOrPayload };
-  writeJsonFile(
-    resolvePairingSessionPath(options),
-    {
-      createdAt: new Date(now()).toISOString(),
-      ...pairingSession,
-    },
-    options,
-  );
+  writeJsonFile(resolvePairingSessionPath(options), {
+    createdAt: new Date(now()).toISOString(),
+    ...pairingSession,
+  }, options);
 }
 
 function readPairingSession(options = {}) {
@@ -81,14 +75,10 @@ function clearPairingSession({ fsImpl = fs, ...options } = {}) {
 
 // Captures the last known service heartbeat so `remodex status` does not depend on launchctl output alone.
 function writeBridgeStatus(status, { now = () => Date.now(), ...options } = {}) {
-  writeJsonFile(
-    resolveBridgeStatusPath(options),
-    {
-      ...status,
-      updatedAt: new Date(now()).toISOString(),
-    },
-    options,
-  );
+  writeJsonFile(resolveBridgeStatusPath(options), {
+    ...status,
+    updatedAt: new Date(now()).toISOString(),
+  }, options);
 }
 
 function readBridgeStatus(options = {}) {

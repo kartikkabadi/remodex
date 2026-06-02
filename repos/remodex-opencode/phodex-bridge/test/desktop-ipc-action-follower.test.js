@@ -24,50 +24,42 @@ const {
 
 test("projects desktop pending user input as an app-server request shape", () => {
   const actions = projectPendingDesktopActions("thread-1", {
-    requests: [
-      {
-        id: "req-user-input",
-        method: "item/tool/requestUserInput",
-        completed: false,
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          itemId: "item-1",
-          questions: [
-            {
-              id: "q1",
-              header: "Mode",
-              question: "Choose one",
-              isOther: true,
-              options: [{ label: "Yes", description: "Continue" }],
-            },
-          ],
-        },
-      },
-    ],
-  });
-
-  assert.deepEqual(actions, [
-    {
+    requests: [{
       id: "req-user-input",
       method: "item/tool/requestUserInput",
+      completed: false,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
         itemId: "item-1",
-        remodexActionSource: "desktop-ipc-action-follower",
-        questions: [
-          {
-            id: "q1",
-            header: "Mode",
-            question: "Choose one",
-            isOther: true,
-            options: [{ label: "Yes", description: "Continue" }],
-          },
-        ],
+        questions: [{
+          id: "q1",
+          header: "Mode",
+          question: "Choose one",
+          isOther: true,
+          options: [{ label: "Yes", description: "Continue" }],
+        }],
       },
+    }],
+  });
+
+  assert.deepEqual(actions, [{
+    id: "req-user-input",
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      remodexActionSource: "desktop-ipc-action-follower",
+      questions: [{
+        id: "q1",
+        header: "Mode",
+        question: "Choose one",
+        isOther: true,
+        options: [{ label: "Yes", description: "Continue" }],
+      }],
     },
-  ]);
+  }]);
 });
 
 test("projects command, file, and permission approvals while ignoring completed requests", () => {
@@ -137,7 +129,7 @@ test("projects command, file, and permission approvals while ignoring completed 
       ["req-file", "item/fileChange/requestApproval", "thread-2"],
       ["req-file-read", "item/fileRead/requestApproval", "thread-2"],
       ["req-permissions", "item/permissions/requestApproval", "thread-2"],
-    ],
+    ]
   );
   assert.equal(actions[0].params.command, "git status");
   assert.equal(actions[1].params.grantRoot, "/repo");
@@ -148,17 +140,14 @@ test("projects command, file, and permission approvals while ignoring completed 
 
 test("builds desktop follower reply payloads from iOS responses", () => {
   assert.deepEqual(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-command",
-        method: "item/commandExecution/requestApproval",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-command",
-        result: { decision: "acceptForSession" },
-      },
-    ),
+    desktopFollowerPayloadForResponse({
+      requestId: "req-command",
+      method: "item/commandExecution/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-command",
+      result: { decision: "acceptForSession" },
+    }),
     {
       method: "thread-follower-command-approval-decision",
       params: {
@@ -166,25 +155,22 @@ test("builds desktop follower reply payloads from iOS responses", () => {
         requestId: "req-command",
         decision: "acceptForSession",
       },
-    },
+    }
   );
 
   assert.deepEqual(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-user-input",
-        method: "item/tool/requestUserInput",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-user-input",
-        result: {
-          answers: {
-            q1: { answers: ["Yes"] },
-          },
+    desktopFollowerPayloadForResponse({
+      requestId: "req-user-input",
+      method: "item/tool/requestUserInput",
+      threadId: "thread-1",
+    }, {
+      id: "req-user-input",
+      result: {
+        answers: {
+          q1: { answers: ["Yes"] },
         },
       },
-    ),
+    }),
     {
       method: "thread-follower-submit-user-input",
       params: {
@@ -196,21 +182,18 @@ test("builds desktop follower reply payloads from iOS responses", () => {
           },
         },
       },
-    },
+    }
   );
 
   assert.deepEqual(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-file-read",
-        method: "item/fileRead/requestApproval",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-file-read",
-        result: { decision: "accept" },
-      },
-    ),
+    desktopFollowerPayloadForResponse({
+      requestId: "req-file-read",
+      method: "item/fileRead/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-file-read",
+      result: { decision: "accept" },
+    }),
     {
       method: "thread-follower-file-approval-decision",
       params: {
@@ -218,26 +201,23 @@ test("builds desktop follower reply payloads from iOS responses", () => {
         requestId: "req-file-read",
         decision: "accept",
       },
-    },
+    }
   );
 
   assert.deepEqual(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-permissions",
-        method: "item/permissions/requestApproval",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-permissions",
-        result: {
-          permissions: {
-            network: { enabled: true },
-          },
-          scope: "turn",
+    desktopFollowerPayloadForResponse({
+      requestId: "req-permissions",
+      method: "item/permissions/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-permissions",
+      result: {
+        permissions: {
+          network: { enabled: true },
         },
+        scope: "turn",
       },
-    ),
+    }),
     {
       method: "thread-follower-file-approval-decision",
       params: {
@@ -245,24 +225,21 @@ test("builds desktop follower reply payloads from iOS responses", () => {
         requestId: "req-permissions",
         decision: "accept",
       },
-    },
+    }
   );
 
   assert.deepEqual(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-permissions",
-        method: "item/permissions/requestApproval",
-        threadId: "thread-1",
+    desktopFollowerPayloadForResponse({
+      requestId: "req-permissions",
+      method: "item/permissions/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-permissions",
+      result: {
+        permissions: {},
+        scope: "turn",
       },
-      {
-        id: "req-permissions",
-        result: {
-          permissions: {},
-          scope: "turn",
-        },
-      },
-    ),
+    }),
     {
       method: "thread-follower-file-approval-decision",
       params: {
@@ -270,54 +247,45 @@ test("builds desktop follower reply payloads from iOS responses", () => {
         requestId: "req-permissions",
         decision: "decline",
       },
-    },
+    }
   );
 });
 
 test("rejects malformed or failed desktop action responses instead of defaulting to accept", () => {
   assert.equal(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-command",
-        method: "item/commandExecution/requestApproval",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-command",
-        error: { code: -32603, message: "User cancelled" },
-      },
-    ),
-    null,
+    desktopFollowerPayloadForResponse({
+      requestId: "req-command",
+      method: "item/commandExecution/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-command",
+      error: { code: -32603, message: "User cancelled" },
+    }),
+    null
   );
 
   assert.equal(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-command",
-        method: "item/commandExecution/requestApproval",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-command",
-        result: {},
-      },
-    ),
-    null,
+    desktopFollowerPayloadForResponse({
+      requestId: "req-command",
+      method: "item/commandExecution/requestApproval",
+      threadId: "thread-1",
+    }, {
+      id: "req-command",
+      result: {},
+    }),
+    null
   );
 
   assert.equal(
-    desktopFollowerPayloadForResponse(
-      {
-        requestId: "req-user-input",
-        method: "item/tool/requestUserInput",
-        threadId: "thread-1",
-      },
-      {
-        id: "req-user-input",
-        result: {},
-      },
-    ),
-    null,
+    desktopFollowerPayloadForResponse({
+      requestId: "req-user-input",
+      method: "item/tool/requestUserInput",
+      threadId: "thread-1",
+    }, {
+      id: "req-user-input",
+      result: {},
+    }),
+    null
   );
 });
 
@@ -325,27 +293,23 @@ test("applies desktop IPC snapshots and Immer-style request patches", () => {
   const snapshot = applyConversationStateChange(null, {
     type: "snapshot",
     conversationState: {
-      requests: [
-        {
-          id: "req-1",
-          method: "item/tool/requestUserInput",
-          params: {
-            questions: [{ id: "q1", question: "Continue?" }],
-          },
+      requests: [{
+        id: "req-1",
+        method: "item/tool/requestUserInput",
+        params: {
+          questions: [{ id: "q1", question: "Continue?" }],
         },
-      ],
+      }],
     },
   });
 
   const patched = applyConversationStateChange(snapshot, {
     type: "patches",
-    patches: [
-      {
-        op: "replace",
-        path: ["requests", 0, "completed"],
-        value: true,
-      },
-    ],
+    patches: [{
+      op: "replace",
+      path: ["requests", 0, "completed"],
+      value: true,
+    }],
   });
 
   assert.equal(snapshot.requests[0].completed, undefined);
@@ -363,7 +327,7 @@ test("seeds conversation state from thread/read responses for IPC recovery", () 
     {
       turns: [{ id: "turn-1", items: [] }],
       requests: [],
-    },
+    }
   );
 
   assert.deepEqual(
@@ -374,145 +338,121 @@ test("seeds conversation state from thread/read responses for IPC recovery", () 
     }),
     {
       requests: [{ id: "req-1" }],
-    },
+    }
   );
 });
 
 test("projects only appended assistant text as live app-server deltas", () => {
   const previousState = {
-    turns: [
-      {
-        id: "turn-1",
-        items: [
-          {
-            id: "assistant-1",
-            type: "assistant_message",
-            text: "Hello",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-1",
+      items: [{
+        id: "assistant-1",
+        type: "assistant_message",
+        text: "Hello",
+      }],
+    }],
   };
   const nextState = {
-    turns: [
-      {
-        id: "turn-1",
-        items: [
-          {
-            id: "assistant-1",
-            type: "assistant_message",
-            text: "Hello world",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-1",
+      items: [{
+        id: "assistant-1",
+        type: "assistant_message",
+        text: "Hello world",
+      }],
+    }],
   };
 
   assert.deepEqual(
     projectDesktopAssistantDeltaNotifications("thread-1", previousState, nextState),
-    [
-      {
-        method: "item/agentMessage/delta",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          itemId: "assistant-1",
-          delta: " world",
-        },
+    [{
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "assistant-1",
+        delta: " world",
       },
-    ],
+    }]
   );
 });
 
 test("projects canonical desktop agentMessage items as live app-server deltas", () => {
   const previousState = {
-    turns: [
-      {
-        id: "turn-agent-message",
-        items: [
-          {
-            id: "agent-message-1",
-            type: "agentMessage",
-            text: "Hello",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-agent-message",
+      items: [{
+        id: "agent-message-1",
+        type: "agentMessage",
+        text: "Hello",
+      }],
+    }],
   };
   const nextState = {
-    turns: [
-      {
-        id: "turn-agent-message",
-        items: [
-          {
-            id: "agent-message-1",
-            type: "agentMessage",
-            text: "Hello world",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-agent-message",
+      items: [{
+        id: "agent-message-1",
+        type: "agentMessage",
+        text: "Hello world",
+      }],
+    }],
   };
 
   assert.deepEqual(
     projectDesktopAssistantDeltaNotifications("thread-agent-message", previousState, nextState),
-    [
-      {
-        method: "item/agentMessage/delta",
-        params: {
-          threadId: "thread-agent-message",
-          turnId: "turn-agent-message",
-          itemId: "agent-message-1",
-          delta: " world",
-        },
+    [{
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread-agent-message",
+        turnId: "turn-agent-message",
+        itemId: "agent-message-1",
+        delta: " world",
       },
-    ],
+    }]
   );
 });
 
 test("does not replay unchanged or rewritten assistant text as live deltas", () => {
   const previousState = {
-    turns: [
-      {
-        id: "turn-1",
-        items: [
-          {
-            id: "assistant-same",
-            type: "assistant_message",
-            text: "same",
-          },
-          {
-            id: "assistant-rewrite",
-            type: "assistant_message",
-            text: "draft",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-1",
+      items: [
+        {
+          id: "assistant-same",
+          type: "assistant_message",
+          text: "same",
+        },
+        {
+          id: "assistant-rewrite",
+          type: "assistant_message",
+          text: "draft",
+        },
+      ],
+    }],
   };
   const nextState = {
-    turns: [
-      {
-        id: "turn-1",
-        items: [
-          {
-            id: "assistant-same",
-            type: "assistant_message",
-            text: "same",
-          },
-          {
-            id: "assistant-rewrite",
-            type: "assistant_message",
-            text: "final",
-          },
-        ],
-      },
-    ],
+    turns: [{
+      id: "turn-1",
+      items: [
+        {
+          id: "assistant-same",
+          type: "assistant_message",
+          text: "same",
+        },
+        {
+          id: "assistant-rewrite",
+          type: "assistant_message",
+          text: "final",
+        },
+      ],
+    }],
   };
 
   assert.deepEqual(
     projectDesktopAssistantDeltaNotifications("thread-1", previousState, nextState),
-    [],
+    []
   );
 });
 
@@ -563,12 +503,10 @@ test("desktop IPC follower projects first add patch-only action updates without 
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-patch" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-patch" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -579,22 +517,20 @@ test("desktop IPC follower projects first add patch-only action updates without 
       conversationId: "thread-patch",
       change: {
         type: "patches",
-        patches: [
-          {
-            op: "add",
-            path: ["requests", 0],
-            value: {
-              id: "req-patch",
-              method: "item/tool/requestUserInput",
-              params: {
-                threadId: "thread-patch",
-                turnId: "turn-patch",
-                itemId: "item-patch",
-                questions: [{ id: "q1", question: "Continue?" }],
-              },
+        patches: [{
+          op: "add",
+          path: ["requests", 0],
+          value: {
+            id: "req-patch",
+            method: "item/tool/requestUserInput",
+            params: {
+              threadId: "thread-patch",
+              turnId: "turn-patch",
+              itemId: "item-patch",
+              questions: [{ id: "q1", question: "Continue?" }],
             },
           },
-        ],
+        }],
       },
     },
   });
@@ -641,31 +577,27 @@ test("desktop IPC follower uses baseline recovery for patch-only updates that ne
     async readConversationState() {
       baselineReads += 1;
       return {
-        requests: [
-          {
-            id: "req-recovered",
-            method: "item/tool/requestUserInput",
-            completed: true,
-            params: {
-              threadId: "thread-replace",
-              turnId: "turn-replace",
-              itemId: "item-replace",
-              questions: [{ id: "q1", question: "Continue?" }],
-            },
+        requests: [{
+          id: "req-recovered",
+          method: "item/tool/requestUserInput",
+          completed: true,
+          params: {
+            threadId: "thread-replace",
+            turnId: "turn-replace",
+            itemId: "item-replace",
+            questions: [{ id: "q1", question: "Continue?" }],
           },
-        ],
+        }],
       };
     },
     requestTimeoutMs: 500,
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-replace" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-replace" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -676,13 +608,11 @@ test("desktop IPC follower uses baseline recovery for patch-only updates that ne
       conversationId: "thread-replace",
       change: {
         type: "patches",
-        patches: [
-          {
-            op: "replace",
-            path: ["requests", 0, "completed"],
-            value: false,
-          },
-        ],
+        patches: [{
+          op: "replace",
+          path: ["requests", 0, "completed"],
+          value: false,
+        }],
       },
     },
   });
@@ -731,12 +661,10 @@ test("desktop IPC follower does not issue baseline reads just because a chat ope
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-open" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-open" },
+  }));
   await waitFor(() => serverSocket);
   await wait(40);
 
@@ -779,12 +707,10 @@ test("desktop IPC follower waits for a usable snapshot when a first patch needs 
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-wait-snapshot" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-wait-snapshot" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -795,13 +721,11 @@ test("desktop IPC follower waits for a usable snapshot when a first patch needs 
       conversationId: "thread-wait-snapshot",
       change: {
         type: "patches",
-        patches: [
-          {
-            op: "replace",
-            path: ["requests", 0, "completed"],
-            value: false,
-          },
-        ],
+        patches: [{
+          op: "replace",
+          path: ["requests", 0, "completed"],
+          value: false,
+        }],
       },
     },
   });
@@ -818,18 +742,16 @@ test("desktop IPC follower waits for a usable snapshot when a first patch needs 
       change: {
         type: "snapshot",
         conversationState: {
-          requests: [
-            {
-              id: "req-after-snapshot",
-              method: "item/tool/requestUserInput",
-              params: {
-                threadId: "thread-wait-snapshot",
-                turnId: "turn-after-snapshot",
-                itemId: "item-after-snapshot",
-                questions: [{ id: "q1", question: "Continue?" }],
-              },
+          requests: [{
+            id: "req-after-snapshot",
+            method: "item/tool/requestUserInput",
+            params: {
+              threadId: "thread-wait-snapshot",
+              turnId: "turn-after-snapshot",
+              itemId: "item-after-snapshot",
+              questions: [{ id: "q1", question: "Continue?" }],
             },
-          ],
+          }],
         },
       },
     },
@@ -886,12 +808,10 @@ test("desktop IPC follower does not block add patch-only actions on a failing ba
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-patch-fallback" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-patch-fallback" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -902,22 +822,20 @@ test("desktop IPC follower does not block add patch-only actions on a failing ba
       conversationId: "thread-patch-fallback",
       change: {
         type: "patches",
-        patches: [
-          {
-            op: "add",
-            path: ["requests", 0],
-            value: {
-              id: "req-fallback",
-              method: "item/tool/requestUserInput",
-              params: {
-                threadId: "thread-patch-fallback",
-                turnId: "turn-fallback",
-                itemId: "item-fallback",
-                questions: [{ id: "q1", question: "Continue?" }],
-              },
+        patches: [{
+          op: "add",
+          path: ["requests", 0],
+          value: {
+            id: "req-fallback",
+            method: "item/tool/requestUserInput",
+            params: {
+              threadId: "thread-patch-fallback",
+              turnId: "turn-fallback",
+              itemId: "item-fallback",
+              questions: [{ id: "q1", question: "Continue?" }],
             },
           },
-        ],
+        }],
       },
     },
   });
@@ -963,12 +881,10 @@ test("desktop IPC follower answers client discovery requests as a passive client
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-discovery" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-discovery" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "client-discovery-request",
@@ -983,9 +899,7 @@ test("desktop IPC follower answers client discovery requests as a passive client
   });
   await wait(25);
 
-  const discoveryResponse = serverFrames.find(
-    (frame) => frame.type === "client-discovery-response",
-  );
+  const discoveryResponse = serverFrames.find((frame) => frame.type === "client-discovery-response");
   assert.deepEqual(discoveryResponse, {
     type: "client-discovery-response",
     requestId: "discovery-1",
@@ -1042,12 +956,10 @@ test("desktop IPC follower forwards pending actions and routes iOS replies back 
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-live" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-live" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -1059,18 +971,16 @@ test("desktop IPC follower forwards pending actions and routes iOS replies back 
       change: {
         type: "snapshot",
         conversationState: {
-          requests: [
-            {
-              id: "req-live",
-              method: "item/tool/requestUserInput",
-              params: {
-                threadId: "thread-live",
-                turnId: "turn-live",
-                itemId: "item-live",
-                questions: [{ id: "q1", question: "Continue?" }],
-              },
+          requests: [{
+            id: "req-live",
+            method: "item/tool/requestUserInput",
+            params: {
+              threadId: "thread-live",
+              turnId: "turn-live",
+              itemId: "item-live",
+              questions: [{ id: "q1", question: "Continue?" }],
             },
-          ],
+          }],
         },
       },
     },
@@ -1080,21 +990,17 @@ test("desktop IPC follower forwards pending actions and routes iOS replies back 
   assert.equal(outbound[0].id, "req-live");
   assert.equal(outbound[0].method, "item/tool/requestUserInput");
 
-  follower.observeInbound(
-    JSON.stringify({
-      id: "req-live",
-      result: {
-        answers: {
-          q1: { answers: ["Yes"] },
-        },
+  follower.observeInbound(JSON.stringify({
+    id: "req-live",
+    result: {
+      answers: {
+        q1: { answers: ["Yes"] },
       },
-    }),
-  );
+    },
+  }));
   await wait(25);
 
-  const replyFrame = serverFrames.find(
-    (frame) => frame.method === "thread-follower-submit-user-input",
-  );
+  const replyFrame = serverFrames.find((frame) => frame.method === "thread-follower-submit-user-input");
   assert.deepEqual(replyFrame.params, {
     conversationId: "thread-live",
     requestId: "req-live",
@@ -1142,12 +1048,10 @@ test("desktop IPC follower mirrors live assistant text growth from desktop state
   });
   t.after(() => follower.stopAll());
 
-  follower.observeInbound(
-    JSON.stringify({
-      method: "thread/resume",
-      params: { threadId: "thread-live-delta" },
-    }),
-  );
+  follower.observeInbound(JSON.stringify({
+    method: "thread/resume",
+    params: { threadId: "thread-live-delta" },
+  }));
   await waitFor(() => serverSocket);
   writeFrame(serverSocket, {
     type: "broadcast",
@@ -1159,18 +1063,14 @@ test("desktop IPC follower mirrors live assistant text growth from desktop state
       change: {
         type: "snapshot",
         conversationState: {
-          turns: [
-            {
-              id: "turn-live-delta",
-              items: [
-                {
-                  id: "assistant-live-delta",
-                  type: "assistant_message",
-                  text: "Hello",
-                },
-              ],
-            },
-          ],
+          turns: [{
+            id: "turn-live-delta",
+            items: [{
+              id: "assistant-live-delta",
+              type: "assistant_message",
+              text: "Hello",
+            }],
+          }],
         },
       },
     },
@@ -1184,13 +1084,11 @@ test("desktop IPC follower mirrors live assistant text growth from desktop state
       conversationId: "thread-live-delta",
       change: {
         type: "patches",
-        patches: [
-          {
-            op: "replace",
-            path: ["turns", 0, "items", 0, "text"],
-            value: "Hello world",
-          },
-        ],
+        patches: [{
+          op: "replace",
+          path: ["turns", 0, "items", 0, "text"],
+          value: "Hello world",
+        }],
       },
     },
   });
@@ -1241,10 +1139,9 @@ async function waitFor(predicate, timeoutMs = 500) {
 
 function createIpcTestSocket(prefix) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const socketPath =
-    process.platform === "win32"
-      ? `\\\\.\\pipe\\${path.basename(tempDir)}-ipc`
-      : path.join(tempDir, "ipc.sock");
+  const socketPath = process.platform === "win32"
+    ? `\\\\.\\pipe\\${path.basename(tempDir)}-ipc`
+    : path.join(tempDir, "ipc.sock");
   return { tempDir, socketPath };
 }
 
