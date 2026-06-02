@@ -18,7 +18,9 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let selectedModelID: String?
         let selectedModelTitle: String
         let isLoadingModels: Bool
+        let isLoadingOpenCodeProvider: Bool
         let isRuntimeSelectionLoading: Bool
+        let modelsErrorMessage: String?
     }
 
     static func makeMenu(_ input: Input) -> UIMenu {
@@ -58,8 +60,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 ]
             }
             if input.orderedModelOptions.isEmpty {
+                if let errorMessage = input.modelsErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !errorMessage.isEmpty {
+                    return [
+                        disabledInfoAction(title: errorMessage),
+                        UIAction(title: "Retry loading models") { _ in
+                            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                            input.runtimeActions.refreshModels()
+                        },
+                    ]
+                }
                 return [
                     disabledInfoAction(title: "No models available"),
+                    UIAction(title: "Retry loading models") { _ in
+                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                        input.runtimeActions.refreshModels()
+                    },
                 ]
             }
 
@@ -93,28 +109,57 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
     private static func providerMenus(_ input: Input) -> [UIMenuElement] {
         let grouped = Dictionary(grouping: input.orderedModelOptions, by: \.modelProvider)
-        let providers = grouped.keys.sorted { lhs, rhs in
+        var providerIDs = input.runtimeState.catalogProviderIDs
+        for provider in grouped.keys {
+            let normalized = CodexModelOption.normalizedProvider(provider)
+            if !providerIDs.contains(normalized) {
+                providerIDs.append(normalized)
+            }
+        }
+
+        providerIDs.sort { lhs, rhs in
             let lhsRank = providerRank(lhs)
             let rhsRank = providerRank(rhs)
             if lhsRank == rhsRank {
-                return TurnComposerMetaMapper.providerTitle(for: lhs) < TurnComposerMetaMapper.providerTitle(for: rhs)
+                return TurnComposerMetaMapper.providerTitle(for: lhs)
+                    < TurnComposerMetaMapper.providerTitle(for: rhs)
             }
             return lhsRank < rhsRank
         }
 
-        return providers.compactMap { provider in
-            guard let models = grouped[provider], !models.isEmpty else { return nil }
-            let providerTitle = TurnComposerMetaMapper.providerTitle(for: provider)
+        return providerIDs.compactMap { provider in
             let normalizedProvider = CodexModelOption.normalizedProvider(provider)
+            let models = grouped[provider] ?? grouped[normalizedProvider] ?? []
+            let providerTitle = TurnComposerMetaMapper.providerTitle(for: provider)
+            let inCatalog = input.runtimeState.catalogProviderIDs.contains(normalizedProvider)
+
+            if models.isEmpty {
+                guard inCatalog else { return nil }
+                return catalogOnlyProviderMenu(
+                    provider: provider,
+                    normalizedProvider: normalizedProvider,
+                    providerTitle: providerTitle,
+                    input: input
+                )
+            }
 
             if input.runtimeState.disabledProviderIDs.contains(normalizedProvider) {
                 let rawReason = input.runtimeState.unavailableReasonByProviderID[normalizedProvider]
-                let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason)
+                let reasonCode = input.runtimeState.reasonCodeByProviderID[normalizedProvider]
+                let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason, reasonCode: reasonCode)
                 return UIMenu(
                     title: providerTitle,
                     image: RuntimeProviderLogo.menuUIImage(provider: provider),
                     options: [],
                     children: [disabledInfoAction(title: unavailable.title)]
+                )
+            }
+
+            if normalizedProvider == "opencode" {
+                return openCodeRuntimeMenu(
+                    providerTitle: providerTitle,
+                    models: models,
+                    input: input
                 )
             }
 
@@ -127,6 +172,98 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 }
             )
         }
+    }
+
+    private static func catalogOnlyProviderMenu(
+        provider: String,
+        normalizedProvider: String,
+        providerTitle: String,
+        input: Input
+    ) -> UIMenu? {
+        if input.runtimeState.disabledProviderIDs.contains(normalizedProvider) {
+            let rawReason = input.runtimeState.unavailableReasonByProviderID[normalizedProvider]
+            let reasonCode = input.runtimeState.reasonCodeByProviderID[normalizedProvider]
+            let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason, reasonCode: reasonCode)
+            return UIMenu(
+                title: providerTitle,
+                image: RuntimeProviderLogo.menuUIImage(provider: provider),
+                options: [],
+                children: [disabledInfoAction(title: unavailable.title)]
+            )
+        }
+
+        let statusTitle: String = {
+            if normalizedProvider == "opencode", input.isLoadingOpenCodeProvider {
+                return "Loading models..."
+            }
+            if normalizedProvider == "opencode",
+               let errorMessage = input.modelsErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !errorMessage.isEmpty {
+                return errorMessage
+            }
+            if normalizedProvider == "opencode" {
+                return "OpenCode models are still loading"
+            }
+            if input.isLoadingModels {
+                return "Loading models..."
+            }
+            return "No models available"
+        }()
+
+        return UIMenu(
+            title: providerTitle,
+            image: RuntimeProviderLogo.menuUIImage(provider: provider),
+            options: [],
+            children: [
+                disabledInfoAction(title: statusTitle),
+                UIAction(title: "Retry loading models") { _ in
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    input.runtimeActions.refreshModels()
+                },
+            ]
+        )
+    }
+
+    private static func openCodeRuntimeMenu(
+        providerTitle: String,
+        models: [CodexModelOption],
+        input: Input
+    ) -> UIMenu {
+        let upstreamGroups = TurnComposerMetaMapper.openCodeModelsGroupedByUpstream(models)
+        if upstreamGroups.isEmpty {
+            return UIMenu(
+                title: providerTitle,
+                image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
+                options: [.singleSelection],
+                children: models.map { modelAction(model: $0, input: input) }
+            )
+        }
+
+        let groupedIds = Set(upstreamGroups.map(\.upstreamId))
+        let ungrouped = models.filter { model in
+            let upstream = model.upstreamProviderId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return upstream.isEmpty || !groupedIds.contains(upstream)
+        }
+
+        var children: [UIMenuElement] = upstreamGroups.map { group in
+            UIMenu(
+                title: group.title,
+                image: RuntimeProviderLogo.menuUIImage(provider: group.upstreamId),
+                options: [.singleSelection],
+                children: group.models.map { modelAction(model: $0, input: input) }
+            )
+        }
+
+        if !ungrouped.isEmpty {
+            children.append(contentsOf: ungrouped.map { modelAction(model: $0, input: input) })
+        }
+
+        return UIMenu(
+            title: providerTitle,
+            image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
+            options: [],
+            children: children
+        )
     }
 
     private static func providerRank(_ provider: String) -> Int {
@@ -145,8 +282,19 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Agent
 
     private static func agentMenu(_ input: Input) -> UIMenu? {
+        guard input.runtimeState.capabilities.supportsAgentSelection else { return nil }
+
         let agents = input.runtimeState.availableAgents
-        guard !agents.isEmpty else { return nil }
+        guard !agents.isEmpty else {
+            return disabledSubmenu(
+                title: "Agent",
+                subtitle: "Unavailable",
+                image: RemodexIcon.menuUIImage(systemName: "person.and.arrow.left.and.arrow.right"),
+                reason: ComposerCapabilityCopy.capabilityReasonWhenAgentSelectionUnavailable(
+                    capabilities: input.runtimeState.capabilities
+                )
+            )
+        }
 
         let selectedId = input.runtimeState.selectedAgent ?? agents.first?.id
         let actions: [UIMenuElement] = agents.map { agent in
@@ -211,22 +359,14 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     // MARK: - Speed
 
     private static func speedMenu(_ input: Input) -> UIMenu? {
+        guard input.selectedModelID != nil else { return nil }
+
         let selectedModelCapabilities = modelCapabilitiesForSelectedModel(input)
         guard input.runtimeState.capabilities.supportsFastMode else {
-            return disabledSubmenu(
-                title: "Speed",
-                subtitle: "Unavailable",
-                image: UIImage(systemName: "bolt.fill"),
-                reason: ComposerCapabilityCopy.capabilityReason(for: .fastMode)
-            )
+            return nil
         }
-        guard selectedModelCapabilities?.supportsFastMode ?? true else {
-            return disabledSubmenu(
-                title: "Speed",
-                subtitle: "Unavailable",
-                image: UIImage(systemName: "bolt.fill"),
-                reason: ComposerCapabilityCopy.capabilityReason(for: .fastMode)
-            )
+        guard selectedModelCapabilities?.supportsFastMode ?? false else {
+            return nil
         }
 
         let normalAction = UIAction(

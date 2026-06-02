@@ -167,6 +167,7 @@ function fakeClient() {
     setMode: async () => {},
     setEffort: async () => {},
     abort: async () => {},
+    fork: async () => "ses_forked",
     getMessages: async () => [],
     replyToPermission: async () => {},
     subscribeToEvents: () => () => {},

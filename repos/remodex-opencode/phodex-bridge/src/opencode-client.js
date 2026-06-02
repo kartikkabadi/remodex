@@ -45,10 +45,10 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
 
   async function listAgents() {
     try {
-      const agents = await withTimeout(client.app.agents(), REQUEST_TIMEOUT_MS);
-      return (Array.isArray(agents) ? agents : []).map((a) => ({
-        id: readString(a.id || a),
-        label: readString(a.name || a.displayName || a.id || a),
+      const response = await withTimeout(client.app.agents(), REQUEST_TIMEOUT_MS);
+      return resolveAgentsList(response).map((a) => ({
+        id: readString(a.id || a.name || a),
+        label: readString(a.label || a.name || a.displayName || a.id || a),
         description: readString(a.description) || "",
       }));
     } catch (error) {
@@ -137,7 +137,8 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
 
     (async () => {
       try {
-        const subscription = client.event.subscribe();
+        const sseClient = await client.event.subscribe();
+        const subscription = sseClient.stream;
         for await (const event of subscription) {
           if (!active) break;
           dispatchEvent(event, handler);
@@ -155,6 +156,48 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     };
   }
 
+  async function fork(sessionId) {
+    const response = await withTimeout(
+      client.session.fork({ sessionID: sessionId }),
+      REQUEST_TIMEOUT_MS,
+    );
+    return readString(response?.sessionID || response?.sessionId);
+  }
+
+  async function listCommands(directory) {
+    try {
+      const commands = await withTimeout(
+        client.command.list({ query: { directory: readString(directory) || process.cwd() } }),
+        REQUEST_TIMEOUT_MS,
+      );
+      return (Array.isArray(commands) ? commands : []).map((c) => ({
+        token: readString(c.token || c.name || c),
+        title: readString(c.title || c.displayName || c.token || c.name || c),
+        description: readString(c.description) || "",
+      }));
+    } catch (error) {
+      console.warn(`${logPrefix} OpenCode command.list() failed: ${error.message}`);
+      return [];
+    }
+  }
+
+  async function listSkills(directory) {
+    if (typeof client.app?.skills !== "function") {
+      return [];
+    }
+    try {
+      const response = await withTimeout(
+        client.app.skills({ query: { directory: readString(directory) || process.cwd() } }),
+        REQUEST_TIMEOUT_MS,
+      );
+      const skills = resolveSkillsList(response);
+      return skills.map((skill) => mapOpenCodeSkill(skill, directory));
+    } catch (error) {
+      console.warn(`${logPrefix} OpenCode app.skills() failed: ${error.message}`);
+      return [];
+    }
+  }
+
   return {
     listModels,
     listAgents,
@@ -168,6 +211,43 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     getMessages,
     replyToPermission,
     subscribeToEvents,
+    fork,
+    listCommands,
+    listSkills,
+  };
+}
+
+function resolveSkillsList(response) {
+  if (Array.isArray(response)) {
+    return response;
+  }
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+  if (Array.isArray(response?.skills)) {
+    return response.skills;
+  }
+  return [];
+}
+
+function mapOpenCodeSkill(skill, directory) {
+  const name = readString(skill?.name || skill?.id);
+  const location = readString(skill?.location || skill?.path);
+  const path = location || "";
+  const scope =
+    path.includes("/.codex/skills/") || path.includes("/.agents/skills/")
+      ? path.includes("/.codex/skills/")
+        ? "global"
+        : "project"
+      : directory && path.startsWith(directory)
+        ? "project"
+        : "global";
+  return {
+    name,
+    description: readString(skill?.description) || "",
+    path,
+    scope,
+    enabled: skill?.enabled !== false,
   };
 }
 
@@ -296,24 +376,61 @@ function dispatchEvent(event, handler) {
   }
 }
 
+function resolveAgentsList(response) {
+  if (Array.isArray(response)) return response;
+  if (response && Array.isArray(response.data)) return response.data;
+  if (response && Array.isArray(response.agents)) return response.agents;
+  return [];
+}
+
+function resolveProviderListPayload(response) {
+  if (!response || typeof response !== "object") return response;
+
+  if (Array.isArray(response.providers) || Array.isArray(response.all)) {
+    return response;
+  }
+
+  const nested = response.data;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested;
+  }
+
+  return response;
+}
+
+function providerEntriesFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return [];
+
+  if (Array.isArray(payload.providers)) return payload.providers;
+  if (Array.isArray(payload.all)) return payload.all;
+  return [];
+}
+
+function modelsForProvider(provider) {
+  const models = provider?.models;
+  if (Array.isArray(models)) return models;
+  if (models && typeof models === "object") return Object.values(models);
+  return [];
+}
+
 function flattenProviderModels(response) {
   if (!response || typeof response !== "object") return [];
 
-  const providers = response.providers;
-  if (!Array.isArray(providers)) {
-    const models = Array.isArray(response.models) ? response.models : [];
-    const items = Array.isArray(response.items) ? response.items : [];
-    const data = Array.isArray(response.data) ? response.data : [];
-    const flat = [...models, ...items, ...data];
-    if (flat.length > 0) return flat.map((m) => buildModelFromAny(m, "unknown"));
-    return [];
+  const payload = resolveProviderListPayload(response);
+  const providers = providerEntriesFromPayload(payload);
+  if (providers.length > 0) {
+    return providers.flatMap((provider) => {
+      const providerId = readString(provider.id || provider.providerId || provider.providerID);
+      return modelsForProvider(provider).map((model) => buildModelFromAny(model, providerId));
+    });
   }
 
-  return providers.flatMap((provider) => {
-    const providerId = readString(provider.id || provider.providerId);
-    const models = Array.isArray(provider.models) ? provider.models : [];
-    return models.map((model) => buildModelFromAny(model, providerId));
-  });
+  const models = Array.isArray(payload.models) ? payload.models : [];
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const data = Array.isArray(payload.data) ? payload.data : [];
+  const flat = [...models, ...items, ...data];
+  if (flat.length > 0) return flat.map((m) => buildModelFromAny(m, "unknown"));
+  return [];
 }
 
 function buildModelFromAny(model, upstreamProviderId) {
@@ -367,4 +484,9 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-module.exports = { createOpenCodeClient };
+module.exports = {
+  createOpenCodeClient,
+  flattenProviderModels,
+  buildModelFromAny,
+  resolveAgentsList,
+};

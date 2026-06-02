@@ -276,6 +276,7 @@ All fields optional. Omit for first page.
       "label": "Codex",
       "enabled": true,
       "unavailableReason": null,
+      "reasonCode": null,
       "agents": [],
       "capabilities": {
         "supportsAgentSelection": false,
@@ -289,14 +290,19 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
-        "supportsMCP": true
+        "supportsMCP": true,
+        "supportsSkillAutocomplete": true,
+        "supportsSteer": true,
+        "supportsQueue": true
       }
     },
     {
       "id": "opencode",
       "label": "OpenCode",
       "enabled": true,
+      "showsBetaLabel": true,
       "unavailableReason": null,
+      "reasonCode": null,
       "agents": [
         { "id": "build", "label": "Build" },
         { "id": "plan", "label": "Plan" }
@@ -313,17 +319,112 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
-        "supportsMCP": true
+        "supportsMCP": true,
+        "supportsSkillAutocomplete": false,
+        "supportsSteer": false,
+        "supportsQueue": true
       }
     }
   ]
 }
 ```
 
+**`reasonCode`** (structured, optional per runtime): machine-readable companion to `unavailableReason`. iOS switches on this field instead of substring-matching human copy.
+
+| Value | When |
+|-------|------|
+| `null` | Runtime is available (or Codex, which is always available) |
+| `"opencode_not_enabled"` | `REMODEX_ENABLE_OPENCODE` is not `"1"` or OpenCode command is missing |
+| `"opencode_agents_unavailable"` | OpenCode is enabled but `listAgents()` failed |
+
 **When OpenCode is unavailable** (binary missing or `REMODEX_ENABLE_OPENCODE` not set):
 - `enabled: false`
-- `unavailableReason: "OpenCode is not installed on this Mac. Install with: curl -fsSL https://opencode.ai/install | bash"`
+- `reasonCode: "opencode_not_enabled"`
+- `unavailableReason: "OpenCode is not enabled on this Mac"` (human-readable)
 - `agents: []`
+
+### command/list
+
+**Routing:** `router` — handled in `runtime-provider-router.js`, never forwarded to Codex
+
+**Params:**
+```
+{ directory?: string, cwd?: string }
+```
+Optional project directory for slash-command discovery. `directory` is preferred; `cwd` is an alias. When omitted, the bridge uses its process `cwd`.
+
+**Result:**
+```json
+{
+  "commands": [
+    {
+      "token": "/build",
+      "title": "Build",
+      "description": "Build the project"
+    }
+  ]
+}
+```
+
+**Routing behavior:** Router calls `opencodeProvider.listCommands(directory)` when the OpenCode harness is registered. Otherwise returns `{ commands: [] }`. Does not consult thread ownership and does not call the Codex app-server.
+
+**OpenCode-only notes:** Requires `REMODEX_ENABLE_OPENCODE` and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`.
+
+### skills/list
+
+**Routing:** `router` — merges Codex app-server skills with OpenCode `app.skills()` when the harness is registered
+
+**Params:**
+```
+{ cwds?: string[], cwd?: string, forceReload?: boolean }
+```
+
+**Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
+
+**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+
+### thread/fork
+
+**Routing:** `router` — dispatched by thread ownership (OpenCode-owned threads); Codex-owned threads fall through to `passthrough`
+
+**Params:**
+```json
+{
+  "threadId": "opencode-thread-1717000000-a1b2c3"
+}
+```
+`thread_id` and `id` are accepted aliases. iOS may also send `excludeTurns` for Codex; the OpenCode provider ignores unknown fields.
+
+**Result (OpenCode):**
+```json
+{
+  "thread": {
+    "id": "opencode-thread-1717002000-f6g7h8",
+    "title": "OpenCode chat",
+    "name": "OpenCode chat",
+    "model": "openai/gpt-5.5",
+    "modelProvider": "opencode",
+    "provider": "opencode",
+    "agent": "build",
+    "cwd": "/path/to/project",
+    "createdAt": "2026-05-30T12:20:00.000Z",
+    "updatedAt": "2026-05-30T12:20:00.000Z",
+    "metadata": { "provider": "opencode" }
+  }
+}
+```
+
+**Routing behavior:** Router reads `thread-ownership.json` via `providerForRequest`. OpenCode-owned `threadId` → `opencode-provider` `threadFork` (SDK `session.fork`, then `thread/start` with the new `sessionId`, preserving `model`, `agent`, and `cwd`). Codex-owned threads are not handled by the router; the request is stripped of provider fields and forwarded to the Codex app-server unchanged.
+
+**OpenCode-only notes:** The source thread must already have a persisted OpenCode `sessionId` (created on the first successful `turn/start`). Forking a thread that was only created via `thread/start` fails with `opencode_fork_requires_session`. The new thread gets a fresh `opencode-thread-*` id and ownership entry; the source thread is unchanged. Capability flag `supportsFork` on `runtime/catalog` gates the composer UI — Codex threads use native Codex fork semantics via passthrough.
+
+**Errors (OpenCode):**
+
+| errorCode | When |
+|-----------|------|
+| `thread_not_found` | `threadId` is unknown to the OpenCode provider |
+| `opencode_fork_requires_session` | Source thread has no `sessionId` yet |
+| `opencode_server_unreachable` | `opencode serve` could not be reached for `session.fork` |
 
 ### Bridge-Local Methods
 

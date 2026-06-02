@@ -470,6 +470,8 @@ final class TurnComposerSendAvailabilityTests: XCTestCase {
         return TurnComposerAccessoryState(
             queuedDrafts: [],
             canSteerQueuedDrafts: false,
+            showsSteerQueuedDraftControl: false,
+            steerUnavailableReason: nil,
             canRestoreQueuedDrafts: false,
             steeringDraftID: nil,
             composerAttachments: hasAttachment ? [

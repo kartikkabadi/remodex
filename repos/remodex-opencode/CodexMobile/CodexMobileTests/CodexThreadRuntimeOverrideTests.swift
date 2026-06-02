@@ -11,6 +11,19 @@ import XCTest
 final class CodexThreadRuntimeOverrideTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
+    func testDefaultCodexCapabilitiesExposeReasoningEffort() {
+        XCTAssertTrue(ProviderCapabilities.defaultCodex.supportsReasoningEffort)
+    }
+
+    func testReasoningFallbackWhenModelsListIsEmptyButCodexIsSelected() {
+        let service = makeService()
+        service.availableModels = []
+        service.setSelectedModelId("codex:gpt-5.5")
+
+        let efforts = service.supportedReasoningEffortsForSelectedModel().map(\.reasoningEffort)
+        XCTAssertEqual(efforts, ["low", "medium", "high", "xhigh"])
+    }
+
     func testTurnStartUsesThreadRuntimeOverridesInsteadOfAppDefaults() async throws {
         let service = makeService()
         service.isConnected = true
@@ -510,7 +523,10 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
                 supportsDesktopHandoff: false,
                 supportsSlashCommands: true,
                 supportsMCP: true,
-                supportsWorktree: true
+                supportsWorktree: true,
+                supportsSkillAutocomplete: false,
+                supportsSteer: false,
+                supportsQueue: true
             )
         )
     }

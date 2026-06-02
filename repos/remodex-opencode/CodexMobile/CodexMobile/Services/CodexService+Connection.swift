@@ -154,6 +154,7 @@ extension CodexService {
         isInitialized = false
         isLoadingThreads = false
         isLoadingModels = false
+        resetOpenCodeModelsRetry()
         pendingRuntimeOptionRefresh = false
         runtimeOptionRefreshTask?.cancel()
         runtimeOptionRefreshTask = nil
@@ -301,8 +302,13 @@ extension CodexService {
             clearPreviousTrustedMacDeviceId()
         }
 
-        if normalizedRelayMacDeviceId == targetDeviceId {
+        // Atomic re-pair: drop saved relay keys when forgetting the Mac that owns them,
+        // or when no trusted Macs remain (avoids trusted_reconnect with stale sessionId).
+        if normalizedRelayMacDeviceId == targetDeviceId || trustedMacRegistry.records.isEmpty {
             clearSavedRelaySession()
+            shouldForceQRBootstrapOnNextHandshake = true
+            secureConnectionState = .notPaired
+            secureMacFingerprint = nil
         } else {
             resetSecureTransportState()
         }
@@ -311,6 +317,11 @@ extension CodexService {
     // Gives the UI one stable "forget pair" action whether reconnect comes from a trusted record
     // or only from the last saved relay session.
     func forgetReconnectCandidate() {
+        shouldAutoReconnectOnForeground = false
+        connectionRecoveryState = .idle
+        lastErrorMessage = nil
+        cancelTrustedSessionResolve()
+
         if let normalizedRelayMacDeviceId,
            trustedMacRegistry.records[normalizedRelayMacDeviceId] != nil {
             forgetTrustedMac(deviceId: normalizedRelayMacDeviceId)
@@ -323,6 +334,9 @@ extension CodexService {
         }
 
         clearSavedRelaySession()
+        shouldForceQRBootstrapOnNextHandshake = true
+        secureConnectionState = .notPaired
+        secureMacFingerprint = nil
     }
 
     func initializeSession() async throws {
@@ -631,7 +645,10 @@ extension CodexService {
                 self.pendingRuntimeOptionRefresh = true
                 return
             }
-            try? await self.listModels()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await self.fetchRuntimeCatalog() }
+                group.addTask { try? await self.listModels() }
+            }
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false
             }
@@ -663,6 +680,7 @@ extension CodexService {
         currentOutput = ""
         lastErrorMessage = nil
         isLoadingModels = false
+        resetOpenCodeModelsRetry()
         pendingRuntimeOptionRefresh = false
         runtimeOptionRefreshTask?.cancel()
         runtimeOptionRefreshTask = nil

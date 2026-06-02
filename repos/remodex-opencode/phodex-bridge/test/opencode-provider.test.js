@@ -64,6 +64,7 @@ function fakeClient() {
     setMode: async () => {},
     setEffort: async () => {},
     abort: async () => {},
+    fork: async () => "ses_forked456",
     getMessages: async () => [],
     replyToPermission: async () => {},
     subscribeToEvents: (handler) => {
@@ -93,6 +94,7 @@ test("provider has expected API surface", () => {
   assert.equal(typeof provider.ownsThread, "function");
   assert.equal(typeof provider.listModels, "function");
   assert.equal(typeof provider.listAgents, "function");
+  assert.equal(typeof provider.listCommands, "function");
   assert.equal(typeof provider.listThreads, "function");
   assert.equal(typeof provider.handleRequest, "function");
   assert.equal(typeof provider.shutdown, "function");
@@ -280,4 +282,65 @@ test("turnStart returns turnId and status running", async () => {
   assert.ok(result.turnId);
   assert.ok(result.turnId.startsWith("opencode-turn-"));
   assert.equal(result.turn.status, "running");
+});
+
+test("threadFork creates new thread with forked session", async () => {
+  const provider = makeProvider();
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "Source thread" },
+  });
+
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "test fork" },
+  });
+
+  // Wait for setImmediate in executeTurn to set sessionId
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const forkResult = await provider.handleRequest({
+    id: 3,
+    method: "thread/fork",
+    params: { threadId: start.thread.id },
+  });
+
+  assert.ok(forkResult.thread);
+  assert.ok(forkResult.thread.id.startsWith("opencode-thread-"));
+  assert.notEqual(forkResult.thread.id, start.thread.id);
+  assert.equal(provider.ownsThread(forkResult.thread.id), true);
+});
+
+test("threadFork without session returns error", async () => {
+  const provider = makeProvider();
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "No session thread" },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 2,
+        method: "thread/fork",
+        params: { threadId: start.thread.id },
+      }),
+    { errorCode: "opencode_fork_requires_session" },
+  );
+});
+
+test("threadFork on unknown thread returns error", async () => {
+  const provider = makeProvider();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/fork",
+        params: { threadId: "nonexistent" },
+      }),
+    { errorCode: "thread_not_found" },
+  );
 });

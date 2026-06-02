@@ -4,7 +4,9 @@
 // Exports: SettingsSubscriptionCard
 // Depends on: SwiftUI, StoreKit, SubscriptionService, RevenueCatPaywallView
 
+#if !REMODEX_LOCAL_DEVICE
 import StoreKit
+#endif
 import SwiftUI
 
 struct SettingsSubscriptionCard: View {
@@ -56,6 +58,7 @@ struct SettingsSubscriptionCard: View {
         .sheet(isPresented: $isPresentingPaywall) {
             RevenueCatPaywallView()
         }
+        #if !REMODEX_LOCAL_DEVICE
         .offerCodeRedemption(isPresented: $isPresentingOfferCodeRedemption) { result in
             Task {
                 if case .failure = result {
@@ -65,6 +68,7 @@ struct SettingsSubscriptionCard: View {
                 }
             }
         }
+        #endif
         .task {
             guard subscriptions.bootstrapState == .idle else {
                 return

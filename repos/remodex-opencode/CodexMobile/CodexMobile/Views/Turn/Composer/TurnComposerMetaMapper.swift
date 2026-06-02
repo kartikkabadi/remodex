@@ -36,6 +36,40 @@ enum TurnComposerMetaMapper {
         }
     }
 
+    static func upstreamProviderTitle(for upstreamId: String, displayName: String?) -> String {
+        let trimmedDisplay = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedDisplay.isEmpty {
+            return trimmedDisplay
+        }
+        return providerTitle(for: upstreamId)
+    }
+
+    /// Groups OpenCode runtime models by upstream provider id (anthropic, openai, …).
+    static func openCodeModelsGroupedByUpstream(
+        _ models: [CodexModelOption]
+    ) -> [(upstreamId: String, title: String, models: [CodexModelOption])] {
+        let withUpstream = models.filter {
+            let upstream = $0.upstreamProviderId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !upstream.isEmpty
+        }
+        guard !withUpstream.isEmpty else {
+            return []
+        }
+
+        let grouped = Dictionary(grouping: withUpstream) { model in
+            model.upstreamProviderId!.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        return grouped.keys.sorted().compactMap { upstreamId in
+            guard let models = grouped[upstreamId], !models.isEmpty else { return nil }
+            let title = upstreamProviderTitle(
+                for: upstreamId,
+                displayName: models.first?.upstreamProviderDisplayName
+            )
+            return (upstreamId: upstreamId, title: title, models: models)
+        }
+    }
+
     static func providerIconName(for provider: String) -> String {
         switch CodexModelOption.normalizedProvider(provider) {
         case "codex":

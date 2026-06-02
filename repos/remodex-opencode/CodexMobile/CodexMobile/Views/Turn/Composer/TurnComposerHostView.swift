@@ -69,6 +69,7 @@ struct TurnComposerHostView: View {
             ),
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
             supportsThreadFork: runtimeState.capabilities.supportsFork,
+            supportsSkillAutocomplete: runtimeState.capabilities.supportsSkillAutocomplete,
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
             isFileAutocompleteVisible: viewModel.isFileAutocompleteVisible,
             isFileAutocompleteLoading: viewModel.isFileAutocompleteLoading,
@@ -90,9 +91,14 @@ struct TurnComposerHostView: View {
             selectedGitBaseBranch: viewModel.selectedGitBaseBranch,
             gitDefaultBranch: viewModel.gitDefaultBranch
         )
+        let steerEligible = isThreadRunning && activeTurnID != nil
         let accessoryState = TurnComposerAccessoryState(
             queuedDrafts: viewModel.queuedDraftsList(codex: codex, threadID: thread.id),
-            canSteerQueuedDrafts: isThreadRunning && activeTurnID != nil,
+            canSteerQueuedDrafts: steerEligible && runtimeState.capabilities.supportsSteer,
+            showsSteerQueuedDraftControl: steerEligible,
+            steerUnavailableReason: runtimeState.capabilities.supportsSteer
+                ? nil
+                : ComposerCapabilityCopy.capabilityReason(for: .steer),
             canRestoreQueuedDrafts: viewModel.canRestoreQueuedDrafts,
             steeringDraftID: viewModel.steeringDraftID,
             composerAttachments: viewModel.composerAttachments,
@@ -115,7 +121,7 @@ struct TurnComposerHostView: View {
         // When the runtime provider is explicitly disabled, replace the entire composer
         // with an unavailable notice so users see why the controls are missing.
         if !runtimeState.isRuntimeEnabled {
-            let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason, reasonCode: runtimeState.runtimeUnavailableReasonCode)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -165,7 +171,9 @@ struct TurnComposerHostView: View {
             selectedModelID: selectedModelID,
             selectedModelTitle: selectedModelTitle,
             isLoadingModels: codex.isLoadingModels,
+            isLoadingOpenCodeProvider: codex.isLoadingOpenCodeProvider,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
+            modelsErrorMessage: codex.modelsErrorMessage,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,
             voiceButtonPresentation: voiceButtonPresentation,

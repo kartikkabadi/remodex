@@ -17,7 +17,7 @@ A multi-repo workspace containing:
 ## Absolute Non-Negotiables
 
 1. **No upstream PRs** until Kartik confirms device E2E (Codex regression + OpenCode session)
-2. **Codex regression**: the existing Codex-only path MUST work identically when `REMODEX_ENABLE_OPENCODE` is unset. Every Codex feature that works today must keep working.
+2. **Codex regression**: the existing Codex-only path MUST work identically when `REMODEX_DISABLE_OPENCODE=1` (or legacy `REMODEX_ENABLE_OPENCODE=0`). Every Codex feature that works today must keep working. OpenCode is enabled by default otherwise.
 3. **Capability-driven UI**: never show an enabled control that isn't backed by `runtime/catalog` proof. Grey out with reason string for anything unsupported. No fake-enabled picker rows.
 4. **Bridge is the composition root**: all subsystem wiring happens in `bridge.js`. No service locators, no DI containers, no dynamic module loading.
 5. **Tests pass before claiming complete**: run `npm test`, verify output, don't skip quality gates for expediency.

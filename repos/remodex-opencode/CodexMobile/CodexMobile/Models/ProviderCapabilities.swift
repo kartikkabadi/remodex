@@ -20,6 +20,9 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsSlashCommands: Bool
     let supportsMCP: Bool
     let supportsWorktree: Bool
+    let supportsSkillAutocomplete: Bool
+    let supportsSteer: Bool
+    let supportsQueue: Bool
 
     init(
         supportsAgentSelection: Bool,
@@ -33,7 +36,10 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsDesktopHandoff: Bool,
         supportsSlashCommands: Bool,
         supportsMCP: Bool,
-        supportsWorktree: Bool
+        supportsWorktree: Bool,
+        supportsSkillAutocomplete: Bool,
+        supportsSteer: Bool,
+        supportsQueue: Bool
     ) {
         self.supportsAgentSelection = supportsAgentSelection
         self.supportsReasoningEffort = supportsReasoningEffort
@@ -47,6 +53,9 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         self.supportsSlashCommands = supportsSlashCommands
         self.supportsMCP = supportsMCP
         self.supportsWorktree = supportsWorktree
+        self.supportsSkillAutocomplete = supportsSkillAutocomplete
+        self.supportsSteer = supportsSteer
+        self.supportsQueue = supportsQueue
     }
 
     enum CodingKeys: String, CodingKey {
@@ -62,6 +71,9 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         case supportsSlashCommands
         case supportsMCP
         case supportsWorktree
+        case supportsSkillAutocomplete
+        case supportsSteer
+        case supportsQueue
     }
 
     init(from decoder: Decoder) throws {
@@ -74,10 +86,13 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsApprovals = (try? container.decodeIfPresent(Bool.self, forKey: .supportsApprovals)) ?? true
         supportsFork = (try? container.decodeIfPresent(Bool.self, forKey: .supportsFork)) ?? true
         supportsVoice = (try? container.decodeIfPresent(Bool.self, forKey: .supportsVoice)) ?? false
-        supportsDesktopHandoff = (try? container.decodeIfPresent(Bool.self, forKey: .supportsDesktopHandoff)) ?? false
+        supportsDesktopHandoff = (try? container.decodeIfPresent(Bool.self, forKey: .supportsDesktopHandoff)) ?? true
         supportsSlashCommands = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSlashCommands)) ?? true
         supportsMCP = (try? container.decodeIfPresent(Bool.self, forKey: .supportsMCP)) ?? true
         supportsWorktree = (try? container.decodeIfPresent(Bool.self, forKey: .supportsWorktree)) ?? false
+        supportsSkillAutocomplete = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillAutocomplete)) ?? false
+        supportsSteer = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSteer)) ?? false
+        supportsQueue = (try? container.decodeIfPresent(Bool.self, forKey: .supportsQueue)) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -94,11 +109,14 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         try container.encode(supportsSlashCommands, forKey: .supportsSlashCommands)
         try container.encode(supportsMCP, forKey: .supportsMCP)
         try container.encode(supportsWorktree, forKey: .supportsWorktree)
+        try container.encode(supportsSkillAutocomplete, forKey: .supportsSkillAutocomplete)
+        try container.encode(supportsSteer, forKey: .supportsSteer)
+        try container.encode(supportsQueue, forKey: .supportsQueue)
     }
 
     static let defaultCodex = ProviderCapabilities(
         supportsAgentSelection: false,
-        supportsReasoningEffort: false,
+        supportsReasoningEffort: true,
         supportsFastMode: true,
         supportsPlanMode: true,
         supportsStreamingTools: true,
@@ -108,6 +126,9 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsDesktopHandoff: true,
         supportsSlashCommands: true,
         supportsMCP: true,
-        supportsWorktree: true
+        supportsWorktree: true,
+        supportsSkillAutocomplete: true,
+        supportsSteer: true,
+        supportsQueue: true
     )
 }

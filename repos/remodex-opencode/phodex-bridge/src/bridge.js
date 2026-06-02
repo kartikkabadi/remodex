@@ -26,7 +26,7 @@ const {
 const { printQR } = require("./qr");
 const { rememberActiveThread } = require("./session-state");
 const { handleDesktopRequest } = require("./desktop-handler");
-const { readDaemonConfig, writeDaemonConfig } = require("./daemon-state");
+const { readDaemonConfig, writeDaemonConfig, writePairingSession } = require("./daemon-state");
 const { handleGitRequest } = require("./git-handler");
 const { handleThreadContextRequest } = require("./thread-context-handler");
 const { handleWorkspaceRequest } = require("./workspace-handler");
@@ -68,9 +68,10 @@ const {
   createRuntimeProviderRouter,
   stripRuntimeProviderFieldsForCodex,
 } = require("./runtime-provider-router");
+const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
 const { createProjectRegistry } = require("./project-registry");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
-const { readStringOrNull } = require("./normalize");
+const { readStringOrNull, resolvedParam } = require("./normalize");
 
 const execFileAsync = promisify(execFile);
 const RELAY_WATCHDOG_PING_INTERVAL_MS = 10_000;
@@ -254,7 +255,7 @@ function startBridge({
     sendRuntimeMessage: (message) => sendRuntimeApplicationMessage("opencode", message),
     projectRegistry,
     ownershipStore,
-    providers: process.env.REMODEX_ENABLE_OPENCODE === "1" ? undefined : [],
+    providers: isOpenCodeRuntimeDisabled(process.env) ? [] : undefined,
     logPrefix: "[remodex]",
   });
   const voiceHandler = createVoiceHandler({
@@ -512,6 +513,7 @@ function startBridge({
   };
   onPairingSession?.(pairingSession);
   if (printPairingQr) {
+    writePairingSession(pairingSession);
     printQR(pairingSession);
   }
   pushServiceClient.logUnavailable();
@@ -607,12 +609,12 @@ function startBridge({
     ) {
       return;
     }
+    if (runtimeProviderRouter.handleApplicationMessage(rawMessage)) {
+      return;
+    }
     desktopRefresher.handleInbound(rawMessage);
     rolloutLiveMirror?.observeInbound(rawMessage);
     if (desktopIpcActionFollower?.observeInbound(rawMessage)) {
-      return;
-    }
-    if (runtimeProviderRouter.handleApplicationMessage(rawMessage)) {
       return;
     }
     if (handleBridgeManagedThreadTurnsListRequest(rawMessage, sendApplicationResponse)) {
@@ -638,8 +640,8 @@ function startBridge({
   function sendRuntimeApplicationMessage(provider, rawMessage) {
     if (provider !== "opencode") {
       desktopRefresher.handleOutbound(rawMessage);
+      pushNotificationTracker.handleOutbound(rawMessage);
     }
-    pushNotificationTracker.handleOutbound(rawMessage);
     rememberThreadFromMessage(provider, rawMessage);
     secureTransport.queueOutboundApplicationMessage(
       sanitizeRelayBoundCodexMessage(rawMessage),
@@ -1093,9 +1095,7 @@ function startBridge({
     }
 
     const params = parsed?.params || {};
-    const cwd = normalizeNonEmptyString(
-      params.cwd || params.current_working_directory || params.working_directory,
-    );
+    const cwd = resolvedParam(params, 'cwd', 'current_working_directory', 'working_directory');
     if (!cwd) {
       return;
     }

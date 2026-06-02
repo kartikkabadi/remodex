@@ -4,16 +4,21 @@
 // Exports: createRuntimeProviderRouter plus merge helpers used by tests
 // Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store
 
-const { readString } = require("./normalize");
+const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeProvider } = require("./opencode-provider");
 const {
   CODEX_PROVIDER_ID,
+  DEFAULT_OPENCODE_MODEL,
   OPENCODE_PROVIDER_ID,
+  buildOpenCodeModelOption,
+  capOpenCodeModelsForMobileList,
   compareThreadsByUpdatedAt,
   isOpenCodeProvider,
   readModelProvider,
   readThreadId,
 } = require("./opencode-models");
+const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
+const { START_TIMEOUT_MS, HEALTH_TIMEOUT_MS } = require("./opencode-server");
 const { CODEX_CAPABILITIES, OPENCODE_CAPABILITIES, resolveModelCapabilities } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 
@@ -34,6 +39,7 @@ const ROUTABLE_THREAD_METHODS = new Set([
   "thread/name/set",
   "thread/archive",
   "thread/unarchive",
+  "thread/fork",
   "turn/start",
   "turn/interrupt",
 ]);
@@ -59,6 +65,13 @@ function createRuntimeProviderRouter({
     logPrefix,
   });
 
+  const opencodeProvider = runtimeProviders.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
+  const skipOpenCodeWarmup =
+    readString(process.env.REMODEX_TEST) === "1" || readString(process.env.NODE_ENV) === "test";
+  if (opencodeProvider && typeof opencodeProvider.warmup === "function" && !skipOpenCodeWarmup) {
+    void opencodeProvider.warmup();
+  }
+
   function handleApplicationMessage(rawMessage) {
     const parsed = safeParseJSON(rawMessage);
     if (!parsed) {
@@ -83,9 +96,25 @@ function createRuntimeProviderRouter({
 
     if (method === "model/list") {
       respondAsync(parsed, async () => {
-        const codexResult = await sendCodexRequest("model/list", parsed.params || {});
-        const providerModels = await listProviderModels(runtimeProviders);
-        return mergeModelListResult(codexResult, providerModels);
+        const params = parsed.params || {};
+        const catalogOpenCode = catalogOpenCodeSnapshotForModelList(runtimeProviders, process.env);
+        const [codexResult, providerModels] = await Promise.all([
+          withModelListBudget(
+            sendCodexRequest("model/list", params).catch((error) => {
+              console.warn(
+                `${logPrefix} Codex model/list failed: ${error?.message || error}`,
+              );
+              return { items: [] };
+            }),
+            CODEX_MODEL_LIST_BUDGET_MS,
+            { items: [] },
+          ),
+          listProviderModelsForModelList(runtimeProviders, logPrefix),
+        ]);
+        return mergeModelListResult(
+          codexResult,
+          providerModelsForModelList(providerModels, catalogOpenCode),
+        );
       });
       return true;
     }
@@ -111,6 +140,23 @@ function createRuntimeProviderRouter({
 
     if (method === "runtime/catalog") {
       respondAsync(parsed, async () => buildRuntimeCatalog(runtimeProviders, process.env));
+      return true;
+    }
+
+    if (method === "command/list") {
+      respondAsync(parsed, async () => {
+        const directory = readString(parsed.params?.directory || parsed.params?.cwd);
+        const opencodeProvider = runtimeProviders.find((p) => p.id === "opencode");
+        if (opencodeProvider && typeof opencodeProvider.listCommands === "function") {
+          return { commands: await opencodeProvider.listCommands(directory) };
+        }
+        return { commands: [] };
+      });
+      return true;
+    }
+
+    if (method === "skills/list") {
+      respondAsync(parsed, async () => mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest));
       return true;
     }
 
@@ -170,6 +216,64 @@ function createRuntimeProviderRouter({
 
 async function listProviderModels(providers) {
   const settled = await Promise.allSettled(providers.map((provider) => provider.listModels()));
+  return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+}
+
+const CODEX_MODEL_LIST_BUDGET_MS = 3_000;
+const MODEL_LIST_PROVIDER_BUDGET_MS = 3_000;
+// Cold `opencode serve` can take START_TIMEOUT_MS + health polling; 8s was too short on device.
+const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
+  START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
+const RUNTIME_CATALOG_AGENT_BUDGET_MS = 2_000;
+
+function readModelListBudgetMs(env, key, fallbackMs) {
+  const numeric = Number(readString(env?.[key]));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallbackMs;
+  }
+  return Math.min(Math.floor(numeric), 60_000);
+}
+
+function opencodeModelListBudgetMs(env = process.env) {
+  return readModelListBudgetMs(
+    env,
+    "REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS",
+    DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
+  );
+}
+
+// Caps one leg of model/list so Codex and OpenCode discovery stay within mobile budgets.
+function withModelListBudget(promise, budgetMs, fallback) {
+  let timeoutId;
+  const budget = new Promise((resolve) => {
+    timeoutId = setTimeout(() => resolve(fallback), budgetMs);
+  });
+
+  return Promise.race([promise, budget]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+// OpenCode model discovery can take several seconds; never block Codex on it.
+async function listProviderModelsForModelList(providers, logPrefix = "[remodex]", env = process.env) {
+  const settled = await Promise.allSettled(
+    providers.map((provider) => {
+      const budgetMs =
+        provider.id === OPENCODE_PROVIDER_ID
+          ? opencodeModelListBudgetMs(env)
+          : MODEL_LIST_PROVIDER_BUDGET_MS;
+      return withModelListBudget(
+        provider.listModels().catch((error) => {
+          console.warn(
+            `${logPrefix} ${provider.id} model/list failed: ${error?.message || error}`,
+          );
+          return [];
+        }),
+        budgetMs,
+        [],
+      );
+    }),
+  );
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
@@ -288,9 +392,7 @@ function rememberProjectFromRequest(projectRegistry, request, metadata = {}) {
   }
 
   const params = request?.params || {};
-  const cwd = readString(
-    params.cwd || params.current_working_directory || params.working_directory,
-  );
+  const cwd = resolvedParam(params, 'cwd', 'current_working_directory', 'working_directory');
   if (!cwd) {
     return;
   }
@@ -371,7 +473,7 @@ function hasExplicitProviderField(params = {}) {
 }
 
 function readThreadIdentifier(thread = {}) {
-  return readString(thread.id || thread.threadId || thread.thread_id);
+  return resolvedParam(thread, 'id', 'threadId', 'thread_id');
 }
 
 function createJsonRpcErrorResponse(requestId, error, defaultErrorCode) {
@@ -408,8 +510,7 @@ function resolveProviders({
   if (providers !== null && providers !== undefined) {
     return providers;
   }
-  const shouldEnable = readString(env.REMODEX_ENABLE_OPENCODE) === "1";
-  if (!shouldEnable) {
+  if (isOpenCodeRuntimeDisabled(env)) {
     return [];
   }
   return [
@@ -422,6 +523,222 @@ function resolveProviders({
   ];
 }
 
+function buildCatalogOpenCodePlaceholderModels() {
+  const model = buildOpenCodeModelOption(DEFAULT_OPENCODE_MODEL, { isDefault: true });
+  if (!model) {
+    return [];
+  }
+  return [
+    {
+      ...model,
+      capabilities: resolveModelCapabilities(OPENCODE_PROVIDER_ID, model),
+    },
+  ];
+}
+
+function providerModelsForModelList(providerModels, catalogOpenCode) {
+  const opencodeModels = providerModels.filter(
+    (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
+  );
+  const cappedOpenCode = capOpenCodeModelsForMobileList(opencodeModels, process.env);
+  const placeholderModels =
+    catalogOpenCode && !catalogOpenCode.enabled && cappedOpenCode.length === 0
+      ? buildCatalogOpenCodePlaceholderModels()
+      : [];
+  return [...cappedOpenCode, ...placeholderModels];
+}
+
+function readOpenCodeCatalogAvailability(opencodeProvider) {
+  if (!opencodeProvider || typeof opencodeProvider.getCatalogAvailability !== "function") {
+    return null;
+  }
+  return opencodeProvider.getCatalogAvailability();
+}
+
+function catalogOpenCodeSnapshotForModelList(providers, env) {
+  if (isOpenCodeRuntimeDisabled(env)) {
+    return null;
+  }
+  const opencodeProvider = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
+  if (!opencodeProvider) {
+    return null;
+  }
+  const availability = readOpenCodeCatalogAvailability(opencodeProvider);
+  return {
+    id: OPENCODE_PROVIDER_ID,
+    enabled: !availability?.unavailableReason,
+  };
+}
+
+async function buildCatalogOpenCodeRuntime(providers, env) {
+  if (isOpenCodeRuntimeDisabled(env)) {
+    return null;
+  }
+
+  const opencodeProvider = providers.find((p) => p.id === OPENCODE_PROVIDER_ID);
+  const hasCommand = readString(env.REMODEX_OPENCODE_COMMAND) || "opencode";
+  let agents = [];
+  let unavailableReason = null;
+  let reasonCode = null;
+
+  const serverAvailability = readOpenCodeCatalogAvailability(opencodeProvider);
+  if (serverAvailability?.unavailableReason) {
+    return {
+      id: OPENCODE_PROVIDER_ID,
+      label: "OpenCode",
+      enabled: false,
+      showsBetaLabel: true,
+      unavailableReason: serverAvailability.unavailableReason,
+      reasonCode: serverAvailability.reasonCode || "opencode_server_failed",
+      agents: [],
+      capabilities: { ...OPENCODE_CAPABILITIES },
+    };
+  }
+
+  if (opencodeProvider) {
+    try {
+      const raw = await withModelListBudget(
+        opencodeProvider.listAgents(),
+        RUNTIME_CATALOG_AGENT_BUDGET_MS,
+        [],
+      );
+      agents = (raw || []).map((a) => ({
+        id: readString(a?.id || a),
+        label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
+      }));
+    } catch {
+      agents = [];
+      unavailableReason = "OpenCode agents could not be listed";
+    }
+  } else if (!hasCommand) {
+    unavailableReason = "OpenCode command is not configured on this Mac";
+  }
+
+  const enabled = Boolean(opencodeProvider) && !unavailableReason && Boolean(hasCommand);
+  if (!enabled && unavailableReason) {
+    reasonCode = "opencode_agents_unavailable";
+  } else if (!enabled) {
+    reasonCode = "opencode_not_enabled";
+  }
+
+  return {
+    id: OPENCODE_PROVIDER_ID,
+    label: "OpenCode",
+    enabled,
+    showsBetaLabel: true,
+    unavailableReason: enabled
+      ? null
+      : unavailableReason || "OpenCode is not available on this Mac",
+    reasonCode,
+    agents,
+    capabilities: { ...OPENCODE_CAPABILITIES },
+  };
+}
+
+function resolveSkillsListCwds(params = {}) {
+  const cwds = [];
+  if (Array.isArray(params.cwds)) {
+    for (const entry of params.cwds) {
+      const cwd = readString(entry);
+      if (cwd) {
+        cwds.push(cwd);
+      }
+    }
+  }
+  const singleCwd = readString(params.cwd || params.directory);
+  if (singleCwd) {
+    cwds.push(singleCwd);
+  }
+  if (cwds.length === 0) {
+    cwds.push(process.cwd());
+  }
+  return [...new Set(cwds)];
+}
+
+function dedupeSkillsByName(skills) {
+  const byName = new Map();
+  for (const skill of skills) {
+    const name = readString(skill?.name);
+    if (!name) {
+      continue;
+    }
+    const existing = byName.get(name);
+    if (!existing || (skill.enabled !== false && existing.enabled === false)) {
+      byName.set(name, skill);
+    }
+  }
+  return [...byName.values()].sort((a, b) =>
+    readString(a.name).localeCompare(readString(b.name), undefined, { sensitivity: "base" }),
+  );
+}
+
+async function mergeSkillsListResult(params, providers, sendCodexRequest) {
+  const cwds = resolveSkillsListCwds(params);
+  const codexParams = { ...params };
+  if (!Array.isArray(codexParams.cwds) || codexParams.cwds.length === 0) {
+    codexParams.cwds = cwds;
+  }
+
+  const [codexResult, opencodeBuckets] = await Promise.all([
+    sendCodexRequest("skills/list", codexParams).catch((error) => {
+      console.warn(`[remodex] Codex skills/list failed: ${error?.message || error}`);
+      return { data: [] };
+    }),
+    listOpenCodeSkillsBuckets(providers, cwds),
+  ]);
+
+  const codexBuckets = normalizeSkillsBuckets(codexResult);
+  const mergedBuckets = mergeSkillsBuckets(codexBuckets, opencodeBuckets);
+  if (Array.isArray(codexResult?.data)) {
+    return { ...codexResult, data: mergedBuckets };
+  }
+  if (Array.isArray(codexResult?.skills)) {
+    return {
+      skills: dedupeSkillsByName(mergedBuckets.flatMap((bucket) => bucket.skills || [])),
+    };
+  }
+  return { data: mergedBuckets };
+}
+
+async function listOpenCodeSkillsBuckets(providers, cwds) {
+  const opencodeProvider = providers.find((p) => p.id === OPENCODE_PROVIDER_ID);
+  if (!opencodeProvider || typeof opencodeProvider.listSkills !== "function") {
+    return [];
+  }
+  const buckets = [];
+  for (const cwd of cwds) {
+    const skills = await opencodeProvider.listSkills(cwd);
+    if (skills.length > 0) {
+      buckets.push({ cwd, skills });
+    }
+  }
+  return buckets;
+}
+
+function normalizeSkillsBuckets(result) {
+  if (Array.isArray(result?.data)) {
+    return result.data.map((bucket) => ({
+      cwd: readString(bucket?.cwd) || "",
+      skills: Array.isArray(bucket?.skills) ? bucket.skills : [],
+    }));
+  }
+  if (Array.isArray(result?.skills)) {
+    return [{ cwd: "", skills: result.skills }];
+  }
+  return [];
+}
+
+function mergeSkillsBuckets(primaryBuckets, secondaryBuckets) {
+  const byCwd = new Map();
+  for (const bucket of [...primaryBuckets, ...secondaryBuckets]) {
+    const cwd = readString(bucket?.cwd) || "";
+    const existing = byCwd.get(cwd) || { cwd, skills: [] };
+    existing.skills = dedupeSkillsByName([...(existing.skills || []), ...(bucket.skills || [])]);
+    byCwd.set(cwd, existing);
+  }
+  return [...byCwd.values()];
+}
+
 async function buildRuntimeCatalog(providers, env) {
   const runtimes = [
     {
@@ -429,50 +746,38 @@ async function buildRuntimeCatalog(providers, env) {
       label: "Codex",
       enabled: true,
       showsBetaLabel: false,
+      reasonCode: null,
       agents: [],
       capabilities: { ...CODEX_CAPABILITIES },
     },
   ];
 
-  const opencodeProvider = providers.find((p) => p.id === "opencode");
-  if (opencodeProvider) {
-    const hasCommand = readString(env.REMODEX_OPENCODE_COMMAND) || "opencode";
-    const enabled = readString(env.REMODEX_ENABLE_OPENCODE) === "1" && Boolean(hasCommand);
-    let agents = [];
-    let unavailableReason = null;
-    try {
-      const raw = await opencodeProvider.listAgents();
-      agents = (raw || []).map((a) => ({
-        id: readString(a?.id || a),
-        label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
-      }));
-    } catch {
-      agents = [];
-      if (enabled) {
-        // Keep enabled flag but note the reason
-        unavailableReason = "OpenCode agents could not be listed";
-      }
-    }
-
-    runtimes.push({
-      id: "opencode",
-      label: "OpenCode",
-      enabled,
-      showsBetaLabel: true,
-      unavailableReason: !enabled ? "OpenCode is not enabled on this Mac" : (unavailableReason || null),
-      agents,
-      capabilities: { ...OPENCODE_CAPABILITIES },
-    });
+  const opencodeRuntime = await buildCatalogOpenCodeRuntime(providers, env);
+  if (opencodeRuntime) {
+    runtimes.push(opencodeRuntime);
   }
 
   return { runtimes };
 }
 
 module.exports = {
+  buildCatalogOpenCodeRuntime,
+  readOpenCodeCatalogAvailability,
+  buildCatalogOpenCodePlaceholderModels,
+  CODEX_MODEL_LIST_BUDGET_MS,
+  DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
+  MODEL_LIST_PROVIDER_BUDGET_MS,
+  opencodeModelListBudgetMs,
   createRuntimeProviderRouter,
+  capOpenCodeModelsForMobileList,
+  catalogOpenCodeSnapshotForModelList,
+  listProviderModelsForModelList,
+  withModelListBudget,
   mergeModelListResult,
+  mergeSkillsListResult,
   mergeThreadListResult,
   providerForRequest,
+  providerModelsForModelList,
   registerThreadProjects,
   stripRuntimeProviderFieldsForCodex,
   threadsFromListResult,

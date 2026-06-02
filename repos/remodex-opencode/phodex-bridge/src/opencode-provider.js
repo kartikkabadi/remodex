@@ -6,7 +6,7 @@
 // Exports: createOpenCodeProvider
 // Depends on: ./opencode-server, ./opencode-client, ./opencode-models, ./provider-capabilities, ./thread-ownership-store
 
-const { readString } = require("./normalize");
+const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
 const { createOpenCodeClient } = require("./opencode-client");
 const {
@@ -62,6 +62,7 @@ function createOpenCodeProvider({
   let restartWindowStart = 0;
   let lastActivityAt = 0;
   let idleTimer = null;
+  let catalogUnavailable = null;
 
   const threads = new Map();
   const activeTurns = new Map();
@@ -83,9 +84,16 @@ function createOpenCodeProvider({
       try {
         await startServer();
       } catch (error) {
-        const enriched = new Error("OpenCode is not available on this Mac.");
-        enriched.errorCode = ERROR_CODES.OPENCODE_NOT_INSTALLED.errorCode;
-        enriched.action = ERROR_CODES.OPENCODE_NOT_INSTALLED.action;
+        const enriched = new Error(catalogUnavailable?.message || "OpenCode is not available on this Mac.");
+        enriched.errorCode =
+          catalogUnavailable?.reasonCode === "opencode_not_installed"
+            ? ERROR_CODES.OPENCODE_NOT_INSTALLED.errorCode
+            : ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
+        enriched.action =
+          catalogUnavailable?.reasonCode === "opencode_not_installed"
+            ? ERROR_CODES.OPENCODE_NOT_INSTALLED.action
+            : ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.action;
+        enriched.reasonCode = catalogUnavailable?.reasonCode || enriched.errorCode;
         throw enriched;
       }
     }
@@ -98,7 +106,12 @@ function createOpenCodeProvider({
     }
 
     if (restartCount >= HEALTH_MAX_RESTARTS) {
-      throw new Error("OpenCode server has restarted too many times. Check opencode installation.");
+      catalogUnavailable = {
+        unavailableReason:
+          "OpenCode server could not stay running on this Mac. Check OpenCode logs.",
+        reasonCode: "opencode_server_failed",
+      };
+      throw new Error(catalogUnavailable.unavailableReason);
     }
 
     restartCount++;
@@ -106,7 +119,25 @@ function createOpenCodeProvider({
       `${logPrefix} Starting OpenCode server (attempt ${restartCount}/${HEALTH_MAX_RESTARTS})...`,
     );
 
-    await server.start();
+    try {
+      await server.start();
+    } catch (error) {
+      const failure = server.getLastStartFailure?.() || null;
+      const reasonCode =
+        readString(error?.reasonCode) ||
+        readString(failure?.reasonCode) ||
+        "opencode_server_failed";
+      catalogUnavailable = {
+        unavailableReason:
+          readString(failure?.message) ||
+          readString(error?.message) ||
+          "OpenCode is not available on this Mac.",
+        reasonCode,
+      };
+      throw error;
+    }
+
+    catalogUnavailable = null;
     client = clientFactory
       ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
       : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
@@ -130,6 +161,18 @@ function createOpenCodeProvider({
     return client.listModels();
   }
 
+  // Starts opencode serve in the background so the first model/list is not capped out.
+  async function warmup() {
+    try {
+      await ensureStarted();
+      console.log(`${logPrefix} OpenCode warmup complete`);
+    } catch (error) {
+      console.warn(
+        `${logPrefix} OpenCode warmup failed: ${(error && error.message) || error}`,
+      );
+    }
+  }
+
   async function listAgents() {
     try {
       await ensureStarted();
@@ -137,6 +180,24 @@ function createOpenCodeProvider({
       return [];
     }
     return client.listAgents();
+  }
+
+  async function listCommands(directory) {
+    try {
+      await ensureStarted();
+    } catch {
+      return [];
+    }
+    return client.listCommands(directory);
+  }
+
+  async function listSkills(directory) {
+    try {
+      await ensureStarted();
+    } catch {
+      return [];
+    }
+    return client.listSkills(directory);
   }
 
   async function listThreads(params = {}) {
@@ -193,6 +254,8 @@ function createOpenCodeProvider({
         return threadArchive(request, true);
       case "thread/unarchive":
         return threadArchive(request, false);
+      case "thread/fork":
+        return threadFork(request);
       case "turn/start":
         return turnStart(request);
       case "turn/interrupt":
@@ -222,10 +285,9 @@ function createOpenCodeProvider({
   async function threadStart(request) {
     const params = request.params || {};
     const now = new Date().toISOString();
-    const requestedCwd = readString(
-      params.cwd || params.current_working_directory || params.working_directory,
-    );
+    const requestedCwd = resolvedParam(params, 'cwd', 'current_working_directory', 'working_directory');
     const threadId = `${OPENCODE_PROVIDER_ID}-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const resolvedSessionId = resolvedParam(params, 'sessionId', 'session_id');
     const thread = {
       id: threadId,
       title: readString(params.title) || "OpenCode chat",
@@ -237,10 +299,13 @@ function createOpenCodeProvider({
       archived: false,
       hasProjectCwd: Boolean(requestedCwd),
       turns: [],
-      sessionId: "",
+      sessionId: resolvedSessionId || "",
     };
     threads.set(threadId, thread);
     ownership.setOwnership(threadId, OPENCODE_PROVIDER_ID);
+    if (resolvedSessionId) {
+      sessions.set(threadId, resolvedSessionId);
+    }
     rememberThreadProject(thread, "opencode-thread-start");
     return { thread: publicThread(thread) };
   }
@@ -266,7 +331,7 @@ function createOpenCodeProvider({
     if (!thread) throw threadNotFoundError(threadId);
 
     const limit = boundedPositiveInteger(params.limit, 50);
-    const sortDirection = readString(params.sortDirection || params.sort_direction) || "desc";
+    const sortDirection = resolvedParam(params, 'sortDirection', 'sort_direction') || "desc";
     const turns = [...(thread.turns || [])];
     if (sortDirection === "asc") turns.reverse();
 
@@ -306,11 +371,11 @@ function createOpenCodeProvider({
     }
 
     thread.model = model;
-    thread.agent = readString(params.agent || params.mode) || thread.agent || "build";
+    thread.agent = resolvedParam(params, 'agent', 'mode') || thread.agent || "build";
     thread.updatedAt = new Date().toISOString();
 
     const turnId = `${OPENCODE_PROVIDER_ID}-turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const effort = readString(params.reasoningEffort || params.reasoning_effort || params.effort);
+    const effort = resolvedParam(params, 'reasoningEffort', 'reasoning_effort', 'effort');
     const now = new Date().toISOString();
     const assistantItemId = `${OPENCODE_PROVIDER_ID}-agent-${turnId}`;
 
@@ -514,7 +579,7 @@ function createOpenCodeProvider({
     const thread = threads.get(readThreadId(params));
     if (!thread) throw threadNotFoundError(readThreadId(params));
 
-    const name = readString(params.name || params.title);
+    const name = resolvedParam(params, 'name', 'title');
     if (name) {
       thread.title = name;
       thread.updatedAt = new Date().toISOString();
@@ -536,6 +601,39 @@ function createOpenCodeProvider({
     thread.archived = archived;
     thread.updatedAt = new Date().toISOString();
     return { thread: publicThread(thread) };
+  }
+
+  async function threadFork(request) {
+    const params = request.params || {};
+    const threadId = readThreadId(params);
+    const thread = threads.get(threadId);
+    if (!thread) throw threadNotFoundError(threadId);
+    if (!thread.sessionId) {
+      const error = new Error("OpenCode fork requires a session on the source thread");
+      error.errorCode = "opencode_fork_requires_session";
+      throw error;
+    }
+
+    try {
+      await ensureStarted();
+    } catch (error) {
+      if (error.errorCode === ERROR_CODES.OPENCODE_NOT_INSTALLED.errorCode) {
+        const forkError = new Error("OpenCode server is unreachable. Fork could not complete.");
+        forkError.errorCode = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
+        forkError.action = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.action;
+        throw forkError;
+      }
+      throw error;
+    }
+    const newSessionId = await client.fork(thread.sessionId);
+    return threadStart({
+      params: {
+        sessionId: newSessionId,
+        model: thread.model,
+        agent: thread.agent,
+        cwd: thread.cwd,
+      },
+    });
   }
 
   function resetIdleTimer() {
@@ -587,15 +685,23 @@ function createOpenCodeProvider({
     );
   }
 
+  function getCatalogAvailability() {
+    return catalogUnavailable ? { ...catalogUnavailable } : null;
+  }
+
   return {
     id: OPENCODE_PROVIDER_ID,
     ownsThread,
     listModels,
     listAgents,
+    listCommands,
+    listSkills,
     listThreads,
     handleRequest,
     handleApplicationResponse,
+    warmup,
     shutdown,
+    getCatalogAvailability,
   };
 }
 

@@ -6,7 +6,12 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createOpenCodeServer } = require("../src/opencode-server");
+const net = require("net");
+const {
+  createOpenCodeServer,
+  findAvailablePort,
+  isPortAvailable,
+} = require("../src/opencode-server");
 
 test("createOpenCodeServer returns expected API surface", () => {
   const server = createOpenCodeServer({});
@@ -102,6 +107,42 @@ test("server rejects when health check returns not-ok", async () => {
   await assert.rejects(() => server.start(), { message: /not-ok/ });
 });
 
+test("findAvailablePort skips a port that is already bound", async () => {
+  const blocker = net.createServer();
+  const blockedPort = await new Promise((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen(0, "127.0.0.1", () => {
+      resolve(blocker.address().port);
+    });
+  });
+
+  try {
+    assert.equal(await isPortAvailable(blockedPort), false);
+    const port = await findAvailablePort(blockedPort, blockedPort + 3);
+    assert.notEqual(port, blockedPort);
+    assert.ok(port >= blockedPort + 1 && port <= blockedPort + 3);
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
+  }
+});
+
+test("server start rejects when child exits before listening", async () => {
+  const server = createOpenCodeServer({
+    resolvePortImpl: async () => 4201,
+    spawnImpl: () => {
+      const child = fakeChildThatNeverEmits();
+      process.nextTick(() => {
+        child._emitStderr("ServeError: Failed to start server. Is port 4201 in use?\n");
+        child._emit("close", 1);
+      });
+      return child;
+    },
+  });
+
+  await assert.rejects(() => server.start(), { message: /OpenCode serve failed/ });
+  assert.equal(server.getLastStartFailure()?.reasonCode, "opencode_port_in_use");
+});
+
 test("server uses custom command from env", async () => {
   const server = createOpenCodeServer({
     env: { REMODEX_OPENCODE_COMMAND: "/usr/local/bin/opencode" },
@@ -134,7 +175,10 @@ function fakeChildThatEmits(stdoutMsg) {
     },
     stderr: {
       setEncoding() {},
-      on() {
+      on(event, handler) {
+        if (event === "data") {
+          handlers.set("stderr:data", handler);
+        }
         return child.stderr;
       },
     },
@@ -150,11 +194,15 @@ function fakeChildThatEmits(stdoutMsg) {
     _emit(event, ...args) {
       handlers.get(event)?.(...args);
     },
+    _emitStderr(chunk) {
+      handlers.get("stderr:data")?.(String(chunk));
+    },
   };
   return child;
 }
 
 function fakeChildThatNeverEmits() {
+  const handlers = new Map();
   const child = {
     killed: false,
     pid: 99999,
@@ -166,7 +214,10 @@ function fakeChildThatNeverEmits() {
     },
     stderr: {
       setEncoding() {},
-      on() {
+      on(event, handler) {
+        if (event === "data") {
+          handlers.set("stderr:data", handler);
+        }
         return child.stderr;
       },
     },
@@ -175,10 +226,16 @@ function fakeChildThatNeverEmits() {
       child.killed = true;
       return true;
     },
-    on() {
+    on(event, handler) {
+      handlers.set(event, handler);
       return child;
     },
-    _emit() {},
+    _emit(event, ...args) {
+      handlers.get(event)?.(...args);
+    },
+    _emitStderr(chunk) {
+      handlers.get("stderr:data")?.(String(chunk));
+    },
   };
   return child;
 }

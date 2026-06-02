@@ -46,7 +46,9 @@ struct TurnComposerView: View {
     let selectedModelID: String?
     let selectedModelTitle: String
     let isLoadingModels: Bool
+    let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
+    let modelsErrorMessage: String?
 
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
@@ -158,6 +160,8 @@ struct TurnComposerView: View {
                     TurnComposerQueuedDraftsSection(
                         drafts: accessoryState.queuedDrafts,
                         canSteerDrafts: accessoryState.canSteerQueuedDrafts,
+                        showsSteerControl: accessoryState.showsSteerQueuedDraftControl,
+                        steerUnavailableReason: accessoryState.steerUnavailableReason,
                         canRestoreDrafts: accessoryState.canRestoreQueuedDrafts,
                         steeringDraftID: accessoryState.steeringDraftID,
                         onRestoreQueuedDraft: onRestoreQueuedDraft,
@@ -220,7 +224,9 @@ struct TurnComposerView: View {
                         selectedModelID: selectedModelID,
                         selectedModelTitle: selectedModelTitle,
                         isLoadingModels: isLoadingModels,
+                        isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
                         isRuntimeSelectionLoading: isRuntimeSelectionLoading,
+                        modelsErrorMessage: modelsErrorMessage,
                         runtimeState: runtimeState,
                         runtimeActions: runtimeActions,
                         remainingAttachmentSlots: remainingAttachmentSlots,
@@ -327,12 +333,32 @@ private struct TurnComposerAutocompletePanels: View {
             }
 
             if state.isSkillAutocompleteVisible {
-                SkillAutocompletePanel(
-                    items: state.skillAutocompleteItems,
-                    isLoading: state.isSkillAutocompleteLoading,
-                    query: state.skillAutocompleteQuery,
-                    onSelect: onSelectSkillAutocomplete
-                )
+                if state.supportsSkillAutocomplete {
+                    SkillAutocompletePanel(
+                        items: state.skillAutocompleteItems,
+                        isLoading: state.isSkillAutocompleteLoading,
+                        query: state.skillAutocompleteQuery,
+                        onSelect: onSelectSkillAutocomplete
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .font(AppFont.footnote())
+                                .foregroundStyle(.secondary)
+                            Text(ComposerCapabilityCopy.capabilityReason(for: .skillAutocomplete))
+                                .font(AppFont.footnote())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(4)
+                    .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .padding(.horizontal, 4)
+                }
             }
 
             if state.slashCommandPanelState != .hidden {
@@ -365,6 +391,8 @@ private struct TurnComposerAutocompletePanels: View {
 private struct TurnComposerQueuedDraftsSection: View {
     let drafts: [QueuedTurnDraft]
     let canSteerDrafts: Bool
+    let showsSteerControl: Bool
+    let steerUnavailableReason: String?
     let canRestoreDrafts: Bool
     let steeringDraftID: String?
     let onRestoreQueuedDraft: (String) -> Void
@@ -377,6 +405,8 @@ private struct TurnComposerQueuedDraftsSection: View {
                 QueuedDraftsPanel(
                     drafts: drafts,
                     canSteerDrafts: canSteerDrafts,
+                    showsSteerControl: showsSteerControl,
+                    steerUnavailableReason: steerUnavailableReason,
                     canRestoreDrafts: canRestoreDrafts,
                     steeringDraftID: steeringDraftID,
                     onRestore: onRestoreQueuedDraft,
@@ -606,6 +636,8 @@ private struct ComposerPreviewContent: View {
             accessoryState: TurnComposerAccessoryState(
                 queuedDrafts: queuedDrafts,
                 canSteerQueuedDrafts: canSteerQueuedDrafts,
+                showsSteerQueuedDraftControl: canSteerQueuedDrafts,
+                steerUnavailableReason: nil,
                 canRestoreQueuedDrafts: canSteerQueuedDrafts,
                 steeringDraftID: nil,
                 composerAttachments: [],
@@ -623,6 +655,7 @@ private struct ComposerPreviewContent: View {
                 availableSlashCommands: TurnComposerSlashCommand.allCommands,
                 supportsSlashCommands: true,
                 supportsThreadFork: true,
+                supportsSkillAutocomplete: true,
                 fileAutocompleteItems: [],
                 isFileAutocompleteVisible: false,
                 isFileAutocompleteLoading: false,
@@ -660,7 +693,9 @@ private struct ComposerPreviewContent: View {
             selectedModelID: "gpt-5.5",
             selectedModelTitle: "GPT-5.5",
             isLoadingModels: false,
+            isLoadingOpenCodeProvider: false,
             isRuntimeSelectionLoading: false,
+            modelsErrorMessage: nil,
             runtimeState: TurnComposerRuntimeState(
                 reasoningDisplayOptions: reasoningOptions,
                 effectiveReasoningEffort: "high",
@@ -672,8 +707,11 @@ private struct ComposerPreviewContent: View {
                 selectedAgent: nil,
                 isRuntimeEnabled: true,
                 runtimeUnavailableReason: nil,
+                runtimeUnavailableReasonCode: nil,
                 disabledProviderIDs: [],
+                catalogProviderIDs: ["codex"],
                 unavailableReasonByProviderID: [:],
+                reasonCodeByProviderID: [:],
                 showsBetaLabel: false
             ),
             runtimeActions: TurnComposerRuntimeActions(
@@ -681,7 +719,8 @@ private struct ComposerPreviewContent: View {
                 selectAutomaticReasoning: {},
                 selectReasoning: { _ in },
                 selectServiceTier: { _ in },
-                selectAgent: { _ in }
+                selectAgent: { _ in },
+                refreshModels: {}
             ),
             voiceButtonPresentation: TurnComposerVoiceButtonPresentation(
                 systemImageName: "mic",

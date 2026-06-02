@@ -27,8 +27,11 @@ struct TurnComposerRuntimeState: Equatable {
     let selectedAgent: String?
     let isRuntimeEnabled: Bool
     let runtimeUnavailableReason: String?
+    let runtimeUnavailableReasonCode: String?
     let disabledProviderIDs: Set<String>
+    let catalogProviderIDs: [String]
     let unavailableReasonByProviderID: [String: String]
+    let reasonCodeByProviderID: [String: String]
     let showsBetaLabel: Bool
 
     var selectedReasoningTitle: String {
@@ -61,19 +64,28 @@ struct TurnComposerRuntimeState: Equatable {
         })
         let isRuntimeEnabled = runtimeInfo?.enabled ?? true
         let runtimeUnavailableReason = runtimeInfo?.unavailableReason
-        let resolvedCapabilities = capabilities ?? ProviderCapabilities.defaultCodex
+        let runtimeUnavailableReasonCode = runtimeInfo?.reasonCode
+        let resolvedCapabilities = capabilities ?? runtimeInfo?.capabilities ?? ProviderCapabilities.defaultCodex
         let disabledProviderIDs = Set(
             codex.availableRuntimes
                 .filter { !$0.enabled }
                 .map { CodexModelOption.normalizedProvider($0.id) }
         )
-        let unavailableReasonByProviderID: [String: String] = Dictionary(
-            uniqueKeysWithValues: codex.availableRuntimes.compactMap { runtime -> (String, String)? in
-                guard !runtime.enabled else { return nil }
+        let catalogProviderIDs = codex.menuCatalogProviderIDs
+        let unavailableReasonByProviderID: [String: String] = codex.availableRuntimes
+            .filter { !$0.enabled }
+            .reduce(into: [:]) { dict, runtime in
                 let providerID = CodexModelOption.normalizedProvider(runtime.id)
-                return (providerID, runtime.unavailableReason ?? "")
+                dict[providerID] = runtime.unavailableReason ?? ""
             }
-        )
+        let reasonCodeByProviderID: [String: String] = codex.availableRuntimes
+            .filter { !$0.enabled }
+            .reduce(into: [:]) { dict, runtime in
+                let providerID = CodexModelOption.normalizedProvider(runtime.id)
+                if let code = runtime.reasonCode {
+                    dict[providerID] = code
+                }
+            }
         return TurnComposerRuntimeState(
             reasoningDisplayOptions: reasoningDisplayOptions,
             effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(threadId: threadId),
@@ -87,8 +99,11 @@ struct TurnComposerRuntimeState: Equatable {
             selectedAgent: codex.effectiveOpenCodeAgent(threadId: threadId),
             isRuntimeEnabled: isRuntimeEnabled,
             runtimeUnavailableReason: runtimeUnavailableReason,
+            runtimeUnavailableReasonCode: runtimeUnavailableReasonCode,
             disabledProviderIDs: disabledProviderIDs,
+            catalogProviderIDs: catalogProviderIDs,
             unavailableReasonByProviderID: unavailableReasonByProviderID,
+            reasonCodeByProviderID: reasonCodeByProviderID,
             showsBetaLabel: codex.showsBetaLabel(forProvider: currentProviderId)
         )
     }

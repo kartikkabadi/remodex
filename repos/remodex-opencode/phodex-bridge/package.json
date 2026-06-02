@@ -1,6 +1,6 @@
 {
   "name": "remodex",
-  "version": "1.5.6",
+  "version": "2.0.0",
   "description": "Local bridge between Codex and the Remodex mobile app. Run `remodex up` to start.",
   "keywords": [
     "bridge",
@@ -22,7 +22,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node ./bin/remodex.js up",
-    "test": "node --test ./test/*.test.js",
+    "test": "node -r ./test/test-env.js --test ./test/*.test.js",
     "lint": "node ./node_modules/oxlint/bin/oxlint",
     "fmt": "node ./node_modules/oxfmt/bin/oxfmt",
     "fmt:check": "node ./node_modules/oxfmt/bin/oxfmt --check",

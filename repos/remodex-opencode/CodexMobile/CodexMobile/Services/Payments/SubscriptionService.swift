@@ -4,6 +4,8 @@
 // Exports: SubscriptionService, SubscriptionPackageOption
 // Depends on: Foundation, Observation, RevenueCat
 
+#if !REMODEX_LOCAL_DEVICE
+
 import Foundation
 import Observation
 import RevenueCat
@@ -405,3 +407,5 @@ private extension SubscriptionService {
         return error.localizedDescription
     }
 }
+
+#endif

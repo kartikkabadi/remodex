@@ -4,8 +4,8 @@
 
 | Component | Min Version | Current | Notes |
 |-----------|-------------|---------|-------|
-| Bridge (npm) | 1.5.6 | 1.5.6 | `remodex` npm package |
-| iOS App | 1.5 | Latest | Enforced by `ios-app-compatibility.js` |
+| Bridge (npm) | 2.0.0 | 2.0.0 | `remodex` npm package |
+| iOS App | 1.5 | 2.0 | Enforced by `ios-app-compatibility.js` |
 | OpenCode CLI | 2.0.0 | 1.15.12 | Must support `opencode serve` and `@opencode-ai/sdk/v2` |
 | Node.js | 18+ | — | Bridge requires Node 18 for `node:test` and `fetch` |
 | macOS | 14+ | — | Required for AppleScript and launchd |
@@ -36,7 +36,7 @@
 | Fast mode | enabled per model | enabled/greyed per model | Greyed if unsupported |
 | Codex Plan mode (+) | enabled | n/a | Hidden on OpenCode threads |
 | Slash commands | enabled | enabled | Slash commands supported by OpenCode runtime |
-| Skills /$ | enabled | greyed | "OpenCode uses its own skill system" |
+| Skills /$ | enabled | partial | Bridge merges `skills/list` with OpenCode `app.skills()` when SDK returns data; device E2E required |
 | MCP settings | enabled | enabled | MCP supported by OpenCode runtime |
 | Git actions | enabled | enabled | Bridge-local, works on all threads |
 | Workspace preview | enabled | enabled | Bridge-local, works on all threads |
@@ -45,8 +45,9 @@
 | Voice mode | enabled | n/a | Hidden on OpenCode |
 | Desktop handoff | enabled | n/a | Hidden on OpenCode |
 | Approvals/perms | enabled | enabled | SDK permission reply channel |
-| Fork thread | enabled | enabled | Capability flag set; session.fork mapping pending |
-| Steer/queue | enabled | greyed | Not yet implemented for OpenCode |
+| Fork thread | enabled | enabled | `thread/fork` via OpenCode provider |
+| Steer | enabled | greyed | No OpenCode SDK steer API |
+| Queue (iOS-local) | enabled | enabled | Local draft queue; steer greyed when `supportsSteer` false |
 | Pairing/E2EE | enabled | enabled | Unchanged from Codex |
 | Thread history | enabled | enabled | SDK session.messages for OpenCode |
 | Composer capability grey-out | enabled | simulator-only | `ComposerDisabledAppearance` + `ComposerCapabilityCopy`; simulator build verified |
@@ -59,7 +60,11 @@
 
 ## Device E2E checklist (iPhone + Mac)
 
-Run before parity sign-off. Bridge: `cd phodex-bridge && REMODEX_ENABLE_OPENCODE=1 npm start`. Pair via QR in CodexMobile.
+Full step-by-step (relay health, Forget, catalog): [device-e2e-checklist.md](device-e2e-checklist.md).
+
+Dev pairing (detached relay, survives shell exit): `repos/remodex-opencode/scripts/remodex-dev-pairing.sh <LAN-IP>`. Handshake smoke: `node phodex-bridge/scripts/test-relay-handshake.js ws://<LAN-IP>:9000/relay`.
+
+Run before parity sign-off. Bridge: `cd phodex-bridge && npm start` (OpenCode is on by default; set `REMODEX_DISABLE_OPENCODE=1` for Codex-only regression). Pair via QR in CodexMobile.
 
 1. Model picker shows Codex and OpenCode groups with provider logos.
 2. OpenCode thread: agent submenu changes agent; turn sends with selected agent; greyed voice/plan where capabilities false.

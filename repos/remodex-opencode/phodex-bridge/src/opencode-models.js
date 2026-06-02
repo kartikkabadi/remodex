@@ -6,7 +6,7 @@
 // Exports: OpenCode provider constants plus model/provider parsing, serialization, and sort helpers.
 // Depends on: ./normalize
 
-const { readString } = require("./normalize");
+const { readString, resolvedParam } = require("./normalize");
 
 const CODEX_PROVIDER_ID = "codex";
 const OPENCODE_PROVIDER_ID = "opencode";
@@ -165,7 +165,7 @@ function buildPromptFromTurnInput(input) {
     if (!item || typeof item !== "object") continue;
     const type = readString(item.type).toLowerCase();
     if (type.includes("image")) {
-      const imagePath = readString(item.path || item.url || item.image_url || item.dataURL);
+      const imagePath = resolvedParam(item, 'path', 'url', 'image_url', 'dataURL');
       appendNonEmpty(textParts, imagePath ? `[image attached: ${imagePath}]` : "[image attached]");
       continue;
     }
@@ -233,6 +233,75 @@ function boundedPositiveInteger(value, fallback) {
   return Math.min(Math.floor(numeric), 200);
 }
 
+const DEFAULT_OPENCODE_MODEL_LIST_TOTAL = 120;
+const DEFAULT_OPENCODE_MODEL_LIST_PER_UPSTREAM = 24;
+
+function slimModelForMobileList(model) {
+  if (!model || typeof model !== "object" || Array.isArray(model)) {
+    return model;
+  }
+  const { contextWindow, context_window, ...rest } = model;
+  return rest;
+}
+
+// Keeps model/list payloads small enough for relay + iOS decode on device.
+function capOpenCodeModelsForMobileList(models, env = process.env) {
+  if (!Array.isArray(models) || models.length === 0) {
+    return [];
+  }
+
+  const maxTotal = boundedPositiveInteger(
+    env.REMODEX_MODEL_LIST_OPENCODE_MAX,
+    DEFAULT_OPENCODE_MODEL_LIST_TOTAL,
+  );
+  const perUpstream = boundedPositiveInteger(
+    env.REMODEX_MODEL_LIST_OPENCODE_PER_UPSTREAM,
+    DEFAULT_OPENCODE_MODEL_LIST_PER_UPSTREAM,
+  );
+
+  const defaults = [];
+  const byUpstream = new Map();
+
+  for (const model of models) {
+    const slim = slimModelForMobileList(model);
+    if (model?.isDefault === true) {
+      defaults.push(slim);
+      continue;
+    }
+
+    const upstream =
+      readString(model.upstreamProviderId || model.upstream_provider_id).toLowerCase() || "other";
+    if (!byUpstream.has(upstream)) {
+      byUpstream.set(upstream, []);
+    }
+    byUpstream.get(upstream).push(slim);
+  }
+
+  const capped = [...defaults];
+  for (const upstream of [...byUpstream.keys()].sort()) {
+    capped.push(...(byUpstream.get(upstream) || []).slice(0, perUpstream));
+    if (capped.length >= maxTotal) {
+      break;
+    }
+  }
+
+  const seen = new Set();
+  const deduped = [];
+  for (const model of capped) {
+    const id = readString(model.id || model.model);
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    deduped.push(model);
+    if (deduped.length >= maxTotal) {
+      break;
+    }
+  }
+
+  return deduped;
+}
+
 function removeUndefinedValues(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const result = {};
@@ -248,7 +317,7 @@ function appendNonEmpty(target, value) {
 }
 
 function readThreadId(params = {}) {
-  return readString(params.threadId || params.thread_id || params.id);
+  return resolvedParam(params, 'threadId', 'thread_id', 'id');
 }
 
 module.exports = {
@@ -257,7 +326,9 @@ module.exports = {
   OPENCODE_PROVIDER_ID,
   appendNonEmpty,
   boundedPositiveInteger,
+  capOpenCodeModelsForMobileList,
   buildOpenCodeModelOption,
+  slimModelForMobileList,
   buildPromptFromTurnInput,
   compareThreadsByUpdatedAt,
   displayNameForOpenCodeModel,

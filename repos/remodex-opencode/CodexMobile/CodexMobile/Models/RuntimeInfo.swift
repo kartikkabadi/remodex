@@ -11,6 +11,7 @@ struct RuntimeInfo: Codable, Hashable, Sendable {
     let label: String
     let enabled: Bool
     let unavailableReason: String?
+    let reasonCode: String?
     let showsBetaLabel: Bool
     let capabilities: ProviderCapabilities
     let agents: [AgentOption]

@@ -10,6 +10,7 @@ struct TurnComposerAutocompleteState {
     let availableSlashCommands: [TurnComposerSlashCommand]
     let supportsSlashCommands: Bool
     let supportsThreadFork: Bool
+    let supportsSkillAutocomplete: Bool
     let fileAutocompleteItems: [CodexFuzzyFileMatch]
     let isFileAutocompleteVisible: Bool
     let isFileAutocompleteLoading: Bool
@@ -35,6 +36,8 @@ struct TurnComposerAutocompleteState {
 struct TurnComposerAccessoryState {
     let queuedDrafts: [QueuedTurnDraft]
     let canSteerQueuedDrafts: Bool
+    let showsSteerQueuedDraftControl: Bool
+    let steerUnavailableReason: String?
     let canRestoreQueuedDrafts: Bool
     let steeringDraftID: String?
     let composerAttachments: [TurnComposerImageAttachment]

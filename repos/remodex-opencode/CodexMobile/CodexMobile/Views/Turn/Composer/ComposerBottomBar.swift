@@ -15,7 +15,9 @@ struct ComposerBottomBar: View {
     let selectedModelID: String?
     let selectedModelTitle: String
     let isLoadingModels: Bool
+    let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
+    let modelsErrorMessage: String?
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
     let remainingAttachmentSlots: Int
@@ -46,6 +48,10 @@ struct ComposerBottomBar: View {
     let onSend: () -> Void
 
     // MARK: - Constants
+
+    private var composerChromeForeground: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.94 : 0.86)
+    }
 
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.subheadline() }
@@ -233,7 +239,9 @@ struct ComposerBottomBar: View {
             selectedModelID: selectedModelID,
             selectedModelTitle: selectedModelTitle,
             isLoadingModels: isLoadingModels,
+            isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
+            modelsErrorMessage: modelsErrorMessage,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions
         )
@@ -305,7 +313,7 @@ struct ComposerBottomBar: View {
         } label: {
             RemodexIcon.image(systemName: "plus")
                 .font(AppFont.title3(weight: .regular))
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(composerChromeForeground)
                 .frame(width: composerIconSide, height: composerIconSide)
                 .contentShape(Capsule())
         }
@@ -347,11 +355,18 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     let selectedModelID: String?
     let selectedModelTitle: String
     let isLoadingModels: Bool
+    let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
+    let modelsErrorMessage: String?
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
 
-    private let metaLabelColor = Color(.secondaryLabel)
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var composerChromeForeground: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.94 : 0.86)
+    }
+
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
     private let maxInlineRuntimeLabelWidth: CGFloat = 108
@@ -365,7 +380,9 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             && lhs.selectedModelID == rhs.selectedModelID
             && lhs.selectedModelTitle == rhs.selectedModelTitle
             && lhs.isLoadingModels == rhs.isLoadingModels
+            && lhs.isLoadingOpenCodeProvider == rhs.isLoadingOpenCodeProvider
             && lhs.isRuntimeSelectionLoading == rhs.isRuntimeSelectionLoading
+            && lhs.modelsErrorMessage == rhs.modelsErrorMessage
             && lhs.runtimeState == rhs.runtimeState
     }
 
@@ -388,20 +405,22 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     selectedModelID: selectedModelID,
                     selectedModelTitle: selectedModelTitle,
                     isLoadingModels: isLoadingModels,
-                    isRuntimeSelectionLoading: isRuntimeSelectionLoading
+                    isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
+                    isRuntimeSelectionLoading: isRuntimeSelectionLoading,
+                    modelsErrorMessage: modelsErrorMessage
                 )
             )
         }
         .layoutPriority(-1)
         .opacity(runtimeState.isRuntimeEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
-        .tint(metaLabelColor)
+        .tint(composerChromeForeground)
         .accessibilityLabel(runtimeAccessibilityLabel)
     }
 
     // Split label parts so the model name and effort can carry different foreground styles.
     private var modelLabelPart: String {
         if !runtimeState.isRuntimeEnabled {
-            let message = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason)
+            let message = ComposerCapabilityCopy.runtimeUnavailableMessage(runtimeState.runtimeUnavailableReason, reasonCode: runtimeState.runtimeUnavailableReasonCode)
             return message.title
         }
         if selectedModelID == nil {

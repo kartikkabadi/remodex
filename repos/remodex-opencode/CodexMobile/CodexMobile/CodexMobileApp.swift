@@ -3,7 +3,9 @@
 // Layer: App
 // Exports: CodexMobileApp
 
+#if !REMODEX_LOCAL_DEVICE
 import RevenueCat
+#endif
 import SwiftUI
 
 @MainActor
@@ -17,7 +19,9 @@ struct CodexMobileApp: App {
     @State private var subscriptionService: SubscriptionService
 
     init() {
+        #if !REMODEX_LOCAL_DEVICE
         Self.configureRevenueCatIfAvailable()
+        #endif
         let service = CodexService()
         service.configureNotifications()
         _codexService = State(initialValue: service)
@@ -58,6 +62,7 @@ struct CodexMobileApp: App {
         }
     }
 
+    #if !REMODEX_LOCAL_DEVICE
     // Configures RevenueCat once at launch using the client-safe public SDK key.
     private static func configureRevenueCatIfAvailable() {
         guard let apiKey = AppEnvironment.revenueCatPublicAPIKey else {
@@ -71,4 +76,5 @@ struct CodexMobileApp: App {
 
         Purchases.configure(withAPIKey: apiKey)
     }
+    #endif
 }

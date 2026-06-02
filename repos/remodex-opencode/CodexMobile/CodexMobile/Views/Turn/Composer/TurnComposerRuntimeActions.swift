@@ -12,6 +12,7 @@ struct TurnComposerRuntimeActions {
     let selectReasoning: (String) -> Void
     let selectServiceTier: (CodexServiceTier?) -> Void
     let selectAgent: (String?) -> Void
+    let refreshModels: () -> Void
 
     static func resolve(codex: CodexService, threadId: String? = nil) -> TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
@@ -46,6 +47,16 @@ struct TurnComposerRuntimeActions {
             },
             selectAgent: { agent in
                 codex.setSelectedAgentOverride(agent, for: threadId)
+            },
+            refreshModels: {
+                Task { @MainActor in
+                    codex.resetOpenCodeModelsRetry()
+                    codex.modelsErrorMessage = nil
+                    await withTaskGroup(of: Void.self) { group in
+                        group.addTask { try? await codex.fetchRuntimeCatalog() }
+                        group.addTask { try? await codex.listModels() }
+                    }
+                }
             }
         )
     }

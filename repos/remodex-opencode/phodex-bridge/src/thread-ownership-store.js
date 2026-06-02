@@ -3,21 +3,27 @@
 //          remains owned by OpenCode across bridge restarts.
 // Layer: Persistence helper
 // Exports: createThreadOwnershipStore
-// Depends on: fs, os, path
+// Depends on: os, json-file-store, normalize
 
-const fs = require("fs");
 const os = require("os");
-const path = require("path");
 const { readString } = require("./normalize");
+const { createJsonFileStore } = require("./json-file-store");
 
 function createThreadOwnershipStore({
   storagePath = "",
   homeDir = os.homedir(),
-  fsImpl = fs,
+  fsImpl,
   nowMs = Date.now,
 } = {}) {
-  const resolvedPath = resolveStoragePath(storagePath, homeDir);
-  let state = readOwnershipState(resolvedPath, fsImpl);
+  const store = createJsonFileStore({
+    filePath: storagePath,
+    defaultFileName: "thread-ownership.json",
+    homeDir,
+    key: "ownership",
+    fsImpl,
+  });
+
+  let ownership = store.read();
 
   function setOwnership(threadId, providerId) {
     const normalizedThreadId = readString(threadId);
@@ -26,17 +32,17 @@ function createThreadOwnershipStore({
       return false;
     }
 
-    state.ownership[normalizedThreadId] = {
+    ownership[normalizedThreadId] = {
       providerId: normalizedProviderId,
       assignedAt: new Date(nowMs()).toISOString(),
     };
-    writeOwnershipState(resolvedPath, state, fsImpl);
+    store.write(ownership);
     return true;
   }
 
   function getOwnership(threadId) {
     const normalizedThreadId = readString(threadId);
-    return state.ownership[normalizedThreadId]?.providerId || null;
+    return ownership[normalizedThreadId]?.providerId || null;
   }
 
   function ownsThread(threadId, providerId) {
@@ -46,12 +52,12 @@ function createThreadOwnershipStore({
 
   function removeOwnership(threadId) {
     const normalizedThreadId = readString(threadId);
-    if (!normalizedThreadId || !state.ownership[normalizedThreadId]) {
+    if (!normalizedThreadId || !ownership[normalizedThreadId]) {
       return false;
     }
 
-    delete state.ownership[normalizedThreadId];
-    writeOwnershipState(resolvedPath, state, fsImpl);
+    delete ownership[normalizedThreadId];
+    store.write(ownership);
     return true;
   }
 
@@ -61,7 +67,7 @@ function createThreadOwnershipStore({
       return [];
     }
 
-    return Object.entries(state.ownership)
+    return Object.entries(ownership)
       .filter(([, entry]) => entry?.providerId === normalizedProviderId)
       .map(([threadId, entry]) => ({
         threadId,
@@ -73,22 +79,22 @@ function createThreadOwnershipStore({
   function pruneStaleEntries(staleMs = 30 * 24 * 60 * 60 * 1000) {
     const cutoff = nowMs() - staleMs;
     let didChange = false;
-    for (const [threadId, entry] of Object.entries(state.ownership)) {
+    for (const [threadId, entry] of Object.entries(ownership)) {
       const assignedTime = Date.parse(entry?.assignedAt || "");
       if (Number.isFinite(assignedTime) && assignedTime < cutoff) {
-        delete state.ownership[threadId];
+        delete ownership[threadId];
         didChange = true;
       }
     }
 
     if (didChange) {
-      writeOwnershipState(resolvedPath, state, fsImpl);
+      store.write(ownership);
     }
     return didChange;
   }
 
   function size() {
-    return Object.keys(state.ownership).length;
+    return Object.keys(ownership).length;
   }
 
   return {
@@ -100,46 +106,6 @@ function createThreadOwnershipStore({
     setOwnership,
     size,
   };
-}
-
-function resolveStoragePath(storagePath, homeDir) {
-  const resolvedHome = path.resolve(homeDir);
-  return readString(storagePath) || path.join(resolvedHome, ".remodex", "thread-ownership.json");
-}
-
-function readOwnershipState(filePath, fsImpl) {
-  try {
-    const raw = fsImpl.readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return normalizeOwnershipState(parsed);
-    }
-  } catch {
-    // File doesn't exist yet or is corrupted; start fresh.
-  }
-  return emptyOwnershipState();
-}
-
-function writeOwnershipState(filePath, state, fsImpl) {
-  const normalizedState = normalizeOwnershipState(state);
-  const directory = path.dirname(filePath);
-  fsImpl.mkdirSync(directory, { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fsImpl.writeFileSync(tempPath, `${JSON.stringify(normalizedState, null, 2)}\n`, "utf8");
-  fsImpl.renameSync(tempPath, filePath);
-}
-
-function normalizeOwnershipState(state) {
-  return {
-    ownership:
-      state.ownership && typeof state.ownership === "object" && !Array.isArray(state.ownership)
-        ? state.ownership
-        : {},
-  };
-}
-
-function emptyOwnershipState() {
-  return { ownership: {} };
 }
 
 module.exports = { createThreadOwnershipStore };

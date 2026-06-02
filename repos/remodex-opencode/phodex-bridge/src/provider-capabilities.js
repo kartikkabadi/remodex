@@ -20,6 +20,9 @@ const CAPABILITIES = [
   "supportsStreamingTools",
   "supportsSlashCommands",
   "supportsMCP",
+  "supportsSkillAutocomplete",
+  "supportsSteer",
+  "supportsQueue",
 ];
 
 const CODEX_CAPABILITIES = {
@@ -35,6 +38,9 @@ const CODEX_CAPABILITIES = {
   supportsStreamingTools: true,
   supportsSlashCommands: true,
   supportsMCP: true,
+  supportsSkillAutocomplete: true,
+  supportsSteer: true,
+  supportsQueue: true,
 };
 
 const OPENCODE_CAPABILITIES = {
@@ -50,6 +56,9 @@ const OPENCODE_CAPABILITIES = {
   supportsStreamingTools: true,
   supportsSlashCommands: true,
   supportsMCP: true,
+  supportsSkillAutocomplete: true,
+  supportsSteer: false,
+  supportsQueue: true,
 };
 
 function resolveModelCapabilities(providerId, modelData = {}) {
@@ -61,11 +70,8 @@ function resolveModelCapabilities(providerId, modelData = {}) {
         ? { ...OPENCODE_CAPABILITIES }
         : { ...CODEX_CAPABILITIES };
 
-  const reasoningEfforts = Array.isArray(modelData.supportedReasoningEfforts)
-    ? modelData.supportedReasoningEfforts
-    : [];
-  if (reasoningEfforts.length > 0) {
-    base.supportsReasoningEffort = true;
+  if (Array.isArray(modelData.supportedReasoningEfforts)) {
+    base.supportsReasoningEffort = modelData.supportedReasoningEfforts.length > 0;
   }
 
   const reasoningEffortsAlt = Array.isArray(modelData.reasoningEfforts)

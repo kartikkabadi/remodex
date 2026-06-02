@@ -13,6 +13,9 @@ enum ComposerCapability {
     case slashCommands
     case reasoningEffort
     case agentSelection
+    case skillAutocomplete
+    case steer
+    case queue
 }
 
 enum ComposerCapabilityCopy {
@@ -30,6 +33,12 @@ enum ComposerCapabilityCopy {
             return "This model does not support reasoning effort levels"
         case .agentSelection:
             return "Agent selection not supported by this runtime"
+        case .skillAutocomplete:
+            return "Skill-based instructions not supported by this runtime"
+        case .steer:
+            return "Mid-turn steering not supported by this runtime"
+        case .queue:
+            return "Queued follow-ups are not available for this runtime"
         }
     }
 
@@ -39,21 +48,21 @@ enum ComposerCapabilityCopy {
             : capabilityReason(for: .agentSelection)
     }
 
-    static func runtimeUnavailableMessage(_ rawReason: String?) -> (title: String, hint: String?) {
-        let trimmed = rawReason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else {
-            return ("Runtime unavailable", nil)
+    static func runtimeUnavailableMessage(_ rawReason: String?, reasonCode: String? = nil) -> (title: String, hint: String?) {
+        if let code = reasonCode {
+            switch code {
+            case "opencode_not_enabled":
+                return ("OpenCode is not enabled on this Mac", "Enable OpenCode on your Mac bridge to use this runtime.")
+            case "opencode_agents_unavailable":
+                return ("OpenCode agents could not be listed", "Check OpenCode on your Mac, then refresh the connection.")
+            default:
+                break
+            }
         }
 
-        let normalized = trimmed.lowercased()
-        if normalized.contains("not enabled") {
-            return (trimmed, "Enable OpenCode on your Mac bridge to use this runtime.")
-        }
-        if normalized.contains("not installed") {
-            return ("OpenCode isn't installed on your Mac", "Install OpenCode on the paired Mac, then reconnect.")
-        }
-        if normalized.contains("agents could not be listed") {
-            return (trimmed, "Check OpenCode on your Mac, then refresh the connection.")
+        let trimmed = rawReason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            return ("Runtime unavailable", nil)
         }
         return (trimmed, nil)
     }
