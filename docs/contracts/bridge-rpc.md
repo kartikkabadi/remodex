@@ -336,21 +336,21 @@ All fields optional. Omit for first page.
 
 OpenCode is **on by default**. Disable for Codex-only regression with `REMODEX_DISABLE_OPENCODE=1` (or `true`). Legacy opt-out: `REMODEX_ENABLE_OPENCODE=0` (or `false`). See `opencode-runtime-policy.js` and `docs/architecture/002-capability-model.md`.
 
-When disabled, `runtime/catalog` still returns an OpenCode entry with `enabled: false`, empty `agents`, and full `capabilities` (so iOS can render greyed copy consistently).
+When disabled (`REMODEX_DISABLE_OPENCODE=1` or legacy `REMODEX_ENABLE_OPENCODE=0`), `buildCatalogOpenCodeRuntime()` returns `null` and OpenCode is **omitted** from `runtimes[]` — the catalog is Codex-only. No `reasonCode` is emitted for disable; iOS sees only Codex in the runtime picker (see `opencode-regression.test.js` “runtime catalog excludes opencode when flag is off”).
 
-**`reasonCode`** (structured, optional per runtime): machine-readable companion to `unavailableReason`. iOS switches on this field instead of substring-matching human copy.
+**`reasonCode`** (structured, optional per runtime): machine-readable companion to `unavailableReason`. iOS switches on this field instead of substring-matching human copy. Only present when the runtime row exists in the catalog.
 
 | Value | When |
 |-------|------|
 | `null` | Runtime is available (or Codex, which is always available) |
-| `"opencode_not_enabled"` | `REMODEX_DISABLE_OPENCODE` is set, OpenCode provider not registered, or `opencode` command missing on PATH |
+| `"opencode_not_enabled"` | OpenCode is advertised in catalog but not enabled (OpenCode provider not registered, or `opencode` command missing on PATH) — not used when `REMODEX_DISABLE_OPENCODE` is set |
 | `"opencode_agents_unavailable"` | OpenCode is registered but `listAgents()` failed |
 | `"opencode_server_failed"` | `opencode serve` could not start or health check failed (see catalog builder) |
 
-**When OpenCode is unavailable** (`REMODEX_DISABLE_OPENCODE=1`, missing binary, or provider not registered):
+**When OpenCode is advertised but unavailable** (default router with `providers: []`, missing binary, or provider not registered — OpenCode row still in catalog):
 - `enabled: false`
-- `reasonCode: "opencode_not_enabled"`
-- `unavailableReason: "OpenCode is not available on this Mac"` (human-readable; exact string may vary)
+- `reasonCode: "opencode_not_enabled"` (or `"opencode_agents_unavailable"` / `"opencode_server_failed"` per table above)
+- `unavailableReason`: human-readable explanation (exact string may vary)
 - `agents: []`
 
 ### command/list

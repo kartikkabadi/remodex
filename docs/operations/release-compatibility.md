@@ -71,7 +71,7 @@ Run before parity sign-off. Bridge: `cd phodex-bridge && npm start` (OpenCode is
 3. Send a turn on OpenCode; streaming text and tool cards render.
 4. Stop button works mid-turn.
 5. Fork and desktop handoff hidden on OpenCode threads.
-6. Disable OpenCode on Mac; composer shows unavailable banner with mapped copy.
+6. Disable OpenCode on Mac (`REMODEX_DISABLE_OPENCODE=1`); `runtime/catalog` is Codex-only (no OpenCode row) — model picker has no OpenCode group; no unavailable banner for a missing OpenCode catalog entry.
 7. Bridge restart; OpenCode thread still routes correctly (thread ownership).
 8. Codex regression: `REMODEX_DISABLE_OPENCODE=1` on Mac — composer unchanged for Codex threads.
 9. Settings: default OpenCode agent persists across relaunch.

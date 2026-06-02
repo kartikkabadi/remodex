@@ -42,7 +42,7 @@ OpenCode is **enabled by default** when the bridge starts. Operators opt out for
 | Env var | Effect |
 |---------|--------|
 | *(default)* | OpenCode runtime registered and advertised in `runtime/catalog` |
-| `REMODEX_DISABLE_OPENCODE=1` (or `true`) | OpenCode disabled — Codex-only regression |
+| `REMODEX_DISABLE_OPENCODE=1` (or `true`) | OpenCode omitted from `runtime/catalog` — Codex-only regression |
 | `REMODEX_ENABLE_OPENCODE=0` (legacy) | Same as disable (backward compat) |
 
 Policy implementation: `phodex-bridge/src/opencode-runtime-policy.js`. Tests: `phodex-bridge/test/opencode-runtime-policy.test.js`.

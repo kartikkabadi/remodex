@@ -14,7 +14,7 @@
 - Every test file is self-contained (defines its own fakes, no shared helpers directory)
 - Three-tier mock taxonomy: DI injection overrides → Fake classes → Monkey-patching (last resort)
 
-**Done bar:** All test files pass. Codex path tests pass when `REMODEX_ENABLE_OPENCODE` unset. OpenCode path tests pass with mocked SDK client.
+**Done bar:** All test files pass. Codex path tests pass when `REMODEX_DISABLE_OPENCODE` is unset (OpenCode on by default). OpenCode path tests pass with mocked SDK client.
 
 ### Bridge Integration Tests
 
@@ -77,7 +77,7 @@
 ## CI Requirements
 
 - Bridge tests: `node --test` must pass on any Node.js 18+ machine with `opencode` on PATH
-- Flag-off path: `REMODEX_ENABLE_OPENCODE=0` must produce identical behavior to today
+- Opt-out path: `REMODEX_DISABLE_OPENCODE=1` (or legacy `REMODEX_ENABLE_OPENCODE=0`) omits OpenCode from `runtime/catalog` and keeps Codex-only routing
 - OpenCode optional: tests with OpenCode are skipped if binary is not installed (use `test.skip`)
 - iOS tests: not run in CI (Xcode test runner is too slow for feedback loop)
 
