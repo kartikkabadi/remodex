@@ -73,6 +73,50 @@ test("buildHandoffPayload returns session metadata fields", () => {
   );
 });
 
+test("continueOpenCodeHandoff rejects missing thread id", async () => {
+  await assert.rejects(
+    () =>
+      continueOpenCodeHandoff(
+        {},
+        {
+          env: { REMODEX_OPENCODE_HANDOFF: "1" },
+          platform: "darwin",
+          ownershipStore: fakeOwnership(),
+          opencodeProvider: fakeProvider(),
+        },
+      ),
+    (error) => {
+      assert.equal(error.errorCode, "missing_thread_id");
+      return true;
+    },
+  );
+});
+
+test("continueOpenCodeHandoff rejects wrong provider ownership", async () => {
+  const codexOwnedStore = {
+    getOwnership(threadId) {
+      return threadId === "codex-thread-99" ? "codex" : null;
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      continueOpenCodeHandoff(
+        { threadId: "codex-thread-99" },
+        {
+          env: { REMODEX_OPENCODE_HANDOFF: "1" },
+          platform: "darwin",
+          ownershipStore: codexOwnedStore,
+          opencodeProvider: fakeProvider(),
+        },
+      ),
+    (error) => {
+      assert.equal(error.errorCode, "wrong_provider");
+      return true;
+    },
+  );
+});
+
 test("continueOpenCodeHandoff rejects when env gate is off", async () => {
   await assert.rejects(
     () =>

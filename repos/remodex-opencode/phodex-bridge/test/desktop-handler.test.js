@@ -9,6 +9,101 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const { handleDesktopRequest } = require("../src/desktop-handler");
+const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+
+function waitOneTick() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test("desktop/continueOpenCode returns wrong_provider for non-OpenCode threads", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/desktop-handler-wrong-provider.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("codex-thread-handoff", "codex");
+
+  const responses = [];
+  const handled = handleDesktopRequest(JSON.stringify({
+    id: "request-opencode-wrong-provider",
+    method: "desktop/continueOpenCode",
+    params: { threadId: "codex-thread-handoff" },
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  }, {
+    platform: "darwin",
+    env: { REMODEX_OPENCODE_HANDOFF: "1" },
+    ownershipStore,
+    opencodeProvider: {
+      id: "opencode",
+      async getHandoffContext() {
+        throw new Error("should not reach provider");
+      },
+    },
+    executor: async () => ({ stdout: "", stderr: "" }),
+    fsModule: { existsSync: () => false },
+  });
+
+  assert.equal(handled, true);
+  await waitOneTick();
+
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].id, "request-opencode-wrong-provider");
+  assert.equal(responses[0].error?.data?.errorCode, "wrong_provider");
+});
+
+test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate is off", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/desktop-handler-handoff-disabled.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
+
+  const responses = [];
+  handleDesktopRequest(JSON.stringify({
+    id: "request-opencode-disabled",
+    method: "desktop/continueOpenCode",
+    params: { threadId: "opencode-thread-handoff" },
+  }), (response) => {
+    responses.push(JSON.parse(response));
+  }, {
+    platform: "darwin",
+    env: {},
+    ownershipStore,
+    opencodeProvider: {
+      id: "opencode",
+      async getHandoffContext(threadId) {
+        return {
+          threadId,
+          sessionId: "ses_abc",
+          cwd: "/tmp/proj",
+        };
+      },
+      async selectTuiSession() {
+        return true;
+      },
+    },
+    executor: async () => ({ stdout: "", stderr: "" }),
+    fsModule: { existsSync: () => false },
+  });
+
+  await waitOneTick();
+
+  assert.equal(responses[0].error?.data?.errorCode, "opencode_handoff_disabled");
+});
 
 test("desktop/continueOnMac relaunches Codex for the requested thread", async () => {
   const executorCalls = [];

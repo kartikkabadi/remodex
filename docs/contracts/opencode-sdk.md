@@ -160,6 +160,8 @@ The SDK requires a `parts` array (`TextPartInput`, `FilePartInput`, `AgentPartIn
 
 **Structured skills from iOS (`turn/start` input items):**
 
+**Capability gate:** iOS emits `type: "skill"` input items only when `supportsStructuredSkillInput` is `true` on `runtime/catalog` / `model/list` for that thread's provider. OpenCode catalog sets this flag to `false` until structured skill parts are validated end-to-end; the bridge still maps skill items when present (e.g. future flag flip or Codex passthrough).
+
 | iOS / Codex input item | Bridge → OpenCode `parts` |
 |------------------------|---------------------------|
 | `{ type: "text", text: "…" }` | `{ type: "text", text: "…" }` |

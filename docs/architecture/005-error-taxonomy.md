@@ -46,6 +46,19 @@ Domain errors that originate in the bridge or router:
 
 `thread_not_found`, `thread_turn_active`, `thread_provider_locked`, `unsupported_opencode_method`, `runtime_provider_failed`, `opencode_input_required`, `opencode_session_expired`
 
+**Desktop handoff (`desktop/continueOpenCode`, `opencode-handoff.js`):**
+
+| `errorCode` | When |
+|-------------|------|
+| `opencode_handoff_disabled` | `REMODEX_OPENCODE_HANDOFF` unset or not `1`/`true` |
+| `unsupported_platform` | Bridge host is not macOS (`darwin`) |
+| `missing_thread_id` | `threadId` absent or whitespace-only |
+| `invalid_thread_id` | `threadId` fails desktop id validation |
+| `wrong_provider` | Thread ownership is not `opencode` |
+| `opencode_server_unreachable` | OpenCode provider missing or `getHandoffContext` unavailable |
+| `opencode_session_expired` | Mapped session no longer exists on the Mac |
+| `thread_not_found` | OpenCode thread/context lookup failed |
+
 ### Layer 3: JSON-RPC Error Shape
 
 Every error crossing the encrypted relay uses this shape:

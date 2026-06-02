@@ -63,14 +63,15 @@ All fields optional. Omit for first page.
         "supportsFastMode": false,
         "supportsPlanMode": false,
         "supportsVoice": false,
-        "supportsDesktopHandoff": true,
+        "supportsDesktopHandoff": false,
         "supportsWorktree": false,
         "supportsFork": true,
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
-        "supportsMCP": true,
+        "supportsMCP": false,
         "supportsSkillAutocomplete": true,
+        "supportsStructuredSkillInput": false,
         "supportsSteer": false,
         "supportsQueue": true
       }
