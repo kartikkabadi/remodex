@@ -32,8 +32,13 @@ Use this after bridge and iOS changes land. Run Mac steps in **Terminal.app** (n
 | 6 | Catalog | `runtime/catalog` shows OpenCode enabled with agents; model list includes OpenCode models |
 | 7 | Session | Start OpenCode thread, send prompt, receive streaming reply |
 | 8 | Composer | Fork, slash commands, queue (if enabled), skills autocomplete match catalog flags |
+| 8a | OpenCode slash | On OpenCode thread, `/` lists **dynamic** commands from bridge `command/list`; pick one and send |
+| 8b | OpenCode skills | `$` autocomplete inserts a skill; turn completes |
+| 8c | OpenCode handoff | With `REMODEX_OPENCODE_HANDOFF=1` on Mac, handoff succeeds; TUI session selected (`handoffMode: tui` preferred) |
+| 8d | Rehydration | Stop/start bridge; resume same OpenCode thread; send another turn |
+| 8e | Codex-only | `REMODEX_DISABLE_OPENCODE=1` — no OpenCode in catalog; Codex composer unchanged |
 
-Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md).
+Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md). After **8a–8e** pass on physical iPhone + Mac, promote parity rows in [release-compatibility.md](release-compatibility.md) and flip `supportsDesktopHandoff` in `provider-capabilities.js` (PR8).
 
 ## Regression
 

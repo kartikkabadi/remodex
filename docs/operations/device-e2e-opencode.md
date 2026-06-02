@@ -17,7 +17,7 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 
 | Step | Check | Pass criterion |
 |------|--------|----------------|
-| O4 | `runtime/catalog` | OpenCode runtime `enabled: true`, agents listed, `capabilities.supportsSlashCommands` and `supportsDesktopHandoff` true |
+| O4 | `runtime/catalog` | OpenCode runtime `enabled: true`, agents listed, `capabilities.supportsSlashCommands` true; `supportsDesktopHandoff` false until step **8c** passes |
 | O5 | Model picker | Codex and OpenCode groups; select OpenCode model; agent submenu visible |
 | O6 | New thread + turn | Send prompt; streaming text and tool cards render; Stop works mid-turn |
 | O7 | Bridge restart | Stop/start bridge; resume same OpenCode thread; send another turn (rehydration) |
