@@ -19,7 +19,11 @@ const {
 } = require("./opencode-models");
 const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
 const { START_TIMEOUT_MS, HEALTH_TIMEOUT_MS } = require("./opencode-server");
-const { CODEX_CAPABILITIES, OPENCODE_CAPABILITIES, resolveModelCapabilities } = require("./provider-capabilities");
+const {
+  CODEX_CAPABILITIES,
+  resolveModelCapabilities,
+  resolveOpenCodeCatalogCapabilities,
+} = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 
 const PROVIDER_FIELD_KEYS = [
@@ -591,7 +595,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       unavailableReason: serverAvailability.unavailableReason,
       reasonCode: serverAvailability.reasonCode || "opencode_server_failed",
       agents: [],
-      capabilities: { ...OPENCODE_CAPABILITIES },
+      capabilities: resolveOpenCodeCatalogCapabilities(env),
     };
   }
 
@@ -631,7 +635,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       : unavailableReason || "OpenCode is not available on this Mac",
     reasonCode,
     agents,
-    capabilities: { ...OPENCODE_CAPABILITIES },
+    capabilities: resolveOpenCodeCatalogCapabilities(env),
   };
 }
 

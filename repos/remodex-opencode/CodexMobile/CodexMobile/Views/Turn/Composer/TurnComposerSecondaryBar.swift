@@ -30,6 +30,9 @@ struct TurnComposerSecondaryBar: View {
     let onRefreshGitBranches: () -> Void
     let canHandOffToWorktree: Bool
     let onTapCreateWorktree: () -> Void
+    let showsComposerDesktopHandoff: Bool
+    let isDesktopHandoffLoading: Bool
+    let onContinueOnDesktop: (() -> Void)?
 
     var body: some View {
         Group {
@@ -58,7 +61,32 @@ struct TurnComposerSecondaryBar: View {
                         onTapCreateWorktree: onTapCreateWorktree
                     )
 
-                    Spacer(minLength: 0)
+                    if showsComposerDesktopHandoff {
+                        Spacer(minLength: 8)
+
+                        Button {
+                            onContinueOnDesktop?()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isDesktopHandoffLoading {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "desktopcomputer")
+                                        .font(AppFont.subheadline(weight: .semibold))
+                                }
+                                Text("Continue on Desktop")
+                                    .font(AppFont.subheadline(weight: .semibold))
+                            }
+                            .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(onContinueOnDesktop == nil || isDesktopHandoffLoading)
+                        .opacity(onContinueOnDesktop == nil || isDesktopHandoffLoading ? 0.5 : 1)
+                        .accessibilityLabel("Continue on Desktop")
+                    } else {
+                        Spacer(minLength: 0)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.move(edge: .bottom).combined(with: .opacity))

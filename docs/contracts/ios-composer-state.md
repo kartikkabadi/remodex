@@ -150,7 +150,7 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 | Approvals UI | Visible, enabled | Visible, partial |
 | Fork thread | Visible, enabled | Visible, greyed (if not supported) |
 | Steer/Queue | Visible, enabled | Visible, greyed (if not supported) |
-| Desktop handoff | Visible, enabled | Hidden |
+| Desktop handoff | Visible, enabled (`desktop/continueOnDesktop`) | Visible when `supportsDesktopHandoff` (`desktop/continueOpenCode`; bridge env `REMODEX_OPENCODE_HANDOFF=1` until PR8 catalog flip) |
 
 ## Grey-Out Modifier
 
@@ -231,3 +231,30 @@ The composer state is per-thread. Switching threads in the sidebar changes:
 4. **Very long agent lists:** Agent picker scrolls. Default agent is pinned to top.
 
 5. **Fast mode + reasoning together:** Both rows can appear simultaneously. No mutual exclusivity.
+
+## Desktop handoff
+
+**Visibility:** `supportsDesktopHandoff` from `runtime/catalog` / `model/list` capabilities (not hardcoded provider checks in views). OpenCode exposes the flag when the Mac bridge has `REMODEX_OPENCODE_HANDOFF=1`; PR8 promotes the default catalog value after device E2E.
+
+**Orchestration (provider selects RPC, capability gates UI):**
+
+| Provider | RPC | iOS entry |
+|----------|-----|-----------|
+| `codex` | `desktop/continueOnDesktop` | Toolbar “Hand off to Desktop”; Codex confirm explains force-close/reopen |
+| `opencode` | `desktop/continueOpenCode` | Toolbar + composer secondary bar “Continue on Desktop” when `supportsDesktopHandoff` |
+
+**OpenCode params** (`CodexService.continueOnDesktopOpenCode` / `OpenCodeDesktopHandoffParams`):
+
+```json
+{
+  "threadId": "opencode-thread-…",
+  "sessionId": "ses_…",
+  "directory": "/path/to/project"
+}
+```
+
+`sessionId` and `directory` are optional; the bridge resolves session context from thread ownership when omitted.
+
+**OpenCode result UX:** iOS surfaces `instructions` (fallback: `handoffMode` copy) in a success alert after handoff. Errors map bridge `errorCode` values (`opencode_handoff_disabled`, `wrong_provider`, `opencode_session_expired`, etc.) via `DesktopHandoffError`.
+
+**Composer:** `TurnComposerHostView` passes `showsComposerDesktopHandoff` only for OpenCode threads with `supportsDesktopHandoff`. Codex threads keep handoff in the thread toolbar menu only.

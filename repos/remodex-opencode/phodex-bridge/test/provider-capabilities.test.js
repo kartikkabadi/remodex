@@ -6,7 +6,10 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { resolveModelCapabilities } = require("../src/provider-capabilities");
+const {
+  resolveModelCapabilities,
+  resolveOpenCodeCatalogCapabilities,
+} = require("../src/provider-capabilities");
 
 test("Codex provider has standard capabilities (no agent selection)", () => {
   const capabilities = resolveModelCapabilities("codex", {});
@@ -104,4 +107,15 @@ test("OpenCode supports structured skill input on turn/start", () => {
   const capabilities = resolveModelCapabilities("opencode", {});
   assert.equal(capabilities.supportsStructuredSkillInput, true);
   assert.equal(capabilities.supportsSkillAutocomplete, true);
+});
+
+test("OpenCode advertises desktop handoff in catalog", () => {
+  assert.equal(
+    resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff,
+    true,
+  );
+  assert.equal(
+    resolveModelCapabilities("opencode", {}).supportsDesktopHandoff,
+    true,
+  );
 });

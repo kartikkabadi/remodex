@@ -42,6 +42,9 @@ struct TurnComposerHostView: View {
     // Pass-through for the New Chat draft surface; defaults to true so every
     // existing call site keeps its meta bar.
     var showsSecondaryBar: Bool = true
+    var showsComposerDesktopHandoff: Bool = false
+    var isDesktopHandoffLoading: Bool = false
+    var onContinueOnDesktop: (() -> Void)?
 
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
@@ -365,7 +368,10 @@ struct TurnComposerHostView: View {
                 viewModel.removeQueuedDraft(id: draftID, codex: codex, threadID: thread.id)
             },
             onSend: onSend,
-            showsSecondaryBar: showsSecondaryBar
+            showsSecondaryBar: showsSecondaryBar,
+            showsComposerDesktopHandoff: showsComposerDesktopHandoff,
+            isDesktopHandoffLoading: isDesktopHandoffLoading,
+            onContinueOnDesktop: onContinueOnDesktop
         )
         }
     }

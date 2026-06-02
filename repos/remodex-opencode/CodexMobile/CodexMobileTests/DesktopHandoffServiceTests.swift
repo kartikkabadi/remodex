@@ -202,6 +202,132 @@ final class DesktopHandoffServiceTests: XCTestCase {
         }
     }
 
+    func testOpenCodeHandoffParamsEncodeOptionalFields() {
+        let params = OpenCodeDesktopHandoffParams.normalized(
+            threadId: " thread-abc ",
+            sessionId: " ses_123 ",
+            directory: " /tmp/proj "
+        )
+        XCTAssertNotNil(params)
+        let object = params?.makeJSONValue().objectValue
+        XCTAssertEqual(object?["threadId"]?.stringValue, "thread-abc")
+        XCTAssertEqual(object?["sessionId"]?.stringValue, "ses_123")
+        XCTAssertEqual(object?["directory"]?.stringValue, "/tmp/proj")
+    }
+
+    func testOpenCodeHandoffParamsOmitEmptyOptionals() {
+        let params = OpenCodeDesktopHandoffParams.normalized(threadId: "thread-abc")
+        let object = params?.makeJSONValue().objectValue
+        XCTAssertEqual(object?["threadId"]?.stringValue, "thread-abc")
+        XCTAssertNil(object?["sessionId"])
+        XCTAssertNil(object?["directory"])
+    }
+
+    func testOpenCodeHandoffResultDecodesBridgePayload() {
+        let result = OpenCodeDesktopHandoffResult(
+            from: [
+                "success": .bool(true),
+                "threadId": .string("thread-1"),
+                "sessionId": .string("ses_abc"),
+                "cwd": .string("/tmp"),
+                "model": .string("openai/gpt-5"),
+                "agent": .string("build"),
+                "title": .string("Fix"),
+                "handoffMode": .string("tui"),
+                "sessionSelected": .bool(true),
+                "desktopAppInstalled": .bool(true),
+                "instructions": .string("Session selected in OpenCode TUI."),
+            ]
+        )
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.handoffMode, "tui")
+        XCTAssertEqual(result.userFacingSummary, "Session selected in OpenCode TUI.")
+    }
+
+    func testContinueOnDesktopOpenCodeUsesBridgeMethod() async throws {
+        let service = makeService()
+        var capturedMethod: String?
+        var capturedParams: JSONValue?
+        service.requestTransportOverride = { method, params in
+            capturedMethod = method
+            capturedParams = params
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "success": .bool(true),
+                    "threadId": .string("thread-1"),
+                    "sessionId": .string("ses_abc"),
+                    "handoffMode": .string("tui"),
+                    "sessionSelected": .bool(true),
+                    "instructions": .string("Done"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let handoff = DesktopHandoffService(codex: service)
+        let result = try await handoff.continueOnDesktopOpenCode(
+            threadId: "thread-1",
+            sessionId: "ses_abc",
+            directory: "/tmp/proj"
+        )
+
+        XCTAssertEqual(capturedMethod, "desktop/continueOpenCode")
+        XCTAssertEqual(capturedParams?.objectValue?["threadId"]?.stringValue, "thread-1")
+        XCTAssertEqual(capturedParams?.objectValue?["sessionId"]?.stringValue, "ses_abc")
+        XCTAssertEqual(capturedParams?.objectValue?["directory"]?.stringValue, "/tmp/proj")
+        XCTAssertEqual(result.handoffMode, "tui")
+    }
+
+    func testContinueOnDesktopRoutesOpenCodeProviderToOpenCodeRPC() async throws {
+        let service = makeService()
+        var capturedMethod: String?
+        service.requestTransportOverride = { method, _ in
+            capturedMethod = method
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "success": .bool(true),
+                    "handoffMode": .string("desktop_app"),
+                    "instructions": .string("Opened"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let handoff = DesktopHandoffService(codex: service)
+        let result = try await handoff.continueOnDesktop(
+            threadId: "thread-1",
+            modelProvider: "opencode",
+            directory: "/tmp"
+        )
+
+        XCTAssertEqual(capturedMethod, "desktop/continueOpenCode")
+        XCTAssertEqual(result?.handoffMode, "desktop_app")
+    }
+
+    func testContinueOnDesktopRoutesCodexProviderToCodexRPC() async throws {
+        let service = makeService()
+        var capturedMethod: String?
+        service.requestTransportOverride = { method, _ in
+            capturedMethod = method
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["success": .bool(true)]),
+                includeJSONRPC: false
+            )
+        }
+
+        let handoff = DesktopHandoffService(codex: service)
+        let result = try await handoff.continueOnDesktop(
+            threadId: "thread-1",
+            modelProvider: "codex"
+        )
+
+        XCTAssertEqual(capturedMethod, "desktop/continueOnDesktop")
+        XCTAssertNil(result)
+    }
+
     func testUnsupportedPlatformMessageIsPlatformNeutral() {
         let error = DesktopHandoffError.bridgeError(
             code: "unsupported_platform",

@@ -111,6 +111,9 @@ struct TurnComposerView: View {
     // Call sites can hide the project git/runtime row above the input for
     // constrained surfaces; access and usage always live in the bottom bar.
     var showsSecondaryBar: Bool = true
+    var showsComposerDesktopHandoff: Bool = false
+    var isDesktopHandoffLoading: Bool = false
+    var onContinueOnDesktop: (() -> Void)?
 
     @State private var composerInputHeight: CGFloat = 32
 
@@ -153,7 +156,10 @@ struct TurnComposerView: View {
                         onSelectGitBaseBranch: onSelectGitBaseBranch,
                         onRefreshGitBranches: onRefreshGitBranches,
                         canHandOffToWorktree: canHandOffToWorktree,
-                        onTapCreateWorktree: onTapCreateWorktree
+                        onTapCreateWorktree: onTapCreateWorktree,
+                        showsComposerDesktopHandoff: showsComposerDesktopHandoff,
+                        isDesktopHandoffLoading: isDesktopHandoffLoading,
+                        onContinueOnDesktop: onContinueOnDesktop
                     )
                 }
 

@@ -187,7 +187,9 @@ struct NewChatDraftView: View {
             isShowingNothingToCommitAlert: isShowingNothingToCommitAlertBinding,
             gitSyncAlert: gitSyncAlertBinding,
             isShowingMacHandoffConfirm: $isShowingMacHandoffConfirm,
+            macHandoffConfirmMessage: "Remodex will continue this chat on your paired Mac.",
             macHandoffErrorMessage: $macHandoffErrorMessage,
+            macHandoffSuccessMessage: .constant(nil),
             onDeclineApproval: { _ in },
             onApproveApproval: { _ in },
             onConfirmGitSyncAction: { action in

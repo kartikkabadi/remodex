@@ -2,10 +2,11 @@
 // Purpose: Defines capability flags for runtimes. Used by runtime/catalog and model/list
 //          to drive iOS composer visibility/grey-out without hardcoded provider checks.
 // Layer: Bridge runtime utility
-// Exports: CAPABILITIES, resolveModelCapabilities, hasReasoningEffort
-// Depends on: ./opencode-models
+// Exports: CAPABILITIES, resolveModelCapabilities, resolveOpenCodeCatalogCapabilities, hasReasoningEffort
+// Depends on: ./opencode-models, ./opencode-handoff
 
 const { CODEX_PROVIDER_ID, OPENCODE_PROVIDER_ID } = require("./opencode-models");
+const { isOpenCodeHandoffEnabled } = require("./opencode-handoff");
 
 const CAPABILITIES = [
   "supportsAgentSelection",
@@ -64,13 +65,20 @@ const OPENCODE_CAPABILITIES = {
   supportsQueue: true,
 };
 
-function resolveModelCapabilities(providerId, modelData = {}) {
+function resolveOpenCodeCatalogCapabilities(env = process.env) {
+  return {
+    ...OPENCODE_CAPABILITIES,
+    supportsDesktopHandoff: isOpenCodeHandoffEnabled(env),
+  };
+}
+
+function resolveModelCapabilities(providerId, modelData = {}, env = process.env) {
   modelData = modelData || {};
   const base =
     providerId === CODEX_PROVIDER_ID
       ? { ...CODEX_CAPABILITIES }
       : providerId === OPENCODE_PROVIDER_ID
-        ? { ...OPENCODE_CAPABILITIES }
+        ? resolveOpenCodeCatalogCapabilities(env)
         : { ...CODEX_CAPABILITIES };
 
   if (Array.isArray(modelData.supportedReasoningEfforts)) {
@@ -107,6 +115,7 @@ module.exports = {
   CAPABILITIES,
   CODEX_CAPABILITIES,
   OPENCODE_CAPABILITIES,
+  resolveOpenCodeCatalogCapabilities,
   resolveModelCapabilities,
   hasReasoningEffort,
 };
