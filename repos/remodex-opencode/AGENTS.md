@@ -63,6 +63,10 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 - Xcode target uses `PBXFileSystemSynchronizedRootGroup` — new Swift files under `CodexMobile/` are picked up automatically.
 - Build (simulator, no signing): `cd CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build`
 
+## Known commit scope
+
+- **`2fd364a`** bundles PR0b iOS compile fixes with a large `phodex-bridge` OpenCode stack sync (router, provider, handoff modules). Treat that bridge delta as intentional baseline — do not revert wholesale when doing Phase 1 follow-ups; use targeted tests and capability flags instead.
+
 ## Phase 1 (done — PR8 catalog flip blocked on device E2E)
 
 | Slice | Status |

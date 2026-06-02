@@ -46,7 +46,9 @@ Domain errors that originate in the bridge or router:
 
 `thread_not_found`, `thread_turn_active`, `thread_provider_locked`, `unsupported_opencode_method`, `runtime_provider_failed`, `opencode_input_required`, `opencode_session_expired`
 
-**Desktop handoff (`desktop/continueOpenCode`, `opencode-handoff.js`):**
+**Desktop handoff — OpenCode (`desktop/continueOpenCode`, `opencode-handoff.js`):**
+
+Codex desktop relaunch uses `desktop/continueOnDesktop` / `desktop/continueOnMac` with codes such as `missing_thread_id`, `invalid_thread_id`, `unsupported_platform`, and `handoff_failed` from `desktop-handler.js`.
 
 | `errorCode` | When |
 |-------------|------|

@@ -47,7 +47,10 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         self.supportsFastMode = supportsFastMode
         self.supportedReasoningEfforts = supportedReasoningEfforts
         self.defaultReasoningEffort = defaultReasoningEffort
-        self.capabilities = capabilities ?? ProviderCapabilities.defaultCodex
+        self.capabilities = capabilities
+            ?? (Self.normalizedProvider(modelProvider) == "opencode"
+                ? .defaultOpenCode
+                : .defaultCodex)
         self.upstreamProviderId = upstreamProviderId
         self.upstreamProviderDisplayName = upstreamProviderDisplayName
         self.contextWindow = contextWindow
@@ -153,7 +156,9 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         let normalizedDefault = defaultEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
         defaultReasoningEffort = (normalizedDefault?.isEmpty == true) ? nil : normalizedDefault
 
-        capabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities) ?? .defaultCodex
+        let decodedCapabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities)
+        capabilities = decodedCapabilities
+            ?? (modelProvider == "opencode" ? .defaultOpenCode : .defaultCodex)
 
         let upstreamId = try container.decodeIfPresent(String.self, forKey: .upstreamProviderId)
         let upstreamIdSnake = try container.decodeIfPresent(String.self, forKey: .upstreamProviderIdSnake)

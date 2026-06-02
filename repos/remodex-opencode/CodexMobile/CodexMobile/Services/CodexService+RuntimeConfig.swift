@@ -486,11 +486,28 @@ extension CodexService {
     }
 
     func supportsStructuredSkillInput(forThreadId threadId: String?) -> Bool {
+        providerCapabilitiesForTurn(threadId: threadId).supportsStructuredSkillInput
+    }
+
+    func providerCapabilitiesForTurn(threadId: String?) -> ProviderCapabilities {
         let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
-        if provider == "opencode" {
-            return openCodeRuntimeCatalogEntry?.capabilities.supportsStructuredSkillInput ?? false
+        if let model = selectedModelOption(threadId: threadId),
+           CodexModelOption.normalizedProvider(model.modelProvider) == provider {
+            return model.capabilities
         }
-        return supportsStructuredSkillInput
+        if provider == "opencode" {
+            return openCodeRuntimeCatalogEntry?.capabilities ?? .defaultOpenCode
+        }
+        if let codexRuntime = availableRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == "codex"
+        }) {
+            return codexRuntime.capabilities
+        }
+        return .defaultCodex
+    }
+
+    func supportsDesktopHandoffForTurn(threadId: String?) -> Bool {
+        providerCapabilitiesForTurn(threadId: threadId).supportsDesktopHandoff
     }
 
     func selectedModelOption() -> CodexModelOption? {

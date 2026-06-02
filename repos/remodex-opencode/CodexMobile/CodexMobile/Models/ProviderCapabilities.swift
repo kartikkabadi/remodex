@@ -90,9 +90,9 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsApprovals = (try? container.decodeIfPresent(Bool.self, forKey: .supportsApprovals)) ?? true
         supportsFork = (try? container.decodeIfPresent(Bool.self, forKey: .supportsFork)) ?? true
         supportsVoice = (try? container.decodeIfPresent(Bool.self, forKey: .supportsVoice)) ?? false
-        supportsDesktopHandoff = (try? container.decodeIfPresent(Bool.self, forKey: .supportsDesktopHandoff)) ?? true
+        supportsDesktopHandoff = (try? container.decodeIfPresent(Bool.self, forKey: .supportsDesktopHandoff)) ?? false
         supportsSlashCommands = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSlashCommands)) ?? true
-        supportsMCP = (try? container.decodeIfPresent(Bool.self, forKey: .supportsMCP)) ?? true
+        supportsMCP = (try? container.decodeIfPresent(Bool.self, forKey: .supportsMCP)) ?? false
         supportsWorktree = (try? container.decodeIfPresent(Bool.self, forKey: .supportsWorktree)) ?? false
         supportsSkillAutocomplete = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillAutocomplete)) ?? false
         supportsStructuredSkillInput =

@@ -508,6 +508,13 @@ test("model/list omits placeholder when OpenCode is enabled with real models", a
   assert.ok(ids.includes("anthropic/claude-sonnet-4"));
   assert.ok(ids.includes("openai/gpt-5.5"));
   assert.equal(ids.filter((id) => id === "opencode/gpt-5.5").length, 0);
+
+  const { OPENCODE_CAPABILITIES } = require("../src/provider-capabilities");
+  const opencodeModel = responsePayload.result.items.find(
+    (model) => model.modelProvider === "opencode",
+  );
+  assert.ok(opencodeModel, "expected at least one OpenCode model in model/list");
+  assert.deepEqual(opencodeModel.capabilities, OPENCODE_CAPABILITIES);
 });
 
 test("command/list returns commands from opencode provider", async () => {

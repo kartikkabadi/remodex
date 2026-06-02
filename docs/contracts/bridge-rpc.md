@@ -381,7 +381,7 @@ Optional project directory for slash-command discovery. `directory` is preferred
 
 **Routing behavior:** Router calls `opencodeProvider.listCommands(directory)` when the OpenCode harness is registered. Otherwise returns `{ commands: [] }`. Does not consult thread ownership and does not call the Codex app-server.
 
-**OpenCode-only notes:** Requires OpenCode runtime not disabled (`REMODEX_DISABLE_OPENCODE` unset) and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`. iOS still uses a Codex-hardcoded slash enum until PR3 wires `command/list` for OpenCode threads — parity matrix marks slash as **partial** until then.
+**OpenCode-only notes:** Requires OpenCode runtime not disabled (`REMODEX_DISABLE_OPENCODE` unset) and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`. iOS OpenCode threads load commands via `command/list` (`CodexService+SlashCommands`, `TurnViewModel.loadBridgeSlashCommandsIfNeeded`); Codex threads keep the hardcoded slash enum only.
 
 ### skills/list
 

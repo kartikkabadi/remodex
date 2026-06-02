@@ -73,6 +73,25 @@ test("buildHandoffPayload returns session metadata fields", () => {
   );
 });
 
+test("continueOpenCodeHandoff rejects whitespace-only thread id", async () => {
+  await assert.rejects(
+    () =>
+      continueOpenCodeHandoff(
+        { threadId: "   " },
+        {
+          env: { REMODEX_OPENCODE_HANDOFF: "1" },
+          platform: "darwin",
+          ownershipStore: fakeOwnership(),
+          opencodeProvider: fakeProvider(),
+        },
+      ),
+    (error) => {
+      assert.equal(error.errorCode, "missing_thread_id");
+      return true;
+    },
+  );
+});
+
 test("continueOpenCodeHandoff rejects missing thread id", async () => {
   await assert.rejects(
     () =>

@@ -191,7 +191,8 @@ extension CodexService {
             shouldAutoReconnectOnForeground = false
             connectionRecoveryState = .idle
         }
-        supportsStructuredSkillInput = true
+        // Disconnect clears cached catalog; per-thread gates use supportsStructuredSkillInput(forThreadId:).
+        supportsStructuredSkillInput = false
         supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
         hasResolvedRateLimitsSnapshot = false
@@ -710,7 +711,8 @@ extension CodexService {
         endBackgroundRunGraceTask(reason: "server-switch")
         shouldAutoReconnectOnForeground = false
         connectionRecoveryState = .idle
-        supportsStructuredSkillInput = true
+        // Server switch drops catalog until runtime/catalog reloads; forThreadId: is authoritative meanwhile.
+        supportsStructuredSkillInput = false
         supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
         bridgeInstalledVersion = nil

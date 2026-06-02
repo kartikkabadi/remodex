@@ -303,7 +303,6 @@ final class DesktopHandoffServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(capturedMethod, "desktop/continueOpenCode")
-        XCTAssertNotEqual(capturedMethod, "desktop/continueOnDesktop")
         XCTAssertEqual(result?.handoffMode, "desktop_app")
     }
 

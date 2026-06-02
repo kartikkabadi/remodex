@@ -17,13 +17,12 @@ extension TurnViewModel {
         thread: CodexThread,
         handoffService: DesktopHandoffService? = nil
     ) async throws -> DesktopHandoffRouteOutcome? {
-        guard let model = codex.selectedModelOption(threadId: thread.id),
-              model.capabilities.supportsDesktopHandoff else {
+        guard codex.supportsDesktopHandoffForTurn(threadId: thread.id) else {
             return nil
         }
 
         let service = handoffService ?? DesktopHandoffService(codex: codex)
-        let modelProvider = thread.modelProvider ?? model.modelProvider
+        let modelProvider = codex.runtimeModelProviderForTurn(threadId: thread.id)
         let directory = thread.gitWorkingDirectory ?? thread.cwd
 
         if let opencodeResult = try await service.continueOnDesktop(
@@ -43,9 +42,7 @@ extension TurnViewModel {
         codex: CodexService
     ) -> String {
         let modelProvider = CodexModelOption.normalizedProvider(
-            thread.modelProvider
-                ?? codex.selectedModelOption(threadId: thread.id)?.modelProvider
-                ?? "codex"
+            codex.runtimeModelProviderForTurn(threadId: thread.id)
         )
 
         if modelProvider == "opencode" {

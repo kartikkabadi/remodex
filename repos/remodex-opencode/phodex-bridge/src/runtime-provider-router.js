@@ -367,10 +367,19 @@ function mergeModelListResult(codexResult, providerModels) {
       capabilities,
     };
   });
+  const normalizedProviderModels = providerModels.map((model) => {
+    const provider = readModelProvider(model) || OPENCODE_PROVIDER_ID;
+    return {
+      ...model,
+      modelProvider: provider,
+      provider,
+      capabilities: model.capabilities ?? resolveModelCapabilities(provider, model),
+    };
+  });
 
   return {
     ...result,
-    [key]: [...normalizedCodexModels, ...providerModels],
+    [key]: [...normalizedCodexModels, ...normalizedProviderModels],
   };
 }
 

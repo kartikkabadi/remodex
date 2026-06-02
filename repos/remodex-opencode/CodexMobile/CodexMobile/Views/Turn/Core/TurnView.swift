@@ -650,7 +650,7 @@ struct TurnView: View {
     }
 
     private var supportsDesktopHandoff: Bool {
-        codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsDesktopHandoff ?? false
+        codex.supportsDesktopHandoffForTurn(threadId: thread.id)
     }
 
     private var macHandoffConfirmMessage: String {
@@ -659,11 +659,7 @@ struct TurnView: View {
 
     private var showsComposerDesktopHandoff: Bool {
         supportsDesktopHandoff
-            && CodexModelOption.normalizedProvider(
-                thread.modelProvider
-                    ?? codex.selectedModelOption(threadId: thread.id)?.modelProvider
-                    ?? "codex"
-            ) == "opencode"
+            && CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: thread.id)) == "opencode"
     }
 
     private var supportsApprovals: Bool {
