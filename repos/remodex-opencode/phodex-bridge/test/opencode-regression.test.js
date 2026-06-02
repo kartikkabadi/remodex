@@ -17,6 +17,7 @@ if (process.env.REMODEX_TEST !== "1") {
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createRuntimeProviderRouter } = require("../src/runtime-provider-router");
+const { handleDesktopRequest } = require("../src/desktop-handler");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
 function waitOneTick() {
@@ -69,6 +70,20 @@ function mockOpenCodeProvider(overrides = {}) {
     handleRequest() {},
     ...overrides,
   };
+}
+
+async function requestDesktopHandoff(request, options = {}) {
+  const responses = [];
+  const handled = handleDesktopRequest(JSON.stringify(request), (message) => {
+    responses.push(JSON.parse(message));
+  }, {
+    platform: "darwin",
+    executor: async () => ({ stdout: "", stderr: "" }),
+    ...options,
+  });
+  assert.equal(handled, true, "desktop handler should handle continueOpenCode");
+  await waitOneTick();
+  return responses[0] ?? null;
 }
 
 function createTestRouter(overrides = {}) {
@@ -395,15 +410,17 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
   const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
   delete process.env.REMODEX_OPENCODE_HANDOFF;
 
-  const { request } = createTestRouter({
-    providers: [mockOpenCodeProvider()],
-    ownershipStore,
-  });
-  const response = await request({
-    id: "handoff-off",
-    method: "desktop/continueOpenCode",
-    params: { threadId: "opencode-thread-handoff" },
-  });
+  const response = await requestDesktopHandoff(
+    {
+      id: "handoff-off",
+      method: "desktop/continueOpenCode",
+      params: { threadId: "opencode-thread-handoff" },
+    },
+    {
+      ownershipStore,
+      opencodeProvider: mockOpenCodeProvider(),
+    },
+  );
 
   assert.equal(response.id, "handoff-off");
   assert.equal(response.error.data.errorCode, "opencode_handoff_disabled");
@@ -432,15 +449,17 @@ test("desktop/continueOpenCode succeeds when handoff env gate is on", async () =
   const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
   process.env.REMODEX_OPENCODE_HANDOFF = "1";
 
-  const { request } = createTestRouter({
-    providers: [mockOpenCodeProvider()],
-    ownershipStore,
-  });
-  const response = await request({
-    id: "handoff-on",
-    method: "desktop/continueOpenCode",
-    params: { threadId: "opencode-thread-handoff" },
-  });
+  const response = await requestDesktopHandoff(
+    {
+      id: "handoff-on",
+      method: "desktop/continueOpenCode",
+      params: { threadId: "opencode-thread-handoff" },
+    },
+    {
+      ownershipStore,
+      opencodeProvider: mockOpenCodeProvider(),
+    },
+  );
 
   assert.equal(response.id, "handoff-on");
   assert.equal(response.result.success, true);
