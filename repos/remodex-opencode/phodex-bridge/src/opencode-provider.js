@@ -76,7 +76,7 @@ function createOpenCodeProvider({
         ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
         : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
       healthy = true;
-      restoreSessions();
+      await restoreSessions();
       return;
     }
 
@@ -142,9 +142,100 @@ function createOpenCodeProvider({
       ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
       : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
     healthy = true;
-    restoreSessions();
+    await restoreSessions();
 
     resetIdleTimer();
+  }
+
+  function persistSessionRecord(thread) {
+    if (!thread?.id || !thread.sessionId) return;
+    sessions.set(thread.id, thread.sessionId, {
+      cwd: thread.cwd,
+      model: thread.model,
+      agent: thread.agent,
+      title: thread.title,
+    });
+  }
+
+  async function rehydrateThreadIfNeeded(threadId) {
+    const normalizedThreadId = readThreadId({ threadId });
+    if (!normalizedThreadId) {
+      throw threadNotFoundError(threadId);
+    }
+
+    const existing = threads.get(normalizedThreadId);
+    if (existing) {
+      return existing;
+    }
+
+    if (!ownership.ownsThread(normalizedThreadId, OPENCODE_PROVIDER_ID)) {
+      throw threadNotFoundError(normalizedThreadId);
+    }
+
+    const storeEntry = sessions.getEntry(normalizedThreadId);
+    const sessionId = storeEntry?.sessionId || sessions.get(normalizedThreadId);
+    if (!sessionId) {
+      throw threadNotFoundError(normalizedThreadId);
+    }
+
+    await ensureStarted();
+
+    let sdkSession = null;
+    try {
+      sdkSession = await client.getSession(sessionId);
+    } catch (error) {
+      sessions.remove(normalizedThreadId);
+      const expired = new Error(
+        `OpenCode session expired for thread ${normalizedThreadId}. Start a new thread.`,
+      );
+      expired.errorCode = ERROR_CODES.OPENCODE_SESSION_EXPIRED.errorCode;
+      expired.action = ERROR_CODES.OPENCODE_SESSION_EXPIRED.action;
+      expired.reasonCode = "opencode_session_expired";
+      throw expired;
+    }
+
+    const now = new Date().toISOString();
+    const cwd =
+      readString(storeEntry?.cwd) ||
+      readString(sdkSession?.directory) ||
+      readString(sdkSession?.cwd) ||
+      process.cwd();
+    const thread = {
+      id: normalizedThreadId,
+      title: readString(storeEntry?.title) || "OpenCode chat",
+      cwd,
+      model: normalizeOpenCodeModel(storeEntry?.model || sdkSession?.model),
+      agent: readString(storeEntry?.agent) || "build",
+      createdAt: readString(storeEntry?.updatedAt) || now,
+      updatedAt: now,
+      archived: false,
+      hasProjectCwd: Boolean(readString(storeEntry?.cwd)),
+      turns: [],
+      sessionId,
+    };
+
+    try {
+      const messages = await client.getMessages(sessionId);
+      if (messages && messages.length > 0) {
+        thread.turns = messagesToTurns(messages, normalizedThreadId);
+      }
+    } catch {
+      // In-memory turns stay empty; thread/read still succeeds.
+    }
+
+    threads.set(normalizedThreadId, thread);
+    persistSessionRecord(thread);
+    rememberThreadProject(thread, "opencode-rehydrate");
+    return thread;
+  }
+
+  async function requireThread(threadId) {
+    const normalizedThreadId = readThreadId({ threadId });
+    const existing = threads.get(normalizedThreadId);
+    if (existing) {
+      return existing;
+    }
+    return rehydrateThreadIfNeeded(normalizedThreadId);
   }
 
   function ownsThread(threadId) {
@@ -304,7 +395,8 @@ function createOpenCodeProvider({
     threads.set(threadId, thread);
     ownership.setOwnership(threadId, OPENCODE_PROVIDER_ID);
     if (resolvedSessionId) {
-      sessions.set(threadId, resolvedSessionId);
+      thread.sessionId = resolvedSessionId;
+      persistSessionRecord(thread);
     }
     rememberThreadProject(thread, "opencode-thread-start");
     return { thread: publicThread(thread) };
@@ -313,8 +405,7 @@ function createOpenCodeProvider({
   async function threadRead(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = threads.get(threadId);
-    if (!thread) throw threadNotFoundError(threadId);
+    const thread = await requireThread(threadId);
 
     rememberThreadProject(thread, "opencode-thread-read");
     const responseThread = { ...publicThread(thread) };
@@ -327,8 +418,7 @@ function createOpenCodeProvider({
   async function threadTurnsList(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = threads.get(threadId);
-    if (!thread) throw threadNotFoundError(threadId);
+    const thread = await requireThread(threadId);
 
     const limit = boundedPositiveInteger(params.limit, 50);
     const sortDirection = resolvedParam(params, 'sortDirection', 'sort_direction') || "desc";
@@ -355,8 +445,7 @@ function createOpenCodeProvider({
   async function turnStart(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = threads.get(threadId);
-    if (!thread) throw threadNotFoundError(threadId);
+    const thread = await requireThread(threadId);
 
     for (const [, active] of activeTurns) {
       if (active.thread.id === threadId) throw activeTurnError(threadId);
@@ -434,7 +523,7 @@ function createOpenCodeProvider({
         const sessionId = await client.createSession({ cwd });
         active.sessionId = sessionId;
         active.thread.sessionId = sessionId;
-        sessions.set(active.thread.id, sessionId);
+        persistSessionRecord(active.thread);
       } else {
         active.sessionId = active.thread.sessionId;
       }
@@ -576,13 +665,13 @@ function createOpenCodeProvider({
 
   async function threadNameSet(request) {
     const params = request.params || {};
-    const thread = threads.get(readThreadId(params));
-    if (!thread) throw threadNotFoundError(readThreadId(params));
+    const thread = await requireThread(readThreadId(params));
 
     const name = resolvedParam(params, 'name', 'title');
     if (name) {
       thread.title = name;
       thread.updatedAt = new Date().toISOString();
+      persistSessionRecord(thread);
     }
 
     const publicValue = publicThread(thread);
@@ -596,8 +685,7 @@ function createOpenCodeProvider({
   }
 
   async function threadArchive(request, archived) {
-    const thread = threads.get(readThreadId(request.params));
-    if (!thread) throw threadNotFoundError(readThreadId(request.params));
+    const thread = await requireThread(readThreadId(request.params));
     thread.archived = archived;
     thread.updatedAt = new Date().toISOString();
     return { thread: publicThread(thread) };
@@ -606,8 +694,7 @@ function createOpenCodeProvider({
   async function threadFork(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = threads.get(threadId);
-    if (!thread) throw threadNotFoundError(threadId);
+    const thread = await requireThread(threadId);
     if (!thread.sessionId) {
       const error = new Error("OpenCode fork requires a session on the source thread");
       error.errorCode = "opencode_fork_requires_session";
@@ -659,11 +746,26 @@ function createOpenCodeProvider({
     }
   }
 
-  function restoreSessions() {
-    for (const [threadId, sessionId] of sessions.entries()) {
+  async function restoreSessions() {
+    activeTurns.clear();
+    for (const [threadId, entry] of sessions.entries()) {
+      const sessionId =
+        typeof entry === "string" ? entry : readString(entry?.sessionId);
       const thread = threads.get(threadId);
       if (thread) {
-        thread.sessionId = sessionId;
+        if (sessionId) {
+          thread.sessionId = sessionId;
+        }
+        continue;
+      }
+      try {
+        await rehydrateThreadIfNeeded(threadId);
+      } catch (error) {
+        console.warn(
+          `${logPrefix} OpenCode session rehydrate skipped for ${threadId}: ${
+            (error && error.message) || error
+          }`,
+        );
       }
     }
   }

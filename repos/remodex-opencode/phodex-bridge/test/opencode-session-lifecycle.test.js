@@ -67,9 +67,25 @@ test("entries returns all stored sessions", () => {
 
   const entries = store.entries();
   assert.equal(entries.length, 2);
-  const map = new Map(entries);
-  assert.equal(map.get("t-a"), "ses_a");
-  assert.equal(map.get("t-b"), "ses_b");
+  const byId = new Map(entries.map(([threadId, entry]) => [threadId, entry.sessionId]));
+  assert.equal(byId.get("t-a"), "ses_a");
+  assert.equal(byId.get("t-b"), "ses_b");
+});
+
+test("set persists cwd model agent metadata", () => {
+  const store = makeSessionStore();
+  store.set("t-meta", "ses_meta", {
+    cwd: "/tmp/project",
+    model: "anthropic/claude-sonnet-4-5",
+    agent: "plan",
+    title: "My chat",
+  });
+  const entry = store.getEntry("t-meta");
+  assert.equal(entry.sessionId, "ses_meta");
+  assert.equal(entry.cwd, "/tmp/project");
+  assert.equal(entry.model, "anthropic/claude-sonnet-4-5");
+  assert.equal(entry.agent, "plan");
+  assert.equal(entry.title, "My chat");
 });
 
 test("durable across store instances", () => {
@@ -140,12 +156,23 @@ function fakeOwnershipStore() {
 function fakeSessionStore() {
   const state = new Map();
   return {
-    set(threadId, sessionId) {
-      state.set(threadId, sessionId);
+    set(threadId, sessionId, metadata = {}) {
+      state.set(threadId, {
+        sessionId,
+        cwd: metadata.cwd || "",
+        model: metadata.model || "",
+        agent: metadata.agent || "",
+        title: metadata.title || "",
+        updatedAt: new Date().toISOString(),
+      });
       return true;
     },
     get(threadId) {
-      return state.get(threadId) || null;
+      return state.get(threadId)?.sessionId || null;
+    },
+    getEntry(threadId) {
+      const entry = state.get(threadId);
+      return entry ? { ...entry } : null;
     },
     remove(threadId) {
       return state.delete(threadId);
