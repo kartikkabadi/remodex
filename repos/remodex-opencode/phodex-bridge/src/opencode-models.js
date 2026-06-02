@@ -209,7 +209,10 @@ function imageItemToPromptPart(item) {
       filename: readString(item.filename || item.name) || "attachment",
     };
   }
-  return { type: "text", text: "[image attached]" };
+  return {
+    type: "text",
+    text: "[image attached — OpenCode receives a text placeholder until multimodal parts are verified on device]",
+  };
 }
 
 function buildPromptFromTurnInput(input) {

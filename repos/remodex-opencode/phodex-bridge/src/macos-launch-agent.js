@@ -324,6 +324,12 @@ function writeLaunchAgentPlist({
     stderrLogPath,
     nodePath,
     cliPath,
+    extraEnvironment: {
+      REMODEX_OPENCODE_COMMAND: env.REMODEX_OPENCODE_COMMAND,
+      REMODEX_OPENCODE_HANDOFF: env.REMODEX_OPENCODE_HANDOFF,
+      REMODEX_DISABLE_OPENCODE: env.REMODEX_DISABLE_OPENCODE,
+      REMODEX_OPENCODE_PORT: env.REMODEX_OPENCODE_PORT,
+    },
   });
 
   fsImpl.mkdirSync(path.dirname(plistPath), { recursive: true });
@@ -339,7 +345,23 @@ function buildLaunchAgentPlist({
   stderrLogPath,
   nodePath,
   cliPath,
+  extraEnvironment = {},
 }) {
+  const environmentEntries = [
+    ["HOME", homeDir],
+    ["PATH", pathEnv],
+    ["REMODEX_DEVICE_STATE_DIR", stateDir],
+    ...Object.entries(extraEnvironment)
+      .map(([key, value]) => [key, normalizeNonEmptyString(value)])
+      .filter(([, value]) => value),
+  ];
+  const environmentXml = environmentEntries
+    .map(
+      ([key, value]) =>
+        `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`,
+    )
+    .join("\n");
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -363,12 +385,7 @@ function buildLaunchAgentPlist({
   <string>${escapeXml(homeDir)}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>HOME</key>
-    <string>${escapeXml(homeDir)}</string>
-    <key>PATH</key>
-    <string>${escapeXml(pathEnv)}</string>
-    <key>REMODEX_DEVICE_STATE_DIR</key>
-    <string>${escapeXml(stateDir)}</string>
+${environmentXml}
   </dict>
   <key>StandardOutPath</key>
   <string>${escapeXml(stdoutLogPath)}</string>

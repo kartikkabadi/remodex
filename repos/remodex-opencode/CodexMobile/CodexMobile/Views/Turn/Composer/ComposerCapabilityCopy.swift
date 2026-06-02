@@ -16,6 +16,9 @@ enum ComposerCapability {
     case skillAutocomplete
     case steer
     case queue
+    case imageAttachments
+    case mcp
+    case pluginMentions
 }
 
 enum ComposerCapabilityCopy {
@@ -39,7 +42,28 @@ enum ComposerCapabilityCopy {
             return "Mid-turn steering not supported by this runtime"
         case .queue:
             return "Queued follow-ups are not available for this runtime"
+        case .imageAttachments:
+            return "Image attachments send a text placeholder on OpenCode until multimodal is verified"
+        case .mcp:
+            return "MCP is configured in OpenCode on your Mac, not from Remodex"
+        case .pluginMentions:
+            return "Plugin mentions are not available for this runtime"
         }
+    }
+
+    static func openCodeStatusSummary(version: String?, minVersion: String?, handoffEnvEnabled: Bool) -> String {
+        var parts: [String] = []
+        if let version, !version.isEmpty {
+            if let minVersion, !minVersion.isEmpty {
+                parts.append("OpenCode \(version) (min \(minVersion))")
+            } else {
+                parts.append("OpenCode \(version)")
+            }
+        } else {
+            parts.append("OpenCode on Mac")
+        }
+        parts.append(handoffEnvEnabled ? "Handoff env on" : "Handoff env off")
+        return parts.joined(separator: " · ")
     }
 
     static func capabilityReasonWhenAgentSelectionUnavailable(capabilities: ProviderCapabilities) -> String {

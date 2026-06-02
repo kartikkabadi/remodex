@@ -730,7 +730,8 @@ private struct ComposerPreviewContent: View {
                 catalogProviderIDs: ["codex"],
                 unavailableReasonByProviderID: [:],
                 reasonCodeByProviderID: [:],
-                showsBetaLabel: false
+                showsBetaLabel: false,
+                showsComposerAccessMode: true
             ),
             runtimeActions: TurnComposerRuntimeActions(
                 selectModel: { _ in },

@@ -217,7 +217,7 @@ test("runtime catalog exposes showsBetaLabel on opencode runtime", async () => {
   }
 });
 
-test("runtime catalog advertises OpenCode supportsDesktopHandoff without handoff env", async () => {
+test("runtime catalog keeps OpenCode supportsDesktopHandoff false until PR8", async () => {
   const responses = [];
   const mockOpenCodeProvider = {
     id: "opencode",
@@ -243,7 +243,7 @@ test("runtime catalog advertises OpenCode supportsDesktopHandoff without handoff
 
   const catalog = responses.find((r) => r.id === "catalog-handoff-cap")?.result;
   const opencodeRuntime = catalog.runtimes.find((runtime) => runtime.id === "opencode");
-  assert.equal(opencodeRuntime.capabilities.supportsDesktopHandoff, true);
+  assert.equal(opencodeRuntime.capabilities.supportsDesktopHandoff, false);
 
   if (previousDisable === undefined) {
     delete process.env.REMODEX_DISABLE_OPENCODE;

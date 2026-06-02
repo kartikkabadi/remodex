@@ -90,7 +90,9 @@ struct ComposerBottomBar: View {
         HStack(spacing: 12) {
             attachmentMenu
                 .padding(.leading, 8)
-            inlineAccessMenuLabel
+            if runtimeState.showsComposerAccessMode {
+                inlineAccessMenuLabel
+            }
             Spacer(minLength: 0)
 
             inlineStatusControl

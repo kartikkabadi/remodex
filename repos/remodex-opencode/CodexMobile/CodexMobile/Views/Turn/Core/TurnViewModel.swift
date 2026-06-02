@@ -911,6 +911,7 @@ final class TurnViewModel {
     ) {
         guard !isComposerInteractionLocked(activeTurnID: activeTurnID),
               codex.isConnected,
+              CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: thread.id)) != "opencode",
               let root = normalizedAutocompleteRoot(for: thread),
               let token = Self.trailingPluginAutocompleteToken(in: text) else {
             resetPluginAutocompleteState()
@@ -1136,7 +1137,9 @@ final class TurnViewModel {
             return TurnComposerSlashCommand.availableCommands(allowsForkCommand: allowsForkCommand)
                 .map { .codex($0) }
         case .bridgeCommands:
-            return bridgeSlashCommands.map { .bridge($0) }
+            return bridgeSlashCommands
+                .filter { !TurnComposerSlashCommand.openCodeExcludedTokens.contains($0.token.lowercased()) }
+                .map { .bridge($0) }
         }
     }
 
@@ -1156,18 +1159,19 @@ final class TurnViewModel {
 
     // Inserts an OpenCode bridge slash token into the draft and dismisses the picker.
     func onSelectBridgeSlashCommand(_ command: BridgeSlashCommand) {
-        if let updatedInput = Self.replacingTrailingSlashCommandToken(
-            in: input,
-            with: command.token
-        ) {
-            input = updatedInput
+        let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else {
+            resetSlashCommandState(clearPendingSelection: true)
+            return
+        }
+
+        let replacement = trimmedToken + " "
+        if let token = Self.trailingSlashCommandToken(in: input) {
+            var updated = input
+            updated.replaceSubrange(token.tokenRange, with: replacement)
+            input = updated
         } else {
-            let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedToken.isEmpty else {
-                resetSlashCommandState(clearPendingSelection: true)
-                return
-            }
-            input = trimmedToken
+            input = replacement
         }
         resetSlashCommandState(clearPendingSelection: true)
     }
@@ -1257,7 +1261,19 @@ final class TurnViewModel {
         composerMentionedPlugins.removeAll(where: { $0.id == id })
     }
 
-    func openCamera(codex: CodexService) {
+    private func allowsComposerImageAttachments(codex: CodexService, threadID: String) -> Bool {
+        let provider = CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: threadID))
+        guard provider == "opencode" else {
+            return true
+        }
+        codex.lastErrorMessage = ComposerCapabilityCopy.capabilityReason(for: .imageAttachments)
+        return false
+    }
+
+    func openCamera(codex: CodexService, threadID: String) {
+        guard allowsComposerImageAttachments(codex: codex, threadID: threadID) else {
+            return
+        }
         guard remainingAttachmentSlots > 0 else {
             codex.lastErrorMessage = "You can attach up to \(maxComposerImages) images per message."
             return
@@ -1273,7 +1289,10 @@ final class TurnViewModel {
         enqueuePastedImageData([data], codex: codex, threadID: threadID)
     }
 
-    func openPhotoLibraryPicker(codex: CodexService) {
+    func openPhotoLibraryPicker(codex: CodexService, threadID: String) {
+        guard allowsComposerImageAttachments(codex: codex, threadID: threadID) else {
+            return
+        }
         guard remainingAttachmentSlots > 0 else {
             codex.lastErrorMessage = "You can attach up to \(maxComposerImages) images per message."
             return
@@ -1285,6 +1304,9 @@ final class TurnViewModel {
     // Converts the picker results into loading slots and async image pipeline jobs.
     func enqueuePhotoPickerItems(_ items: [PhotosPickerItem], codex: CodexService, threadID: String) {
         guard !items.isEmpty else {
+            return
+        }
+        guard allowsComposerImageAttachments(codex: codex, threadID: threadID) else {
             return
         }
 
@@ -1322,6 +1344,9 @@ final class TurnViewModel {
     // Reuses the picker intake pipeline so pasted images obey the same limits and processing.
     func enqueuePastedImageData(_ imageDataItems: [Data], codex: CodexService, threadID: String) {
         guard !imageDataItems.isEmpty else {
+            return
+        }
+        guard allowsComposerImageAttachments(codex: codex, threadID: threadID) else {
             return
         }
 

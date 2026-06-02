@@ -25,6 +25,7 @@ const {
   resolveOpenCodeCatalogCapabilities,
 } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
+const { buildOpenCodeRuntimeStatus } = require("./opencode-runtime-status");
 
 const PROVIDER_FIELD_KEYS = [
   "modelProvider",
@@ -586,6 +587,16 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
   let reasonCode = null;
 
   const serverAvailability = readOpenCodeCatalogAvailability(opencodeProvider);
+  const runtimeStatus =
+    typeof opencodeProvider?.getRuntimeStatus === "function"
+      ? opencodeProvider.getRuntimeStatus(env)
+      : buildOpenCodeRuntimeStatus({
+          enabled: false,
+          command: hasCommand,
+          handoffEnvEnabled: readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "1"
+            || readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "true",
+        });
+
   if (serverAvailability?.unavailableReason) {
     return {
       id: OPENCODE_PROVIDER_ID,
@@ -596,6 +607,12 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       reasonCode: serverAvailability.reasonCode || "opencode_server_failed",
       agents: [],
       capabilities: resolveOpenCodeCatalogCapabilities(env),
+      opencode: {
+        ...runtimeStatus,
+        enabled: false,
+        lastError: serverAvailability.unavailableReason,
+        version: readString(serverAvailability.version) || runtimeStatus.version,
+      },
     };
   }
 
@@ -636,6 +653,11 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
     reasonCode,
     agents,
     capabilities: resolveOpenCodeCatalogCapabilities(env),
+    opencode: {
+      ...runtimeStatus,
+      enabled: enabled && runtimeStatus.enabled !== false,
+      lastError: enabled ? null : runtimeStatus.lastError || unavailableReason,
+    },
   };
 }
 

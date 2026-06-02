@@ -25,6 +25,12 @@ const {
 } = require("./opencode-models");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 const { createOpenCodeSessionStore } = require("./opencode-session-store");
+const {
+  buildOpenCodeRuntimeStatus,
+  isVersionBelowMinimum,
+  OPENCODE_MIN_CLI_VERSION,
+} = require("./opencode-runtime-status");
+const { isOpenCodeHandoffEnabled } = require("./opencode-handoff");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -785,7 +791,33 @@ function createOpenCodeProvider({
   }
 
   function getCatalogAvailability() {
-    return catalogUnavailable ? { ...catalogUnavailable } : null;
+    if (catalogUnavailable) {
+      return { ...catalogUnavailable };
+    }
+    const runtimeVersion = readString(server.version);
+    if (runtimeVersion && server.isRunning) {
+      if (isVersionBelowMinimum(runtimeVersion, OPENCODE_MIN_CLI_VERSION)) {
+        return {
+          unavailableReason: `OpenCode ${runtimeVersion} is below minimum ${OPENCODE_MIN_CLI_VERSION}. Upgrade OpenCode on this Mac.`,
+          reasonCode: "opencode_version_below_minimum",
+          version: runtimeVersion,
+        };
+      }
+    }
+    return runtimeVersion ? { version: runtimeVersion } : null;
+  }
+
+  function getRuntimeStatus(env = process.env) {
+    const availability = getCatalogAvailability();
+    return buildOpenCodeRuntimeStatus({
+      enabled: healthy && !availability?.unavailableReason,
+      serveUrl: server.baseUrl,
+      version: readString(server.version) || readString(availability?.version),
+      sessionCount: threads.size,
+      lastError: readString(availability?.unavailableReason),
+      command: readString(env.REMODEX_OPENCODE_COMMAND) || "opencode",
+      handoffEnvEnabled: isOpenCodeHandoffEnabled(env),
+    });
   }
 
   async function getHandoffContext(threadId, { sessionId = "", directory = "" } = {}) {
@@ -851,6 +883,7 @@ function createOpenCodeProvider({
     warmup,
     shutdown,
     getCatalogAvailability,
+    getRuntimeStatus,
     getHandoffContext,
     selectTuiSession,
   };

@@ -26,10 +26,10 @@ test("CAPABILITIES includes supportsStructuredSkillInput as 16th flag", () => {
   assert.equal(CAPABILITIES[13], "supportsStructuredSkillInput");
 });
 
-test("OpenCode and Codex catalogs enable supportsStructuredSkillInput", () => {
+test("Codex enables structured skill input; OpenCode defaults false", () => {
   assert.equal(CODEX_CAPABILITIES.supportsStructuredSkillInput, true);
-  assert.equal(OPENCODE_CAPABILITIES.supportsStructuredSkillInput, true);
-  assert.equal(resolveModelCapabilities("opencode", {}).supportsStructuredSkillInput, true);
+  assert.equal(OPENCODE_CAPABILITIES.supportsStructuredSkillInput, false);
+  assert.equal(resolveModelCapabilities("opencode", {}).supportsStructuredSkillInput, false);
 });
 
 test("skill with path maps to file part for session.prompt", () => {

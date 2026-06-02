@@ -221,17 +221,22 @@ enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendabl
     }
 
     static func availableCommands(
-        allowsForkCommand: Bool
+        allowsForkCommand: Bool,
+        includeCodexOnlyCommands: Bool = true
     ) -> [TurnComposerSlashCommand] {
         return allCommands.filter { command in
             switch command {
             case .fork:
                 return allowsForkCommand
-            case .codeReview, .compact, .feedback, .status, .subagents:
+            case .codeReview, .subagents:
+                return includeCodexOnlyCommands
+            case .compact, .feedback, .status:
                 return true
             }
         }
     }
+
+    static let openCodeExcludedTokens: Set<String> = ["/review", "/subagents"]
 }
 
 enum TurnComposerForkDestination: String, Identifiable, Equatable {

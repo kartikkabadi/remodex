@@ -96,6 +96,15 @@ struct BridgeMenuBarContentView: View {
             } else {
                 LabelValueRow(label: "Relay URL", value: "Not configured yet")
             }
+
+            if let opencode = store.snapshot?.bridgeStatus?.opencode {
+                let versionLabel = opencode.version?.nonEmptyTrimmed ?? "unknown"
+                let enabledLabel = (opencode.enabled == true) ? "enabled" : "disabled"
+                LabelValueRow(
+                    label: "OpenCode",
+                    value: "\(enabledLabel) · v\(versionLabel) · \(opencode.sessionCount ?? 0) sessions"
+                )
+            }
         }
         .padding(12)
         .background(cardFill, in: cardShape)

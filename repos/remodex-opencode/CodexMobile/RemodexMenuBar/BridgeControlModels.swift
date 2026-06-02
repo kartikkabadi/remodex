@@ -27,12 +27,25 @@ struct BridgeDaemonConfig: Codable, Equatable {
     let refreshEnabled: Bool?
 }
 
+struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
+    let enabled: Bool?
+    let serveUrl: String?
+    let version: String?
+    let minVersion: String?
+    let versionBelowMinimum: Bool?
+    let sessionCount: Int?
+    let lastError: String?
+    let command: String?
+    let handoffEnvEnabled: Bool?
+}
+
 struct BridgeRuntimeStatus: Codable, Equatable {
     let state: String?
     let connectionStatus: String?
     let pid: Int?
     let lastError: String?
     let updatedAt: String?
+    let opencode: BridgeOpenCodeRuntimeStatus?
 }
 
 struct BridgePairingSession: Codable, Equatable {

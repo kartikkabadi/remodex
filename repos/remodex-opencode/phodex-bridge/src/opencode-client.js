@@ -25,12 +25,16 @@ async function getSdkClient() {
 
 const REQUEST_TIMEOUT_MS = 90_000;
 
-async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
+async function createOpenCodeClient({
+  baseUrl,
+  logPrefix = "[remodex]",
+  createOpencodeClientImpl = null,
+} = {}) {
   if (!baseUrl) {
     throw new Error("OpenCode SDK client requires a baseUrl.");
   }
 
-  const createOpencodeClient = await getSdkClient();
+  const createOpencodeClient = createOpencodeClientImpl || (await getSdkClient());
   const client = createOpencodeClient({ baseUrl });
 
   async function listModels() {
@@ -150,14 +154,33 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
 
   function subscribeToEvents(handler) {
     let active = true;
+    let releaseStream = null;
 
-    (async () => {
+    const streamTask = (async () => {
       try {
         const sseClient = await client.event.subscribe();
+        releaseStream =
+          typeof sseClient.close === "function"
+            ? () => sseClient.close()
+            : typeof sseClient.abort === "function"
+              ? () => sseClient.abort()
+              : null;
         const subscription = sseClient.stream;
-        for await (const event of subscription) {
-          if (!active) break;
-          dispatchEvent(event, handler);
+        try {
+          for await (const event of subscription) {
+            if (!active) {
+              break;
+            }
+            dispatchEvent(event, handler);
+          }
+        } finally {
+          if (typeof subscription?.return === "function") {
+            try {
+              await subscription.return();
+            } catch {
+              // Stream may already be closed when unsubscribing.
+            }
+          }
         }
       } catch (error) {
         if (active) {
@@ -169,6 +192,15 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
 
     return () => {
       active = false;
+      if (releaseStream) {
+        try {
+          releaseStream();
+        } catch {
+          // Best-effort teardown so node:test can exit.
+        }
+        releaseStream = null;
+      }
+      void streamTask.catch(() => {});
     };
   }
 
@@ -300,8 +332,30 @@ function dispatchEvent(event, handler) {
       });
       break;
 
-    case "message.part.added":
+    case "message.part.added": {
+      const partType = readString(event.part?.type || event.partType);
+      const turnId = readString(event.turnID || event.turnId);
+      const itemId = readString(event.partID || event.partId) || `part-${Date.now()}`;
+      const text = readString(event.part?.text || event.text || event.content);
+      if (partType === "tool_call" || partType === "tool") {
+        handler("item/toolCall", {
+          turnId,
+          itemId,
+          toolName: readString(event.part?.tool?.name || event.toolName),
+          args: event.part?.tool?.args || event.args || {},
+          status: "running",
+        });
+      } else if (text) {
+        handler("item/agentMessage/delta", {
+          turnId,
+          itemId,
+          delta: text,
+          textDelta: text,
+          assistantPhase: "final",
+        });
+      }
       break;
+    }
 
     case "message.part.delta": {
       const partType = readString(event.part?.type || event.partType);
@@ -408,6 +462,54 @@ function dispatchEvent(event, handler) {
       });
       break;
 
+    case "session.idle":
+      handler("turn/completed", {
+        turnId: readString(event.turnID || event.turnId || event.properties?.turnID),
+        status: "completed",
+        sessionId: readString(event.sessionID || event.sessionId || event.properties?.sessionID),
+      });
+      break;
+
+    case "session.error": {
+      const errMsg = readString(
+        event.error?.message || event.message || event.properties?.error?.message,
+      );
+      handler("turn/failed", {
+        turnId: readString(event.turnID || event.turnId),
+        sessionId: readString(event.sessionID || event.sessionId),
+        message: errMsg || "OpenCode session error",
+      });
+      break;
+    }
+
+    case "session.compacted":
+      handler("thread/context/compacted", {
+        sessionId: readString(event.sessionID || event.sessionId),
+        turnId: readString(event.turnID || event.turnId),
+      });
+      break;
+
+    case "todo.updated":
+      handler("turn/tasks/updated", {
+        turnId: readString(event.turnID || event.turnId),
+        sessionId: readString(event.sessionID || event.sessionId),
+        todos: event.todos || event.properties?.todos || [],
+      });
+      break;
+
+    case "session.status": {
+      const status = readString(event.status || event.properties?.status);
+      if (status) {
+        handler("runtime/warning", {
+          sessionId: readString(event.sessionID || event.sessionId),
+          turnId: readString(event.turnID || event.turnId),
+          message: `OpenCode session status: ${status}`,
+          reasonCode: "opencode_session_status",
+        });
+      }
+      break;
+    }
+
     default:
       break;
   }
@@ -513,12 +615,18 @@ function formatProviderDisplayName(providerId) {
 }
 
 function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`OpenCode SDK request timed out after ${ms}ms`)), ms),
-    ),
-  ]);
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`OpenCode SDK request timed out after ${ms}ms`)),
+      ms,
+    );
+    timeoutId.unref?.();
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
 }
 
 module.exports = {

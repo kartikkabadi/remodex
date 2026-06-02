@@ -33,6 +33,7 @@ struct TurnComposerRuntimeState: Equatable {
     let unavailableReasonByProviderID: [String: String]
     let reasonCodeByProviderID: [String: String]
     let showsBetaLabel: Bool
+    let showsComposerAccessMode: Bool
 
     var selectedReasoningTitle: String {
         effectiveReasoningEffort.map(TurnComposerMetaMapper.reasoningTitle(for:)) ?? "Select reasoning"
@@ -104,7 +105,8 @@ struct TurnComposerRuntimeState: Equatable {
             catalogProviderIDs: catalogProviderIDs,
             unavailableReasonByProviderID: unavailableReasonByProviderID,
             reasonCodeByProviderID: reasonCodeByProviderID,
-            showsBetaLabel: codex.showsBetaLabel(forProvider: currentProviderId)
+            showsBetaLabel: codex.showsBetaLabel(forProvider: currentProviderId),
+            showsComposerAccessMode: currentProviderId != "opencode"
         )
     }
 }

@@ -645,8 +645,8 @@ function startBridge({
   function sendRuntimeApplicationMessage(provider, rawMessage) {
     if (provider !== "opencode") {
       desktopRefresher.handleOutbound(rawMessage);
-      pushNotificationTracker.handleOutbound(rawMessage);
     }
+    pushNotificationTracker.handleOutbound(rawMessage);
     rememberThreadFromMessage(provider, rawMessage);
     secureTransport.queueOutboundApplicationMessage(
       sanitizeRelayBoundCodexMessage(rawMessage),
@@ -1404,7 +1404,16 @@ function startBridge({
   }
 
   function publishBridgeStatus(status) {
-    bridgeStatusPublisher.publish(status);
+    const opencodeProvider = runtimeProviderRouter.providers.find(
+      (provider) => provider.id === "opencode",
+    );
+    const opencode =
+      typeof opencodeProvider?.getRuntimeStatus === "function"
+        ? opencodeProvider.getRuntimeStatus(process.env)
+        : undefined;
+    bridgeStatusPublisher.publish(
+      opencode ? { ...status, opencode } : status,
+    );
   }
 
   // Refreshes the relay's trusted-mac index after the QR bootstrap locks in a phone identity.

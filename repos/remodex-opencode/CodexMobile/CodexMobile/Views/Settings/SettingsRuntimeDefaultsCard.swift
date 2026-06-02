@@ -82,7 +82,26 @@ struct SettingsRuntimeDefaultsCard: View {
             Text("Used for AI-generated commit messages and PR drafts. Defaults to GPT-5.4 Mini when available.")
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
+
+            if let opencodeRuntime = codex.availableRuntimes.first(where: {
+                CodexModelOption.normalizedProvider($0.id) == "opencode"
+            }) {
+                Text(openCodeRuntimeFootnote(opencodeRuntime))
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(ComposerCapabilityCopy.capabilityReason(for: .mcp))
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private func openCodeRuntimeFootnote(_ runtime: RuntimeInfo) -> String {
+        if runtime.enabled {
+            return "OpenCode is available on your Mac bridge. Desktop handoff stays greyed until device E2E (checklist step 8c)."
+        }
+        return runtime.unavailableReason ?? "OpenCode is not available on this Mac bridge."
     }
 
     private var showsOpenCodeAgentPicker: Bool {

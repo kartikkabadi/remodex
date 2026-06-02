@@ -220,8 +220,8 @@ struct TurnComposerHostView: View {
             canHandOffToWorktree: isGitBranchSelectorEnabled
                 && !isWorktreeProject
                 && !viewModel.isCreatingGitWorktree,
-            onTapAddImage: { viewModel.openPhotoLibraryPicker(codex: codex) },
-            onTapTakePhoto: { viewModel.openCamera(codex: codex) },
+            onTapAddImage: { viewModel.openPhotoLibraryPicker(codex: codex, threadID: thread.id) },
+            onTapTakePhoto: { viewModel.openCamera(codex: codex, threadID: thread.id) },
             onTapVoice: onTapVoice,
             onCancelVoiceRecording: onCancelVoiceRecording,
             onTapCreateWorktree: onOpenWorktreeHandoff,

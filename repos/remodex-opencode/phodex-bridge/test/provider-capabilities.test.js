@@ -32,13 +32,13 @@ test("OpenCode provider has agent selection enabled and fast/plan/voice/desktop/
   assert.equal(capabilities.supportsFastMode, false);
   assert.equal(capabilities.supportsPlanMode, false);
   assert.equal(capabilities.supportsVoice, false);
-  assert.equal(capabilities.supportsDesktopHandoff, true);
+  assert.equal(capabilities.supportsDesktopHandoff, false);
   assert.equal(capabilities.supportsWorktree, false);
   assert.equal(capabilities.supportsFork, true);
   assert.equal(capabilities.supportsApprovals, true);
   assert.equal(capabilities.supportsStreamingTools, true);
   assert.equal(capabilities.supportsSlashCommands, true);
-  assert.equal(capabilities.supportsMCP, true);
+  assert.equal(capabilities.supportsMCP, false);
 });
 
 test("reasoning effort enabled when model has supportedReasoningEfforts", () => {
@@ -88,9 +88,9 @@ test("unknown provider defaults to Codex capabilities", () => {
   assert.equal(capabilities.supportsVoice, true);
 });
 
-test("OpenCode MCP is enabled", () => {
+test("OpenCode MCP is greyed in catalog (configured on Mac, not in Remodex)", () => {
   const capabilities = resolveModelCapabilities("opencode", {});
-  assert.equal(capabilities.supportsMCP, true);
+  assert.equal(capabilities.supportsMCP, false);
 });
 
 test("Codex MCP is enabled", () => {
@@ -103,16 +103,16 @@ test("Codex supports structured skill input on turn/start", () => {
   assert.equal(capabilities.supportsStructuredSkillInput, true);
 });
 
-test("OpenCode supports structured skill input on turn/start", () => {
+test("OpenCode does not enable structured skill input until SDK spike", () => {
   const capabilities = resolveModelCapabilities("opencode", {});
-  assert.equal(capabilities.supportsStructuredSkillInput, true);
+  assert.equal(capabilities.supportsStructuredSkillInput, false);
   assert.equal(capabilities.supportsSkillAutocomplete, true);
 });
 
-test("OpenCode catalog supportsDesktopHandoff is true after PR8 sign-off", () => {
-  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, true);
+test("OpenCode catalog keeps supportsDesktopHandoff false until device E2E (PR8)", () => {
+  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, false);
   assert.equal(
     resolveModelCapabilities("opencode", {}, {}).supportsDesktopHandoff,
-    true,
+    false,
   );
 });
