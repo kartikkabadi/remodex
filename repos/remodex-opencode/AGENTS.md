@@ -63,11 +63,13 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 - Xcode target uses `PBXFileSystemSynchronizedRootGroup` — new Swift files under `CodexMobile/` are picked up automatically.
 - Build (simulator, no signing): `cd CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build`
 
-## Phase 1 (in progress)
+## Phase 1 (done — PR8 catalog flip blocked on device E2E)
 
 | Slice | Status |
 |-------|--------|
 | PR1 `bridge-rpc.md` + catalog snapshot test | Done — OpenCode example matches `OPENCODE_CAPABILITIES` |
-| PR3 slash `command/list` | Already wired (`CodexService+SlashCommands`, `TurnViewModel.loadBridgeSlashCommandsIfNeeded`) |
-| PR4 structured skills | Done — 16th flag on `ProviderCapabilities`; OpenCode turns gated via `supportsStructuredSkillInput(forThreadId:)` |
-| PR5–6 handoff iOS | Pending device E2E — bridge RPC exists; catalog still `supportsDesktopHandoff: false` until PR8 |
+| PR3 slash `command/list` | Done — bridge router + iOS `CodexService+SlashCommands`; Codex threads use enum only |
+| PR4 structured skills | Done — `supportsStructuredSkillInput: false` for OpenCode; iOS gated via `supportsStructuredSkillInput(forThreadId:)` |
+| PR5 handoff regression | Done — `opencode-handoff.test.js` + `desktop-handler.test.js` negatives; `005-error-taxonomy.md` aligned |
+| PR6 handoff iOS routing | Done — `DesktopHandoffService` / `TurnViewModel+DesktopHandoff` / toolbar capability gate |
+| PR8 `supportsDesktopHandoff` | **Blocked** — catalog stays `false`; flip after device E2E checklist 8c |
