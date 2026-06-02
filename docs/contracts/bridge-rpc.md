@@ -458,7 +458,7 @@ These methods are handled by bridge.js handlers and never reach any agent:
 | `project/directory` | `project-handler.js` | Browse directories |
 | `pet/list` | `pet-handler.js` | List Codex pets |
 | `desktop/continueOnMac` | `desktop-handler.js` | Hand off to Codex.app |
-| `desktop/continueOpenCode` | `desktop-handler.js` + `runtime-provider-router.js` | Hand off OpenCode-owned thread to Mac (TUI + optional desktop app) |
+| `desktop/continueOpenCode` | `desktop-handler.js` | Hand off OpenCode-owned thread to Mac (TUI + optional desktop app) |
 | `desktop/wakeDisplay` | `desktop-handler.js` | Wake Mac display |
 | `desktop/preferences/read` | `desktop-handler.js` | Read bridge prefs |
 | `voice/transcribe` | `voice-handler.js` | Transcribe audio |
@@ -508,7 +508,7 @@ Every error across all methods uses this shape:
 
 ### desktop/continueOpenCode
 
-**Routing:** `bridge-local` — `desktop-handler.js` (entry) delegates to `runtime-provider-router.js` / `opencode-handoff.js`. macOS only.
+**Routing:** `bridge-local` — `desktop-handler.js` delegates to `opencode-handoff.js`. macOS only.
 
 **Env gate:** Requires `REMODEX_OPENCODE_HANDOFF=1` (or `true`). When unset/`0`/`false`, returns `opencode_handoff_disabled` with no success payload.
 
@@ -551,6 +551,7 @@ Every error across all methods uses this shape:
 |-----------|------|
 | `opencode_handoff_disabled` | `REMODEX_OPENCODE_HANDOFF` not enabled |
 | `wrong_provider` | Thread not owned by `opencode` |
+| `missing_thread_id` | `threadId` omitted or empty |
 | `thread_not_found` | Unknown thread or rehydrate failed |
 | `invalid_thread_id` | Fails desktop thread id pattern |
 | `opencode_session_expired` | Missing or stale `sessionId` |

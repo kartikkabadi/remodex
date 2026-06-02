@@ -798,15 +798,18 @@ function createOpenCodeProvider({
     }
 
     const thread = await requireThread(normalizedThreadId);
+    // Client-supplied sessionId/directory are hints only; never override owned thread state.
     const requestedSessionId = readString(sessionId);
     const requestedDirectory = readString(directory);
     if (requestedSessionId && requestedSessionId !== thread.sessionId) {
-      thread.sessionId = requestedSessionId;
-      persistSessionRecord(thread);
+      console.warn(
+        `${logPrefix} Ignoring untrusted handoff sessionId for thread ${normalizedThreadId}`,
+      );
     }
     if (requestedDirectory && requestedDirectory !== thread.cwd) {
-      thread.cwd = requestedDirectory;
-      persistSessionRecord(thread);
+      console.warn(
+        `${logPrefix} Ignoring untrusted handoff directory for thread ${normalizedThreadId}`,
+      );
     }
 
     if (!thread.sessionId) {

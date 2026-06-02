@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { promisify } = require("util");
 const { findRolloutFileForThread, resolveSessionsRoot } = require("./rollout-watch");
-const { handleContinueOpenCodeRequest } = require("./runtime-provider-router");
+const { continueOpenCodeHandoff } = require("./opencode-handoff");
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BUNDLE_ID = "com.openai.codex";
@@ -124,7 +124,7 @@ async function handleDesktopMethod(method, params, options = {}) {
         threadMaterializePollMs,
       });
     case "desktop/continueOpenCode":
-      return handleContinueOpenCodeRequest(params, {
+      return continueOpenCodeHandoff(params, {
         env,
         platform,
         ownershipStore: options.ownershipStore,
