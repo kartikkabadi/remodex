@@ -150,7 +150,7 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 | Approvals UI | Visible, enabled | Visible, partial |
 | Fork thread | Visible, enabled | Visible, greyed (if not supported) |
 | Steer/Queue | Visible, enabled | Visible, greyed (if not supported) |
-| Desktop handoff | Visible, enabled (`desktop/continueOnDesktop`) | Visible when `supportsDesktopHandoff` (`desktop/continueOpenCode`; bridge env `REMODEX_OPENCODE_HANDOFF=1` until PR8 catalog flip) |
+| Desktop handoff | Visible, enabled (`desktop/continueOnDesktop`) | Visible when `supportsDesktopHandoff` (`desktop/continueOpenCode`; Mac bridge requires `REMODEX_OPENCODE_HANDOFF=1` for RPC) |
 
 ## Grey-Out Modifier
 
@@ -234,7 +234,7 @@ The composer state is per-thread. Switching threads in the sidebar changes:
 
 ## Desktop handoff
 
-**Visibility:** `supportsDesktopHandoff` from `runtime/catalog` / `model/list` capabilities (not hardcoded provider checks in views). OpenCode exposes the flag when the Mac bridge has `REMODEX_OPENCODE_HANDOFF=1`; PR8 promotes the default catalog value after device E2E.
+**Visibility:** `supportsDesktopHandoff` from `runtime/catalog` / `model/list` capabilities (not hardcoded provider checks in views). OpenCode catalog advertises `true` after device E2E sign-off; `desktop/continueOpenCode` still requires `REMODEX_OPENCODE_HANDOFF=1` on the Mac bridge.
 
 **Orchestration (provider selects RPC, capability gates UI):**
 

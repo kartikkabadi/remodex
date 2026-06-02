@@ -32,7 +32,7 @@ test("OpenCode provider has agent selection enabled and fast/plan/voice/desktop/
   assert.equal(capabilities.supportsFastMode, false);
   assert.equal(capabilities.supportsPlanMode, false);
   assert.equal(capabilities.supportsVoice, false);
-  assert.equal(capabilities.supportsDesktopHandoff, false);
+  assert.equal(capabilities.supportsDesktopHandoff, true);
   assert.equal(capabilities.supportsWorktree, false);
   assert.equal(capabilities.supportsFork, true);
   assert.equal(capabilities.supportsApprovals, true);
@@ -109,13 +109,10 @@ test("OpenCode supports structured skill input on turn/start", () => {
   assert.equal(capabilities.supportsSkillAutocomplete, true);
 });
 
-test("OpenCode advertises desktop handoff in catalog", () => {
+test("OpenCode catalog supportsDesktopHandoff is true after PR8 sign-off", () => {
+  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, true);
   assert.equal(
-    resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff,
-    true,
-  );
-  assert.equal(
-    resolveModelCapabilities("opencode", {}).supportsDesktopHandoff,
+    resolveModelCapabilities("opencode", {}, {}).supportsDesktopHandoff,
     true,
   );
 });

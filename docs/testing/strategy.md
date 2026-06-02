@@ -34,7 +34,7 @@
 
 - `REMODEX_DISABLE_OPENCODE=1` — omit OpenCode from `runtime/catalog` and skip provider registration (Codex regression).
 - `REMODEX_ENABLE_OPENCODE=1` — opt-in for provider unit tests with mocked `serverFactory` / `clientFactory`.
-- `REMODEX_OPENCODE_HANDOFF=1` — allow `desktop/continueOpenCode`; default off returns `opencode_handoff_disabled`.
+- `REMODEX_OPENCODE_HANDOFF=1` — allow `desktop/continueOpenCode`; default off returns `opencode_handoff_disabled`. Catalog advertises `supportsDesktopHandoff: true` for OpenCode after PR8 (independent of this env).
 
 **Done bar:** `npm run test:opencode` passes without a live `opencode` binary. Restart rehydration and handoff regressions stay mocked; integration tests that spawn real `opencode serve` remain optional (`test.skip` when binary missing).
 

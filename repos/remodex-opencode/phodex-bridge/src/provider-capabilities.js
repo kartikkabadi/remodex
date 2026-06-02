@@ -3,10 +3,10 @@
 //          to drive iOS composer visibility/grey-out without hardcoded provider checks.
 // Layer: Bridge runtime utility
 // Exports: CAPABILITIES, resolveModelCapabilities, resolveOpenCodeCatalogCapabilities, hasReasoningEffort
-// Depends on: ./opencode-models, ./opencode-handoff
+// Depends on: ./opencode-models
 
 const { CODEX_PROVIDER_ID, OPENCODE_PROVIDER_ID } = require("./opencode-models");
-const { isOpenCodeHandoffEnabled } = require("./opencode-handoff");
+
 
 const CAPABILITIES = [
   "supportsAgentSelection",
@@ -52,7 +52,7 @@ const OPENCODE_CAPABILITIES = {
   supportsFastMode: false,
   supportsPlanMode: false,
   supportsVoice: false,
-  supportsDesktopHandoff: false,
+  supportsDesktopHandoff: true,
   supportsWorktree: false,
   supportsFork: true,
   supportsApprovals: true,
@@ -65,11 +65,8 @@ const OPENCODE_CAPABILITIES = {
   supportsQueue: true,
 };
 
-function resolveOpenCodeCatalogCapabilities(env = process.env) {
-  return {
-    ...OPENCODE_CAPABILITIES,
-    supportsDesktopHandoff: isOpenCodeHandoffEnabled(env),
-  };
+function resolveOpenCodeCatalogCapabilities(_env = process.env) {
+  return { ...OPENCODE_CAPABILITIES };
 }
 
 function resolveModelCapabilities(providerId, modelData = {}, env = process.env) {

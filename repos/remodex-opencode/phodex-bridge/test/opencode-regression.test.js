@@ -202,6 +202,46 @@ test("runtime catalog exposes showsBetaLabel on opencode runtime", async () => {
   }
 });
 
+test("runtime catalog advertises OpenCode supportsDesktopHandoff without handoff env", async () => {
+  const responses = [];
+  const mockOpenCodeProvider = {
+    id: "opencode",
+    listAgents: async () => [{ id: "build", label: "Build" }],
+  };
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse: (msg) => responses.push(JSON.parse(msg)),
+    sendRuntimeMessage: () => {},
+    providers: [mockOpenCodeProvider],
+    logPrefix: "[test]",
+  });
+
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
+  delete process.env.REMODEX_DISABLE_OPENCODE;
+  delete process.env.REMODEX_OPENCODE_HANDOFF;
+
+  router.handleApplicationMessage(
+    JSON.stringify({ id: "catalog-handoff-cap", method: "runtime/catalog" }),
+  );
+  await waitOneTick();
+
+  const catalog = responses.find((r) => r.id === "catalog-handoff-cap")?.result;
+  const opencodeRuntime = catalog.runtimes.find((runtime) => runtime.id === "opencode");
+  assert.equal(opencodeRuntime.capabilities.supportsDesktopHandoff, true);
+
+  if (previousDisable === undefined) {
+    delete process.env.REMODEX_DISABLE_OPENCODE;
+  } else {
+    process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+  }
+  if (previousHandoff === undefined) {
+    delete process.env.REMODEX_OPENCODE_HANDOFF;
+  } else {
+    process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
+  }
+});
+
 test("provider is not created when OpenCode is explicitly disabled", () => {
   process.env.REMODEX_DISABLE_OPENCODE = "1";
   const router = createRuntimeProviderRouter({
