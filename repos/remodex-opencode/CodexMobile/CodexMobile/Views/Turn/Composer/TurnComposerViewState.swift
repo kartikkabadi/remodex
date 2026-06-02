@@ -12,6 +12,7 @@ struct TurnComposerAutocompleteState {
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool
     let showsBridgeSlashCommandsEmptyHint: Bool
+    let bridgeSlashCommandsLoadError: String?
     let supportsThreadFork: Bool
     let supportsSkillAutocomplete: Bool
     let fileAutocompleteItems: [CodexFuzzyFileMatch]

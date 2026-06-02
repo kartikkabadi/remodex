@@ -96,6 +96,7 @@ struct TurnComposerView: View {
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
+    let onRetryBridgeSlashCommands: () -> Void
     let onRemoveMentionedFile: (String) -> Void
     let onRemoveMentionedSkill: (String) -> Void
     let onRemoveMentionedPlugin: (String) -> Void
@@ -273,7 +274,8 @@ struct TurnComposerView: View {
                                 onSelectSlashCommand: onSelectSlashCommand,
                                 onSelectCodeReviewTarget: onSelectCodeReviewTarget,
                                 onSelectForkDestination: onSelectForkDestination,
-                                onCloseSlashCommandPanel: onCloseSlashCommandPanel
+                                onCloseSlashCommandPanel: onCloseSlashCommandPanel,
+                                onRetryBridgeSlashCommands: onRetryBridgeSlashCommands
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -303,6 +305,7 @@ private struct TurnComposerAutocompletePanels: View {
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
+    let onRetryBridgeSlashCommands: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -369,6 +372,8 @@ private struct TurnComposerAutocompletePanels: View {
                     usesBridgeSlashCommands: state.usesBridgeSlashCommands,
                     isLoadingBridgeSlashCommands: state.isLoadingBridgeSlashCommands,
                     showsBridgeSlashCommandsEmptyHint: state.showsBridgeSlashCommandsEmptyHint,
+                    bridgeSlashCommandsLoadError: state.bridgeSlashCommandsLoadError,
+                    onRetryBridgeSlashCommands: onRetryBridgeSlashCommands,
                     supportsThreadFork: state.supportsThreadFork,
                     hasComposerContentConflictingWithReview: state.hasComposerContentConflictingWithReview,
                     isThreadRunning: state.isThreadRunning,
@@ -660,6 +665,7 @@ private struct ComposerPreviewContent: View {
                 usesBridgeSlashCommands: false,
                 isLoadingBridgeSlashCommands: false,
                 showsBridgeSlashCommandsEmptyHint: false,
+                bridgeSlashCommandsLoadError: nil,
                 supportsThreadFork: true,
                 supportsSkillAutocomplete: true,
                 fileAutocompleteItems: [],
@@ -782,6 +788,7 @@ private struct ComposerPreviewContent: View {
             onSelectCodeReviewTarget: { _ in },
             onSelectForkDestination: { _ in },
             onCloseSlashCommandPanel: {},
+            onRetryBridgeSlashCommands: {},
             onRemoveMentionedFile: { _ in },
             onRemoveMentionedSkill: { _ in },
             onRemoveMentionedPlugin: { _ in },

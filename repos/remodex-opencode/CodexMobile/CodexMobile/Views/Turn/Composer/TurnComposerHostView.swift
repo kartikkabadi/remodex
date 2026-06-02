@@ -77,6 +77,7 @@ struct TurnComposerHostView: View {
             usesBridgeSlashCommands: slashSource == .bridgeCommands,
             isLoadingBridgeSlashCommands: viewModel.isLoadingBridgeSlashCommands,
             showsBridgeSlashCommandsEmptyHint: viewModel.showsBridgeSlashCommandsEmptyHint,
+            bridgeSlashCommandsLoadError: viewModel.bridgeSlashCommandsLoadError,
             supportsThreadFork: runtimeState.capabilities.supportsFork,
             supportsSkillAutocomplete: runtimeState.capabilities.supportsSkillAutocomplete,
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
@@ -324,6 +325,9 @@ struct TurnComposerHostView: View {
                 }
             },
             onCloseSlashCommandPanel: viewModel.closeSlashCommandPanel,
+            onRetryBridgeSlashCommands: {
+                viewModel.retryBridgeSlashCommandsLoad(codex: codex, thread: thread)
+            },
             onRemoveMentionedFile: { mentionID in
                 viewModel.removeMentionedFile(id: mentionID)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)

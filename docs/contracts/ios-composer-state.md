@@ -133,11 +133,13 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 { "commands": [{ "token": "/build", "title": "Build", "description": "Build the project" }] }
 ```
 
-**Cache (iOS):** `CodexService.fetchSlashCommands(directory:)` caches per normalized directory for ~60s. Invalidate on relay disconnect (`clearHydrationCaches` → `invalidateSlashCommandCache`) and when `thread.gitWorkingDirectory` changes (ViewModel refetches for the new directory).
+**Cache (iOS):** `CodexService.fetchSlashCommands(directory:)` caches successful responses per normalized directory for ~60s. Failures are not cached. Invalidate on relay disconnect (`clearHydrationCaches` → `invalidateSlashCommandCache`) and when `thread.gitWorkingDirectory` changes (ViewModel cancels in-flight fetch, bumps a generation token, and refetches for the new directory).
 
 **Selection:** Codex commands keep existing behaviors (review targets, fork destinations, compact RPC, etc.). OpenCode bridge commands insert `token` into the draft only; send path includes the `/token` text in `turn/start`.
 
 **Empty OpenCode list:** After a successful fetch with zero commands, show inline hint “No commands for this project” (no `reasonCode` until bridge adds one).
+
+**Fetch failure:** Show “Couldn't load commands. Tap to retry.” with a Retry control; do not show the empty-project hint until a successful fetch returns zero commands.
 
 ### Other Controls
 

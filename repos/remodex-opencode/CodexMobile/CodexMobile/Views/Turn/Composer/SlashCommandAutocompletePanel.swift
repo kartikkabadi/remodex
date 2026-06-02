@@ -13,6 +13,8 @@ struct SlashCommandAutocompletePanel: View {
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool
     let showsBridgeSlashCommandsEmptyHint: Bool
+    let bridgeSlashCommandsLoadError: String?
+    let onRetryBridgeSlashCommands: () -> Void
     let supportsThreadFork: Bool
     let hasComposerContentConflictingWithReview: Bool
     let isThreadRunning: Bool
@@ -85,7 +87,11 @@ struct SlashCommandAutocompletePanel: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
             } else if items.isEmpty {
-                if showsBridgeSlashCommandsEmptyHint, query.isEmpty {
+                if usesBridgeSlashCommands,
+                   let bridgeSlashCommandsLoadError,
+                   query.isEmpty {
+                    bridgeSlashCommandsFailureView(message: bridgeSlashCommandsLoadError)
+                } else if showsBridgeSlashCommandsEmptyHint, query.isEmpty {
                     Text("No commands for this project")
                         .font(AppFont.footnote())
                         .foregroundStyle(.secondary)
@@ -148,6 +154,30 @@ struct SlashCommandAutocompletePanel: View {
                 .frame(height: Self.visibleListHeight(for: items.count))
             }
         }
+    }
+
+    private func bridgeSlashCommandsFailureView(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(AppFont.caption2())
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                onRetryBridgeSlashCommands()
+            } label: {
+                Text("Retry")
+                    .font(AppFont.subheadline(weight: .semibold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private var reviewTargetList: some View {

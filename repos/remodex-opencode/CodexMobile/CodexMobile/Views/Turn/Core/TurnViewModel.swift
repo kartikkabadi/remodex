@@ -234,7 +234,9 @@ final class TurnViewModel {
     var bridgeSlashCommands: [BridgeSlashCommand] = []
     var isLoadingBridgeSlashCommands = false
     var didLoadBridgeSlashCommandsSuccessfully = false
+    var bridgeSlashCommandsLoadError: String?
     @ObservationIgnored private var bridgeSlashCommandsDirectory: String?
+    @ObservationIgnored private var bridgeSlashCommandsFetchGeneration: UInt64 = 0
     @ObservationIgnored private var bridgeSlashCommandsFetchTask: Task<Void, Never>?
     // MARK: - Git state
 
@@ -1142,6 +1144,14 @@ final class TurnViewModel {
         didLoadBridgeSlashCommandsSuccessfully
             && bridgeSlashCommands.isEmpty
             && !isLoadingBridgeSlashCommands
+            && bridgeSlashCommandsLoadError == nil
+    }
+
+    func retryBridgeSlashCommandsLoad(codex: CodexService, thread: CodexThread) {
+        codex.invalidateSlashCommandCache(directory: thread.gitWorkingDirectory)
+        bridgeSlashCommandsLoadError = nil
+        didLoadBridgeSlashCommandsSuccessfully = false
+        loadBridgeSlashCommandsIfNeeded(codex: codex, thread: thread)
     }
 
     // Inserts an OpenCode bridge slash token into the draft and dismisses the picker.
@@ -2686,32 +2696,53 @@ final class TurnViewModel {
         bridgeSlashCommandsFetchTask = nil
         bridgeSlashCommands = []
         bridgeSlashCommandsDirectory = nil
+        bridgeSlashCommandsFetchGeneration = 0
         isLoadingBridgeSlashCommands = false
         didLoadBridgeSlashCommandsSuccessfully = false
+        bridgeSlashCommandsLoadError = nil
     }
 
     private func loadBridgeSlashCommandsIfNeeded(codex: CodexService, thread: CodexThread) {
         let directory = thread.gitWorkingDirectory
         if bridgeSlashCommandsDirectory != directory {
+            bridgeSlashCommandsFetchTask?.cancel()
+            bridgeSlashCommandsFetchTask = nil
             bridgeSlashCommands = []
             didLoadBridgeSlashCommandsSuccessfully = false
+            bridgeSlashCommandsLoadError = nil
+            isLoadingBridgeSlashCommands = false
             bridgeSlashCommandsDirectory = directory
+            bridgeSlashCommandsFetchGeneration &+= 1
         }
 
-        guard !isLoadingBridgeSlashCommands else {
-            return
-        }
+        let generation = bridgeSlashCommandsFetchGeneration
 
         bridgeSlashCommandsFetchTask?.cancel()
         isLoadingBridgeSlashCommands = true
+        bridgeSlashCommandsLoadError = nil
 
         bridgeSlashCommandsFetchTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let commands = await codex.fetchSlashCommands(directory: directory)
-            guard !Task.isCancelled else { return }
-            self.bridgeSlashCommands = commands
-            self.isLoadingBridgeSlashCommands = false
-            self.didLoadBridgeSlashCommandsSuccessfully = true
+            do {
+                let commands = try await codex.fetchSlashCommands(directory: directory)
+                guard !Task.isCancelled else { return }
+                guard generation == self.bridgeSlashCommandsFetchGeneration else { return }
+                guard self.bridgeSlashCommandsDirectory == directory else { return }
+
+                self.bridgeSlashCommands = commands
+                self.isLoadingBridgeSlashCommands = false
+                self.didLoadBridgeSlashCommandsSuccessfully = true
+                self.bridgeSlashCommandsLoadError = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                guard generation == self.bridgeSlashCommandsFetchGeneration else { return }
+                guard self.bridgeSlashCommandsDirectory == directory else { return }
+
+                self.bridgeSlashCommands = []
+                self.isLoadingBridgeSlashCommands = false
+                self.didLoadBridgeSlashCommandsSuccessfully = false
+                self.bridgeSlashCommandsLoadError = "Couldn't load commands. Tap to retry."
+            }
         }
     }
 

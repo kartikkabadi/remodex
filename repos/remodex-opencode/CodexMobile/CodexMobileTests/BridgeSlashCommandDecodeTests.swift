@@ -10,6 +10,7 @@ import XCTest
 @MainActor
 final class BridgeSlashCommandDecodeTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
+    private static var retainedViewModels: [TurnViewModel] = []
 
     func testDecodeSlashCommandsParsesCommandListShape() {
         let service = makeService()
@@ -65,19 +66,43 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             )
         }
 
-        let commands = await service.fetchSlashCommands(directory: "/Users/me/work/repo")
+        let commands = try await service.fetchSlashCommands(directory: "/Users/me/work/repo")
 
         XCTAssertEqual(capturedMethod, "command/list")
         XCTAssertEqual(capturedDirectory, "/Users/me/work/repo")
         XCTAssertEqual(commands.count, 1)
         XCTAssertEqual(commands.first?.token, "/compact")
 
-        let cached = await service.fetchSlashCommands(directory: "/Users/me/work/repo")
+        let cached = try await service.fetchSlashCommands(directory: "/Users/me/work/repo")
         XCTAssertEqual(cached.count, 1)
         XCTAssertEqual(capturedMethod, "command/list")
     }
 
-    func testFetchSlashCommandsUsesCacheWithinTTL() async {
+    func testFetchSlashCommandsDoesNotCacheFailures() async {
+        let service = makeService()
+        var requestCount = 0
+
+        service.requestTransportOverride = { _, _ in
+            requestCount += 1
+            throw CodexServiceError.disconnected
+        }
+
+        do {
+            _ = try await service.fetchSlashCommands(directory: "/tmp/failed-project")
+            XCTFail("Expected fetchSlashCommands to throw")
+        } catch {
+            XCTAssertEqual(requestCount, 1)
+        }
+
+        do {
+            _ = try await service.fetchSlashCommands(directory: "/tmp/failed-project")
+            XCTFail("Expected fetchSlashCommands to throw on retry")
+        } catch {
+            XCTAssertEqual(requestCount, 2)
+        }
+    }
+
+    func testFetchSlashCommandsUsesCacheWithinTTL() async throws {
         let service = makeService()
         var requestCount = 0
 
@@ -99,13 +124,13 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             )
         }
 
-        _ = await service.fetchSlashCommands(directory: "/tmp/project-a")
-        _ = await service.fetchSlashCommands(directory: "/tmp/project-a")
+        _ = try await service.fetchSlashCommands(directory: "/tmp/project-a")
+        _ = try await service.fetchSlashCommands(directory: "/tmp/project-a")
 
         XCTAssertEqual(requestCount, 1)
     }
 
-    func testInvalidateSlashCommandCacheForcesRefetch() async {
+    func testInvalidateSlashCommandCacheForcesRefetch() async throws {
         let service = makeService()
         var requestCount = 0
 
@@ -118,11 +143,148 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             )
         }
 
-        _ = await service.fetchSlashCommands(directory: "/tmp/project-b")
+        _ = try await service.fetchSlashCommands(directory: "/tmp/project-b")
         service.invalidateSlashCommandCache()
-        _ = await service.fetchSlashCommands(directory: "/tmp/project-b")
+        _ = try await service.fetchSlashCommands(directory: "/tmp/project-b")
 
         XCTAssertEqual(requestCount, 2)
+    }
+
+    func testBridgeSlashCommandLoadFailureShowsRetryInsteadOfEmptyHint() async {
+        let service = makeService()
+        service.requestTransportOverride = { _, _ in
+            throw CodexServiceError.disconnected
+        }
+        service.upsertThread(CodexThread(
+            id: "thread-slash-failure",
+            cwd: "/tmp/project-failure",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        ))
+
+        let viewModel = makeViewModel()
+        let thread = CodexThread(
+            id: "thread-slash-failure",
+            cwd: "/tmp/project-failure",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        )
+
+        viewModel.onInputChangedForSlashCommandAutocomplete(
+            "/",
+            codex: service,
+            thread: thread,
+            supportsSlashCommands: true,
+            activeTurnID: nil
+        )
+
+        for _ in 0..<50 {
+            if viewModel.bridgeSlashCommandsLoadError != nil || !viewModel.isLoadingBridgeSlashCommands {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTAssertEqual(viewModel.bridgeSlashCommandsLoadError, "Couldn't load commands. Tap to retry.")
+        XCTAssertFalse(viewModel.didLoadBridgeSlashCommandsSuccessfully)
+        XCTAssertFalse(viewModel.showsBridgeSlashCommandsEmptyHint)
+    }
+
+    func testDirectoryChangeDuringFetchUsesLatestDirectoryCommands() async throws {
+        let service = makeService()
+        let firstDirectoryReady = expectation(description: "first directory fetch started")
+        let releaseFirstDirectory = expectation(description: "release first directory fetch")
+        var firstFetchStarted = false
+
+        service.requestTransportOverride = { _, params in
+            let directory = params?.objectValue?["directory"]?.stringValue
+            if directory == "/tmp/project-first" {
+                if !firstFetchStarted {
+                    firstFetchStarted = true
+                    firstDirectoryReady.fulfill()
+                }
+                await fulfillment(of: [releaseFirstDirectory], timeout: 2.0)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "commands": .array([
+                            .object([
+                                "token": .string("/stale"),
+                                "title": .string("Stale"),
+                                "description": .string("Should not win"),
+                            ]),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            }
+
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "commands": .array([
+                        .object([
+                            "token": .string("/fresh"),
+                            "title": .string("Fresh"),
+                            "description": .string("Latest directory"),
+                        ]),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        service.upsertThread(CodexThread(
+            id: "thread-slash-race",
+            cwd: "/tmp/project-first",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        ))
+
+        let viewModel = makeViewModel()
+        let firstThread = CodexThread(
+            id: "thread-slash-race",
+            cwd: "/tmp/project-first",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        )
+        let secondThread = CodexThread(
+            id: "thread-slash-race",
+            cwd: "/tmp/project-second",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        )
+
+        viewModel.onInputChangedForSlashCommandAutocomplete(
+            "/",
+            codex: service,
+            thread: firstThread,
+            supportsSlashCommands: true,
+            activeTurnID: nil
+        )
+
+        await fulfillment(of: [firstDirectoryReady], timeout: 2.0)
+
+        viewModel.onInputChangedForSlashCommandAutocomplete(
+            "/",
+            codex: service,
+            thread: secondThread,
+            supportsSlashCommands: true,
+            activeTurnID: nil
+        )
+
+        releaseFirstDirectory.fulfill()
+
+        for _ in 0..<100 {
+            if viewModel.bridgeSlashCommands.map(\.token) == ["/fresh"] {
+                break
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTAssertEqual(viewModel.bridgeSlashCommands.map(\.token), ["/fresh"])
+        XCTAssertTrue(viewModel.didLoadBridgeSlashCommandsSuccessfully)
+        XCTAssertNil(viewModel.bridgeSlashCommandsLoadError)
     }
 
     func testBridgeSlashCommandFilteredMatchesTokenTitleAndDescription() {
@@ -191,5 +353,11 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
 
         Self.retainedServices.append(service)
         return service
+    }
+
+    private func makeViewModel() -> TurnViewModel {
+        let viewModel = TurnViewModel()
+        Self.retainedViewModels.append(viewModel)
+        return viewModel
     }
 }

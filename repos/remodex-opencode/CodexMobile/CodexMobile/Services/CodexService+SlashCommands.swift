@@ -15,8 +15,8 @@ private struct SlashCommandCacheEntry: Sendable {
 extension CodexService {
     static let slashCommandCacheTTL: TimeInterval = 60
 
-    // Loads slash commands for a project directory, using a short-lived per-directory cache.
-    func fetchSlashCommands(directory: String?) async -> [BridgeSlashCommand] {
+    // Loads slash commands for a project directory, using a short-lived per-directory cache on success only.
+    func fetchSlashCommands(directory: String?) async throws -> [BridgeSlashCommand] {
         let normalizedDirectory = Self.normalizedSlashCommandDirectory(directory)
         let cacheKey = normalizedDirectory ?? "__global__"
 
@@ -42,17 +42,18 @@ extension CodexService {
             return commands
         } catch {
             print("[CodexService] command/list failed for \(cacheKey): \(error.localizedDescription)")
-            slashCommandCacheByDirectory[cacheKey] = SlashCommandCacheEntry(
-                commands: [],
-                fetchedAt: Date(),
-                directory: cacheKey
-            )
-            return []
+            throw error
         }
     }
 
     func invalidateSlashCommandCache() {
         slashCommandCacheByDirectory.removeAll()
+    }
+
+    func invalidateSlashCommandCache(directory: String?) {
+        let normalizedDirectory = Self.normalizedSlashCommandDirectory(directory)
+        let cacheKey = normalizedDirectory ?? "__global__"
+        slashCommandCacheByDirectory.removeValue(forKey: cacheKey)
     }
 
     // Parses `result.commands` so tests can validate decoding without transport wiring.
