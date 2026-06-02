@@ -6,7 +6,7 @@
 
 import Foundation
 
-private struct SlashCommandCacheEntry: Sendable {
+struct SlashCommandCacheEntry: Sendable {
     let commands: [BridgeSlashCommand]
     let fetchedAt: Date
     let directory: String
@@ -74,10 +74,4 @@ extension CodexService {
         let trimmed = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
-}
-
-// MARK: - Cache storage (CodexService)
-
-extension CodexService {
-    @ObservationIgnored var slashCommandCacheByDirectory: [String: SlashCommandCacheEntry] = [:]
 }

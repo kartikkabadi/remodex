@@ -1,0 +1,5 @@
+# Agent artifacts (local only; never commit)
+.sisyphus/
+
+# Embedded local checkout (full tree on branch wip/local-2026-06-03)
+repos/remodex/

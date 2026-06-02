@@ -203,7 +203,7 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
                     firstFetchStarted = true
                     firstDirectoryReady.fulfill()
                 }
-                await fulfillment(of: [releaseFirstDirectory], timeout: 2.0)
+                await self.fulfillment(of: [releaseFirstDirectory], timeout: 2.0)
                 return RPCMessage(
                     id: .string(UUID().uuidString),
                     result: .object([

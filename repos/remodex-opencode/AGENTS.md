@@ -95,3 +95,5 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 | PR19a plugins | Done | `opencode-sdk.md` spike; no `plugin/list` |
 | PR19 plugin UI | Done | `@plugin` autocomplete gated for OpenCode |
 | PR20 slash | Done | `openCodeExcludedTokens`; `availableCommandsForProvider` test |
+
+**Device E2E prep:** Branch `wip/local-2026-06-03` holds local WIP (widgets, relay, iOS test edits, assets). **`main` must stay clean** at integration commits for Kartik device sign-off — see `docs/operations/device-e2e-opencode.md` pre-flight.

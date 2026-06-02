@@ -1,5 +1,38 @@
 # Device E2E — OpenCode parity sign-off
 
+## Pre-flight (automated)
+
+Before Kartik runs steps O0–O17 on device:
+
+| Check | Requirement |
+|-------|-------------|
+| Git `main` | Working tree **clean** at Phase 1/2 integration commits (no WIP on `main`). Local-only work lives on branch `wip/local-2026-06-03`. |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — all green |
+| Bridge coverage (optional) | `npm run test:coverage` |
+| iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` |
+
+**Environment (full checklist):**
+
+| Variable | When |
+|----------|------|
+| *(unset)* `REMODEX_DISABLE_OPENCODE` | Default — OpenCode enabled (step O1) |
+| `REMODEX_OPENCODE_HANDOFF=1` | Required on Mac for handoff rows O12–O14 and catalog promotion after PR8 device sign-off |
+| `REMODEX_DISABLE_OPENCODE=1` | Codex regression only (step O17) |
+
+**Start bridge (from remodex-opencode repo):**
+
+```bash
+cd repos/remodex-opencode
+./run-local-remodex.sh --hostname <LAN-IP>
+# or pairing helper if present in your checkout
+```
+
+Relay + bridge must stay up **≥10 min** (see [device-e2e-checklist.md](device-e2e-checklist.md)).
+
+**Parity matrix:** [release-compatibility.md](release-compatibility.md) — promote rows only after this checklist passes.
+
+---
+
 Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and PR7 (regression tests) are merged. Use it to promote OpenCode rows in [release-compatibility.md](release-compatibility.md) from `partial` / `simulator-only` to `enabled`.
 
 **Prerequisites:** Complete the transport and pairing steps in [device-e2e-checklist.md](device-e2e-checklist.md) (relay health, Forget + QR, `test-relay-handshake.js`).
