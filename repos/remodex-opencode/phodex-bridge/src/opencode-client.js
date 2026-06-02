@@ -197,6 +197,26 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     }
   }
 
+  async function selectTuiSession(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId || typeof client.tui?.selectSession !== "function") {
+      return false;
+    }
+
+    try {
+      await withTimeout(
+        client.tui.selectSession({ sessionID: normalizedSessionId }),
+        REQUEST_TIMEOUT_MS,
+      );
+      return true;
+    } catch (error) {
+      console.warn(
+        `${logPrefix} OpenCode tui.selectSession failed: ${error?.message || error}`,
+      );
+      return false;
+    }
+  }
+
   async function listSkills(directory) {
     if (typeof client.app?.skills !== "function") {
       return [];
@@ -230,6 +250,7 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     fork,
     listCommands,
     listSkills,
+    selectTuiSession,
   };
 }
 

@@ -791,6 +791,53 @@ function createOpenCodeProvider({
     return catalogUnavailable ? { ...catalogUnavailable } : null;
   }
 
+  async function getHandoffContext(threadId, { sessionId = "", directory = "" } = {}) {
+    const normalizedThreadId = readThreadId({ threadId });
+    if (!normalizedThreadId) {
+      throw threadNotFoundError(threadId);
+    }
+
+    const thread = await requireThread(normalizedThreadId);
+    const requestedSessionId = readString(sessionId);
+    const requestedDirectory = readString(directory);
+    if (requestedSessionId && requestedSessionId !== thread.sessionId) {
+      thread.sessionId = requestedSessionId;
+      persistSessionRecord(thread);
+    }
+    if (requestedDirectory && requestedDirectory !== thread.cwd) {
+      thread.cwd = requestedDirectory;
+      persistSessionRecord(thread);
+    }
+
+    if (!thread.sessionId) {
+      const expired = new Error("OpenCode session is missing for this thread.");
+      expired.errorCode = ERROR_CODES.OPENCODE_SESSION_EXPIRED.errorCode;
+      expired.action = ERROR_CODES.OPENCODE_SESSION_EXPIRED.action;
+      throw expired;
+    }
+
+    return {
+      threadId: thread.id,
+      sessionId: thread.sessionId,
+      cwd: thread.cwd,
+      model: thread.model,
+      agent: thread.agent,
+      title: thread.title,
+    };
+  }
+
+  async function selectTuiSession(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return false;
+    }
+    await ensureStarted();
+    if (!client || typeof client.selectTuiSession !== "function") {
+      return false;
+    }
+    return client.selectTuiSession(normalizedSessionId);
+  }
+
   return {
     id: OPENCODE_PROVIDER_ID,
     ownsThread,
@@ -804,6 +851,8 @@ function createOpenCodeProvider({
     warmup,
     shutdown,
     getCatalogAvailability,
+    getHandoffContext,
+    selectTuiSession,
   };
 }
 

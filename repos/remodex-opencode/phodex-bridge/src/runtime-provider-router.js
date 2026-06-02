@@ -21,6 +21,7 @@ const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
 const { START_TIMEOUT_MS, HEALTH_TIMEOUT_MS } = require("./opencode-server");
 const { CODEX_CAPABILITIES, OPENCODE_CAPABILITIES, resolveModelCapabilities } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
+const { continueOpenCodeHandoff } = require("./opencode-handoff");
 
 const PROVIDER_FIELD_KEYS = [
   "modelProvider",
@@ -157,6 +158,19 @@ function createRuntimeProviderRouter({
 
     if (method === "skills/list") {
       respondAsync(parsed, async () => mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest));
+      return true;
+    }
+
+    if (method === "desktop/continueOpenCode") {
+      respondAsync(parsed, async () =>
+        continueOpenCodeHandoff(parsed.params || {}, {
+          env: process.env,
+          platform: process.platform,
+          ownershipStore: threadOwnership,
+          opencodeProvider: runtimeProviders.find((provider) => provider.id === OPENCODE_PROVIDER_ID),
+          logPrefix,
+        }),
+      );
       return true;
     }
 
@@ -760,7 +774,12 @@ async function buildRuntimeCatalog(providers, env) {
   return { runtimes };
 }
 
+function handleContinueOpenCodeRequest(params, options = {}) {
+  return continueOpenCodeHandoff(params, options);
+}
+
 module.exports = {
+  handleContinueOpenCodeRequest,
   buildCatalogOpenCodeRuntime,
   readOpenCodeCatalogAvailability,
   buildCatalogOpenCodePlaceholderModels,

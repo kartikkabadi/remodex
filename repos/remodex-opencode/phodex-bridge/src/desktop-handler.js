@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { promisify } = require("util");
 const { findRolloutFileForThread, resolveSessionsRoot } = require("./rollout-watch");
+const { handleContinueOpenCodeRequest } = require("./runtime-provider-router");
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BUNDLE_ID = "com.openai.codex";
@@ -121,6 +122,16 @@ async function handleDesktopMethod(method, params, options = {}) {
         relaunchWaitMs,
         threadMaterializeWaitMs,
         threadMaterializePollMs,
+      });
+    case "desktop/continueOpenCode":
+      return handleContinueOpenCodeRequest(params, {
+        env,
+        platform,
+        ownershipStore: options.ownershipStore,
+        opencodeProvider: options.opencodeProvider,
+        executor,
+        fsModule,
+        logPrefix: options.logPrefix,
       });
     case "desktop/wakeDisplay":
       return wakeDisplay({

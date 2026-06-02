@@ -597,6 +597,11 @@ function startBridge({
         readBridgePreferences,
         updateBridgePreferences,
         updateBridgePackageAndRestart,
+        ownershipStore,
+        opencodeProvider: runtimeProviderRouter.providers.find(
+          (provider) => provider.id === "opencode",
+        ),
+        logPrefix: "[remodex:opencode]",
       })
     ) {
       return;
