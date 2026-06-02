@@ -266,6 +266,30 @@ async function createOpenCodeClient({
     }
   }
 
+  async function probeProviderAuthState() {
+    try {
+      const response = await withTimeout(client.provider.auth(), REQUEST_TIMEOUT_MS);
+      return inferAuthConfiguredFromProviderAuth(response);
+    } catch (error) {
+      console.warn(`${logPrefix} OpenCode provider.auth() failed: ${error.message}`);
+      return null;
+    }
+  }
+
+  async function probeConnectedProviders() {
+    try {
+      const response = await withTimeout(client.provider.list(), REQUEST_TIMEOUT_MS);
+      const payload = resolveProviderListPayload(response);
+      const connected = Array.isArray(payload?.connected) ? payload.connected : [];
+      if (connected.length === 0) {
+        return false;
+      }
+      return true;
+    } catch {
+      return null;
+    }
+  }
+
   return {
     listModels,
     listAgents,
@@ -283,7 +307,20 @@ async function createOpenCodeClient({
     listCommands,
     listSkills,
     selectTuiSession,
+    probeProviderAuthState,
+    probeConnectedProviders,
   };
+}
+
+function inferAuthConfiguredFromProviderAuth(response) {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+  const entries = Object.entries(response).filter(([key]) => key !== "data");
+  if (entries.length === 0) {
+    return null;
+  }
+  return entries.some(([, methods]) => Array.isArray(methods) && methods.length > 0);
 }
 
 function resolveSkillsList(response) {
@@ -320,9 +357,35 @@ function mapOpenCodeSkill(skill, directory) {
   };
 }
 
+function normalizeOpenCodeEventType(type) {
+  const normalized = readString(type);
+  if (!normalized) {
+    return "";
+  }
+  return normalized.endsWith(".1") ? normalized.slice(0, -2) : normalized;
+}
+
+function readOpenCodeEventProperties(event) {
+  if (event?.properties && typeof event.properties === "object" && !Array.isArray(event.properties)) {
+    return event.properties;
+  }
+  return event || {};
+}
+
+function openCodeToolContentText(content) {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => readString(part?.text))
+    .filter(Boolean)
+    .join("\n");
+}
+
 function dispatchEvent(event, handler) {
-  const type = readString(event?.type);
+  const type = normalizeOpenCodeEventType(event?.type);
   if (!type) return;
+  const properties = readOpenCodeEventProperties(event);
 
   switch (type) {
     case "turn.started":
@@ -498,15 +561,149 @@ function dispatchEvent(event, handler) {
       break;
 
     case "session.status": {
-      const status = readString(event.status || event.properties?.status);
+      const status = readString(properties.status || event.status);
       if (status) {
         handler("runtime/warning", {
-          sessionId: readString(event.sessionID || event.sessionId),
-          turnId: readString(event.turnID || event.turnId),
+          sessionId: readString(properties.sessionID || properties.sessionId || event.sessionID),
+          turnId: readString(properties.turnID || properties.turnId || event.turnID),
           message: `OpenCode session status: ${status}`,
           reasonCode: "opencode_session_status",
         });
       }
+      break;
+    }
+
+    case "session.next.text.delta": {
+      const delta = readString(properties.delta);
+      if (!delta) {
+        break;
+      }
+      const sessionId = readString(properties.sessionID || properties.sessionId);
+      const itemId =
+        readString(properties.partID || properties.partId) ||
+        `oc-text-${sessionId || "session"}-${Date.now()}`;
+      handler("item/agentMessage/delta", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId,
+        delta,
+        textDelta: delta,
+        assistantPhase: "final",
+        sessionId,
+      });
+      break;
+    }
+
+    case "session.next.text.ended": {
+      const text = readString(properties.text);
+      const sessionId = readString(properties.sessionID || properties.sessionId);
+      const itemId =
+        readString(properties.partID || properties.partId) ||
+        `oc-text-${sessionId || "session"}-${Date.now()}`;
+      if (text) {
+        handler("item/agentMessage/delta", {
+          turnId: readString(properties.turnID || properties.turnId || event.turnID),
+          itemId,
+          delta: text,
+          textDelta: text,
+          assistantPhase: "final",
+          sessionId,
+        });
+      }
+      handler("item/completed", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId,
+        message: text,
+        assistantPhase: "final_answer",
+        sessionId,
+      });
+      break;
+    }
+
+    case "session.next.reasoning.delta": {
+      const delta = readString(properties.delta);
+      if (!delta) {
+        break;
+      }
+      handler("item/reasoning/textDelta", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId: readString(properties.reasoningID || properties.reasoningId) || `reasoning-${Date.now()}`,
+        delta,
+        textDelta: delta,
+        sessionId: readString(properties.sessionID || properties.sessionId),
+      });
+      break;
+    }
+
+    case "session.next.reasoning.ended": {
+      const reasoningText = readString(properties.text);
+      handler("item/completed", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId: readString(properties.reasoningID || properties.reasoningId) || `reasoning-${Date.now()}`,
+        message: reasoningText,
+        assistantPhase: "reasoning",
+        sessionId: readString(properties.sessionID || properties.sessionId),
+      });
+      break;
+    }
+
+    case "session.next.tool.called": {
+      const toolName = readString(properties.tool || properties.name);
+      const callId = readString(properties.callID || properties.callId) || `tool-${Date.now()}`;
+      handler("item/toolCall", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId: callId,
+        toolName,
+        args: properties.input || properties.args || {},
+        status: "running",
+        sessionId: readString(properties.sessionID || properties.sessionId),
+      });
+      break;
+    }
+
+    case "session.next.tool.progress":
+    case "session.next.tool.success": {
+      const callId = readString(properties.callID || properties.callId);
+      const output = openCodeToolContentText(properties.content);
+      const status = type === "session.next.tool.success" ? "completed" : "running";
+      handler("item/toolCallUpdate", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId: callId || `tool-${Date.now()}`,
+        output,
+        status,
+        sessionId: readString(properties.sessionID || properties.sessionId),
+      });
+      if (type === "session.next.tool.success") {
+        handler("item/completed", {
+          turnId: readString(properties.turnID || properties.turnId || event.turnID),
+          itemId: callId,
+          status: "completed",
+          sessionId: readString(properties.sessionID || properties.sessionId),
+        });
+      }
+      break;
+    }
+
+    case "session.next.tool.failed": {
+      const callId = readString(properties.callID || properties.callId);
+      const errMsg = readString(properties.error?.message || properties.message) || "Tool failed";
+      handler("item/toolCallUpdate", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        itemId: callId || `tool-${Date.now()}`,
+        output: errMsg,
+        status: "failed",
+        sessionId: readString(properties.sessionID || properties.sessionId),
+      });
+      break;
+    }
+
+    case "session.next.step.failed": {
+      const errMsg =
+        readString(properties.error?.message || properties.message) || "OpenCode step failed";
+      handler("turn/failed", {
+        turnId: readString(properties.turnID || properties.turnId || event.turnID),
+        sessionId: readString(properties.sessionID || properties.sessionId),
+        message: errMsg,
+      });
       break;
     }
 
@@ -631,7 +828,9 @@ function withTimeout(promise, ms) {
 
 module.exports = {
   createOpenCodeClient,
+  dispatchEvent,
   flattenProviderModels,
   buildModelFromAny,
   resolveAgentsList,
+  normalizeOpenCodeEventType,
 };

@@ -357,6 +357,42 @@ test("threadFork on unknown thread returns error", async () => {
   );
 });
 
+test("duplicate turn/completed from session.idle is ignored after first completion", async () => {
+  const emitted = [];
+  const provider = makeProvider({
+    send: (raw) => {
+      const message = JSON.parse(raw);
+      emitted.push(message.method);
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler) => {
+        setImmediate(() => {
+          handler("turn/completed", { status: "completed" });
+          handler("turn/completed", { status: "completed" });
+        });
+        return () => {};
+      },
+    }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "Idle dedupe" },
+  });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello" },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  const completed = emitted.filter((method) => method === "turn/completed");
+  assert.equal(completed.length, 1);
+});
+
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({

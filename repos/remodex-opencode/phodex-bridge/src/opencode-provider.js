@@ -78,10 +78,12 @@ function createOpenCodeProvider({
   let lastActivityAt = 0;
   let idleTimer = null;
   let catalogUnavailable = null;
+  let cachedAuthConfigured = null;
 
   const threads = new Map();
   const activeTurns = new Map();
   const eventUnsubscribers = new Map();
+  const completedTurnIds = new Set();
 
   async function ensureStarted() {
     if (healthy && client) return;
@@ -91,6 +93,7 @@ function createOpenCodeProvider({
         ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
         : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
       healthy = true;
+      await refreshAuthConfigured();
       await restoreSessions();
       return;
     }
@@ -157,9 +160,33 @@ function createOpenCodeProvider({
       ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
       : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
     healthy = true;
+    await refreshAuthConfigured();
     await restoreSessions();
 
     resetIdleTimer();
+  }
+
+  async function refreshAuthConfigured() {
+    if (!client) {
+      cachedAuthConfigured = null;
+      return;
+    }
+    if (typeof client.probeConnectedProviders === "function") {
+      const connected = await client.probeConnectedProviders();
+      if (connected === true) {
+        cachedAuthConfigured = true;
+        return;
+      }
+      if (connected === false) {
+        cachedAuthConfigured = false;
+      }
+    }
+    if (typeof client.probeProviderAuthState === "function") {
+      const fromAuth = await client.probeProviderAuthState();
+      if (fromAuth !== null) {
+        cachedAuthConfigured = fromAuth;
+      }
+    }
   }
 
   function persistSessionRecord(thread) {
@@ -548,6 +575,12 @@ function createOpenCodeProvider({
 
       const unsubscribe = client.subscribeToEvents((method, params) => {
         if (active.completed) return;
+
+        const eventTurnId = readString(params.turnId || params.turnID);
+        if (method === "turn/completed" && completedTurnIds.has(active.turn.id)) {
+          return;
+        }
+
         const enriched = {
           ...params,
           threadId: active.thread.id,
@@ -562,7 +595,11 @@ function createOpenCodeProvider({
         }
 
         if (method === "turn/completed") {
+          if (eventTurnId && eventTurnId !== active.turn.id) {
+            return;
+          }
           completeTurn({ status: readString(params.status) || "completed", active });
+          return;
         }
 
         emit(method, enriched);
@@ -590,8 +627,9 @@ function createOpenCodeProvider({
 
   function completeTurn({ errorMessage = "", errorCode = "", action = "", status, active }) {
     const turnId = active.turn.id;
-    if (active.completed) return false;
+    if (active.completed || completedTurnIds.has(turnId)) return false;
     active.completed = true;
+    completedTurnIds.add(turnId);
 
     const unsubscribe = eventUnsubscribers.get(turnId);
     if (unsubscribe) {
@@ -770,6 +808,7 @@ function createOpenCodeProvider({
 
   async function restoreSessions() {
     activeTurns.clear();
+    completedTurnIds.clear();
     for (const [threadId, entry] of sessions.entries()) {
       const sessionId =
         typeof entry === "string" ? entry : readString(entry?.sessionId);
@@ -836,6 +875,7 @@ function createOpenCodeProvider({
       lastError: readString(availability?.unavailableReason),
       command: readString(env.REMODEX_OPENCODE_COMMAND) || "opencode",
       handoffEnvEnabled: isOpenCodeHandoffEnabled(env),
+      authConfigured: cachedAuthConfigured,
     });
   }
 

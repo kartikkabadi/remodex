@@ -8,6 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   createOpenCodeClient,
+  dispatchEvent,
   flattenProviderModels,
   resolveAgentsList,
 } = require("../src/opencode-client");
@@ -215,4 +216,84 @@ test("listCommands API surface is exposed", async () => {
   const commands = await client.listCommands("/tmp/project");
   assert.equal(commands.length, 1);
   assert.equal(commands[0].token, "/compact");
+});
+
+test("dispatchEvent maps session.next.text.delta to agent message delta", () => {
+  const events = [];
+  dispatchEvent(
+    {
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "ses-1",
+        delta: "Hello ",
+      },
+    },
+    (method, payload) => events.push([method, payload]),
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0][0], "item/agentMessage/delta");
+  assert.equal(events[0][1].delta, "Hello");
+  assert.equal(events[0][1].textDelta, "Hello");
+});
+
+test("dispatchEvent maps session.next.text.delta.1 suffix events", () => {
+  const events = [];
+  dispatchEvent(
+    {
+      type: "session.next.text.delta.1",
+      properties: { sessionID: "ses-1", delta: "partial" },
+    },
+    (method) => events.push(method),
+  );
+  assert.deepEqual(events, ["item/agentMessage/delta"]);
+});
+
+test("dispatchEvent maps session.next.tool.called and tool.success", () => {
+  const events = [];
+  dispatchEvent(
+    {
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: "ses-1",
+        callID: "call-1",
+        tool: "bash",
+        input: { command: "ls" },
+      },
+    },
+    (method, payload) => events.push([method, payload]),
+  );
+  dispatchEvent(
+    {
+      type: "session.next.tool.success",
+      properties: {
+        sessionID: "ses-1",
+        callID: "call-1",
+        content: [{ type: "text", text: "done" }],
+      },
+    },
+    (method, payload) => events.push([method, payload]),
+  );
+
+  assert.equal(events[0][0], "item/toolCall");
+  assert.equal(events[0][1].toolName, "bash");
+  assert.equal(events[1][0], "item/toolCallUpdate");
+  assert.equal(events[1][1].status, "completed");
+  assert.equal(events[2][0], "item/completed");
+});
+
+test("dispatchEvent maps session.next.reasoning.delta", () => {
+  const events = [];
+  dispatchEvent(
+    {
+      type: "session.next.reasoning.delta",
+      properties: {
+        sessionID: "ses-1",
+        reasoningID: "reason-1",
+        delta: "thinking",
+      },
+    },
+    (method) => events.push(method),
+  );
+  assert.deepEqual(events, ["item/reasoning/textDelta"]);
 });
