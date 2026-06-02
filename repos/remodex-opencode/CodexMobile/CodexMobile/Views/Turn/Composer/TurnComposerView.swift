@@ -92,10 +92,11 @@ struct TurnComposerView: View {
     let onSelectFileAutocomplete: (CodexFuzzyFileMatch) -> Void
     let onSelectSkillAutocomplete: (CodexSkillMetadata) -> Void
     let onSelectPluginAutocomplete: (CodexPluginMetadata) -> Void
-    let onSelectSlashCommand: (TurnComposerSlashCommand) -> Void
+    let onSelectSlashCommand: (TurnComposerSlashCommandItem) -> Void
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
+    let onRetryBridgeSlashCommands: () -> Void
     let onRemoveMentionedFile: (String) -> Void
     let onRemoveMentionedSkill: (String) -> Void
     let onRemoveMentionedPlugin: (String) -> Void
@@ -110,6 +111,9 @@ struct TurnComposerView: View {
     // Call sites can hide the project git/runtime row above the input for
     // constrained surfaces; access and usage always live in the bottom bar.
     var showsSecondaryBar: Bool = true
+    var showsComposerDesktopHandoff: Bool = false
+    var isDesktopHandoffLoading: Bool = false
+    var onContinueOnDesktop: (() -> Void)?
 
     @State private var composerInputHeight: CGFloat = 32
 
@@ -152,7 +156,10 @@ struct TurnComposerView: View {
                         onSelectGitBaseBranch: onSelectGitBaseBranch,
                         onRefreshGitBranches: onRefreshGitBranches,
                         canHandOffToWorktree: canHandOffToWorktree,
-                        onTapCreateWorktree: onTapCreateWorktree
+                        onTapCreateWorktree: onTapCreateWorktree,
+                        showsComposerDesktopHandoff: showsComposerDesktopHandoff,
+                        isDesktopHandoffLoading: isDesktopHandoffLoading,
+                        onContinueOnDesktop: onContinueOnDesktop
                     )
                 }
 
@@ -273,7 +280,8 @@ struct TurnComposerView: View {
                                 onSelectSlashCommand: onSelectSlashCommand,
                                 onSelectCodeReviewTarget: onSelectCodeReviewTarget,
                                 onSelectForkDestination: onSelectForkDestination,
-                                onCloseSlashCommandPanel: onCloseSlashCommandPanel
+                                onCloseSlashCommandPanel: onCloseSlashCommandPanel,
+                                onRetryBridgeSlashCommands: onRetryBridgeSlashCommands
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -299,10 +307,11 @@ private struct TurnComposerAutocompletePanels: View {
     let onSelectFileAutocomplete: (CodexFuzzyFileMatch) -> Void
     let onSelectSkillAutocomplete: (CodexSkillMetadata) -> Void
     let onSelectPluginAutocomplete: (CodexPluginMetadata) -> Void
-    let onSelectSlashCommand: (TurnComposerSlashCommand) -> Void
+    let onSelectSlashCommand: (TurnComposerSlashCommandItem) -> Void
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
+    let onRetryBridgeSlashCommands: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -366,6 +375,11 @@ private struct TurnComposerAutocompletePanels: View {
                     state: state.slashCommandPanelState,
                     availableCommands: state.availableSlashCommands,
                     supportsSlashCommands: state.supportsSlashCommands,
+                    usesBridgeSlashCommands: state.usesBridgeSlashCommands,
+                    isLoadingBridgeSlashCommands: state.isLoadingBridgeSlashCommands,
+                    showsBridgeSlashCommandsEmptyHint: state.showsBridgeSlashCommandsEmptyHint,
+                    bridgeSlashCommandsLoadError: state.bridgeSlashCommandsLoadError,
+                    onRetryBridgeSlashCommands: onRetryBridgeSlashCommands,
                     supportsThreadFork: state.supportsThreadFork,
                     hasComposerContentConflictingWithReview: state.hasComposerContentConflictingWithReview,
                     isThreadRunning: state.isThreadRunning,
@@ -652,8 +666,12 @@ private struct ComposerPreviewContent: View {
                 voiceRecordingDuration: 0
             ),
             autocompleteState: TurnComposerAutocompleteState(
-                availableSlashCommands: TurnComposerSlashCommand.allCommands,
+                availableSlashCommands: TurnComposerSlashCommand.allCommands.map { .codex($0) },
                 supportsSlashCommands: true,
+                usesBridgeSlashCommands: false,
+                isLoadingBridgeSlashCommands: false,
+                showsBridgeSlashCommandsEmptyHint: false,
+                bridgeSlashCommandsLoadError: nil,
                 supportsThreadFork: true,
                 supportsSkillAutocomplete: true,
                 fileAutocompleteItems: [],
@@ -776,6 +794,7 @@ private struct ComposerPreviewContent: View {
             onSelectCodeReviewTarget: { _ in },
             onSelectForkDestination: { _ in },
             onCloseSlashCommandPanel: {},
+            onRetryBridgeSlashCommands: {},
             onRemoveMentionedFile: { _ in },
             onRemoveMentionedSkill: { _ in },
             onRemoveMentionedPlugin: { _ in },

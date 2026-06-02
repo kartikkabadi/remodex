@@ -8,8 +8,13 @@ import SwiftUI
 
 struct SlashCommandAutocompletePanel: View {
     let state: TurnComposerSlashCommandPanelState
-    let availableCommands: [TurnComposerSlashCommand]
+    let availableCommands: [TurnComposerSlashCommandItem]
     let supportsSlashCommands: Bool
+    let usesBridgeSlashCommands: Bool
+    let isLoadingBridgeSlashCommands: Bool
+    let showsBridgeSlashCommandsEmptyHint: Bool
+    let bridgeSlashCommandsLoadError: String?
+    let onRetryBridgeSlashCommands: () -> Void
     let supportsThreadFork: Bool
     let hasComposerContentConflictingWithReview: Bool
     let isThreadRunning: Bool
@@ -18,7 +23,7 @@ struct SlashCommandAutocompletePanel: View {
     let availableGitBranchTargets: [String]
     let selectedGitBaseBranch: String
     let gitDefaultBranch: String
-    let onSelectCommand: (TurnComposerSlashCommand) -> Void
+    let onSelectCommand: (TurnComposerSlashCommandItem) -> Void
     let onSelectReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onClose: () -> Void
@@ -55,7 +60,7 @@ struct SlashCommandAutocompletePanel: View {
 
     @ViewBuilder
     private func commandList(query: String) -> some View {
-        let items = TurnComposerSlashCommand.filtered(matching: query, within: availableCommands)
+        let items = TurnComposerSlashCommandItem.filtered(matching: query, within: availableCommands)
 
         VStack(alignment: .leading, spacing: 0) {
             if !supportsSlashCommands {
@@ -71,12 +76,34 @@ struct SlashCommandAutocompletePanel: View {
                 .padding(.vertical, 8)
             }
 
-            if items.isEmpty {
-                Text("No commands for /\(query)")
-                    .font(AppFont.footnote())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+            if isLoadingBridgeSlashCommands {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading commands…")
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            } else if items.isEmpty {
+                if usesBridgeSlashCommands,
+                   let bridgeSlashCommandsLoadError,
+                   query.isEmpty {
+                    bridgeSlashCommandsFailureView(message: bridgeSlashCommandsLoadError)
+                } else if showsBridgeSlashCommandsEmptyHint, query.isEmpty {
+                    Text("No commands for this project")
+                        .font(AppFont.footnote())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                } else {
+                    Text("No commands for /\(query)")
+                        .font(AppFont.footnote())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                }
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -127,6 +154,30 @@ struct SlashCommandAutocompletePanel: View {
                 .frame(height: Self.visibleListHeight(for: items.count))
             }
         }
+    }
+
+    private func bridgeSlashCommandsFailureView(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(AppFont.caption2())
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                onRetryBridgeSlashCommands()
+            } label: {
+                Text("Retry")
+                    .font(AppFont.subheadline(weight: .semibold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private var reviewTargetList: some View {
@@ -251,13 +302,21 @@ struct SlashCommandAutocompletePanel: View {
     }
 
     @ViewBuilder
-    private func commandIcon(for command: TurnComposerSlashCommand, isEnabled: Bool) -> some View {
-        if command == .fork {
-            RemodexIcon.image(systemName: "remodex.git-branch", size: 16)
-                .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
-                .frame(width: 22)
-        } else {
-            RemodexIcon.image(systemName: command.symbolName)
+    private func commandIcon(for command: TurnComposerSlashCommandItem, isEnabled: Bool) -> some View {
+        switch command {
+        case .codex(let codexCommand):
+            if codexCommand == .fork {
+                RemodexIcon.image(systemName: "remodex.git-branch", size: 16)
+                    .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                    .frame(width: 22)
+            } else {
+                RemodexIcon.image(systemName: codexCommand.symbolName)
+                    .font(AppFont.system(size: 15, weight: .semibold))
+                    .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                    .frame(width: 22)
+            }
+        case .bridge:
+            RemodexIcon.image(systemName: "terminal")
                 .font(AppFont.system(size: 15, weight: .semibold))
                 .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
                 .frame(width: 22)
@@ -311,37 +370,47 @@ struct SlashCommandAutocompletePanel: View {
         return "Pick a base branch first"
     }
 
-    private func isCommandEnabled(_ command: TurnComposerSlashCommand) -> Bool {
+    private func isCommandEnabled(_ command: TurnComposerSlashCommandItem) -> Bool {
         switch command {
-        case .codeReview:
-            return !hasComposerContentConflictingWithReview
-        case .compact:
-            return !isThreadRunning
-        case .feedback:
+        case .bridge:
             return true
-        case .fork:
-            return supportsThreadFork && !isThreadRunning
-        case .status:
-            return true
-        case .subagents:
-            return true
+        case .codex(let codexCommand):
+            switch codexCommand {
+            case .codeReview:
+                return !hasComposerContentConflictingWithReview
+            case .compact:
+                return !isThreadRunning
+            case .feedback:
+                return true
+            case .fork:
+                return supportsThreadFork && !isThreadRunning
+            case .status:
+                return true
+            case .subagents:
+                return true
+            }
         }
     }
 
-    private func commandSubtitle(for command: TurnComposerSlashCommand) -> String {
-        if command == .fork, !supportsThreadFork {
-            return "Fork not supported by this runtime"
-        }
+    private func commandSubtitle(for command: TurnComposerSlashCommandItem) -> String {
+        switch command {
+        case .bridge(let bridgeCommand):
+            return bridgeCommand.description
+        case .codex(let codexCommand):
+            if codexCommand == .fork, !supportsThreadFork {
+                return "Fork not supported by this runtime"
+            }
 
-        if (command == .compact || command == .fork), isThreadRunning {
-            return "Wait for the current response to finish first"
-        }
+            if (codexCommand == .compact || codexCommand == .fork), isThreadRunning {
+                return "Wait for the current response to finish first"
+            }
 
-        guard isCommandEnabled(command) else {
-            return "Clear draft text, files, skills, and images first"
-        }
+            guard isCommandEnabled(command) else {
+                return "Clear draft text, files, skills, and images first"
+            }
 
-        return command.subtitle
+            return codexCommand.subtitle
+        }
     }
 
     private func submenuHeader(

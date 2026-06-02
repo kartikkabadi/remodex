@@ -7,8 +7,12 @@
 import SwiftUI
 
 struct TurnComposerAutocompleteState {
-    let availableSlashCommands: [TurnComposerSlashCommand]
+    let availableSlashCommands: [TurnComposerSlashCommandItem]
     let supportsSlashCommands: Bool
+    let usesBridgeSlashCommands: Bool
+    let isLoadingBridgeSlashCommands: Bool
+    let showsBridgeSlashCommandsEmptyHint: Bool
+    let bridgeSlashCommandsLoadError: String?
     let supportsThreadFork: Bool
     let supportsSkillAutocomplete: Bool
     let fileAutocompleteItems: [CodexFuzzyFileMatch]

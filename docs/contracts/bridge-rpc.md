@@ -63,7 +63,7 @@ All fields optional. Omit for first page.
         "supportsFastMode": false,
         "supportsPlanMode": false,
         "supportsVoice": false,
-        "supportsDesktopHandoff": false,
+        "supportsDesktopHandoff": true,
         "supportsWorktree": false,
         "supportsFork": true,
         "supportsApprovals": true,
@@ -295,6 +295,7 @@ All fields optional. Omit for first page.
         "supportsSlashCommands": true,
         "supportsMCP": true,
         "supportsSkillAutocomplete": true,
+        "supportsStructuredSkillInput": true,
         "supportsSteer": true,
         "supportsQueue": true
       }
@@ -316,7 +317,7 @@ All fields optional. Omit for first page.
         "supportsFastMode": false,
         "supportsPlanMode": false,
         "supportsVoice": false,
-        "supportsDesktopHandoff": false,
+        "supportsDesktopHandoff": true,
         "supportsWorktree": false,
         "supportsFork": true,
         "supportsApprovals": true,
@@ -324,6 +325,7 @@ All fields optional. Omit for first page.
         "supportsSlashCommands": true,
         "supportsMCP": true,
         "supportsSkillAutocomplete": true,
+        "supportsStructuredSkillInput": true,
         "supportsSteer": false,
         "supportsQueue": true
       }
@@ -392,6 +394,10 @@ Optional project directory for slash-command discovery. `directory` is preferred
 **Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
 
 **Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+
+**OpenCode-only notes:** When `REMODEX_ENABLE_OPENCODE` is set and the OpenCode provider is registered, `listOpenCodeSkillsBuckets` calls `opencodeProvider.listSkills(cwd)` per requested cwd (defaulting to `process.cwd()` when none are supplied). SDK failures return empty buckets with a bridge warning; Codex buckets are still returned.
+
+**Structured turn input (OpenCode `turn/start`):** iOS may send `input` items with `type: "skill"` (`id`, optional `name`, optional `path`) when `supportsStructuredSkillInput` is true on `runtime/catalog`. The bridge maps each skill to an OpenCode `session.prompt` **file** part (`mime: text/markdown`, `url: file://…`, `filename: name`) when `path` is present, or a **text** part (`$skillName`) when only the name/id is known. User text and `@mention` items are mapped to text/file parts respectively. This is separate from `supportsSkillAutocomplete` (composer `$` autocomplete only).
 
 ### thread/fork
 
@@ -462,6 +468,7 @@ These methods are handled by bridge.js handlers and never reach any agent:
 | `project/directory` | `project-handler.js` | Browse directories |
 | `pet/list` | `pet-handler.js` | List Codex pets |
 | `desktop/continueOnMac` | `desktop-handler.js` | Hand off to Codex.app |
+| `desktop/continueOpenCode` | `desktop-handler.js` | Hand off OpenCode-owned thread to Mac (TUI + optional desktop app) |
 | `desktop/wakeDisplay` | `desktop-handler.js` | Wake Mac display |
 | `desktop/preferences/read` | `desktop-handler.js` | Read bridge prefs |
 | `voice/transcribe` | `voice-handler.js` | Transcribe audio |
@@ -509,6 +516,58 @@ Every error across all methods uses this shape:
 | `bridge_update_failed` | Bridge self-update failed | Show error with suggested manual command |
 | `auth_status_failed` | Account status read failed | Show degraded state |
 
+### desktop/continueOpenCode
+
+**Routing:** `bridge-local` — `desktop-handler.js` delegates to `opencode-handoff.js`. macOS only.
+
+**Env gate:** Requires `REMODEX_OPENCODE_HANDOFF=1` (or `true`). When unset/`0`/`false`, returns `opencode_handoff_disabled` with no success payload.
+
+**Params:**
+```json
+{
+  "threadId": "opencode-thread-1717000000-a1b2c3",
+  "sessionId": "ses_abc123",
+  "directory": "/path/to/project",
+  "preferDesktopApp": true
+}
+```
+
+**Result:**
+```json
+{
+  "success": true,
+  "threadId": "opencode-thread-1717000000-a1b2c3",
+  "sessionId": "ses_abc123",
+  "cwd": "/path/to/project",
+  "model": "anthropic/claude-sonnet-4-5",
+  "agent": "build",
+  "title": "Mobile thread",
+  "handoffMode": "tui",
+  "sessionSelected": true,
+  "desktopAppInstalled": true,
+  "instructions": "Session selected in OpenCode TUI. Run `opencode` in Terminal if needed."
+}
+```
+
+| `handoffMode` | Meaning |
+|---------------|---------|
+| `tui` | `tui.selectSession` succeeded |
+| `desktop_app` | Desktop app launched; `sessionSelected` may be `false` when no deep link |
+| `tui_only` | No desktop app; CLI/TUI instructions only |
+
+**Errors:**
+
+| errorCode | When |
+|-----------|------|
+| `opencode_handoff_disabled` | `REMODEX_OPENCODE_HANDOFF` not enabled |
+| `wrong_provider` | Thread not owned by `opencode` |
+| `missing_thread_id` | `threadId` omitted or empty |
+| `thread_not_found` | Unknown thread or rehydrate failed |
+| `invalid_thread_id` | Fails desktop thread id pattern |
+| `opencode_session_expired` | Missing or stale `sessionId` |
+| `opencode_server_unreachable` | OpenCode provider unavailable |
+| `unsupported_platform` | Non-macOS bridge |
+
 ## OpenCode Threads — Desktop/Phone Split
 
 OpenCode threads do NOT participate in Codex desktop features:
@@ -516,4 +575,4 @@ OpenCode threads do NOT participate in Codex desktop features:
 - `desktop-ipc-action-follower` skips OpenCode threads
 - JSONL rollout mirroring skips OpenCode threads
 - `DesktopHandoffService` shows "Hand off unavailable for OpenCode threads"
-- `desktop/continueOnMac` returns error for OpenCode threads
+- `desktop/continueOnMac` returns error for OpenCode threads (use `desktop/continueOpenCode` instead)

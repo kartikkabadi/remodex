@@ -69,12 +69,28 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function prompt({ sessionID, prompt, cwd }) {
+  async function prompt({ sessionID, prompt, parts, cwd }) {
+    const resolvedParts =
+      Array.isArray(parts) && parts.length > 0
+        ? parts
+        : [{ type: "text", text: readString(prompt) || "" }];
+    const bodyParts = resolvedParts.filter(
+      (part) =>
+        part &&
+        (part.type === "file" ||
+          part.type === "agent" ||
+          part.type === "subtask" ||
+          readString(part.text)),
+    );
+    if (bodyParts.length === 0) {
+      throw new Error("OpenCode prompt requires at least one part.");
+    }
+
     return withTimeout(
       client.session.prompt({
         sessionID,
-        prompt,
-        cwd,
+        directory: readString(cwd) || process.cwd(),
+        parts: bodyParts,
       }),
       REQUEST_TIMEOUT_MS,
     );
@@ -181,6 +197,26 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     }
   }
 
+  async function selectTuiSession(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId || typeof client.tui?.selectSession !== "function") {
+      return false;
+    }
+
+    try {
+      await withTimeout(
+        client.tui.selectSession({ sessionID: normalizedSessionId }),
+        REQUEST_TIMEOUT_MS,
+      );
+      return true;
+    } catch (error) {
+      console.warn(
+        `${logPrefix} OpenCode tui.selectSession failed: ${error?.message || error}`,
+      );
+      return false;
+    }
+  }
+
   async function listSkills(directory) {
     if (typeof client.app?.skills !== "function") {
       return [];
@@ -214,6 +250,7 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     fork,
     listCommands,
     listSkills,
+    selectTuiSession,
   };
 }
 

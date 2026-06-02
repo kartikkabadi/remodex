@@ -98,6 +98,7 @@ test("provider has expected API surface", () => {
   assert.equal(typeof provider.listThreads, "function");
   assert.equal(typeof provider.handleRequest, "function");
   assert.equal(typeof provider.shutdown, "function");
+  assert.equal(typeof provider.getHandoffContext, "function");
 });
 
 test("ownsThread returns false for unknown thread", () => {
@@ -343,4 +344,26 @@ test("threadFork on unknown thread returns error", async () => {
       }),
     { errorCode: "thread_not_found" },
   );
+});
+
+test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
+  const provider = makeProvider();
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: {
+      title: "Handoff test",
+      cwd: "/tmp/owned-project",
+      sessionId: "ses_owned",
+    },
+  });
+
+  const context = await provider.getHandoffContext(start.thread.id, {
+    sessionId: "ses_untrusted",
+    directory: "/tmp/evil-path",
+  });
+
+  assert.equal(context.threadId, start.thread.id);
+  assert.equal(context.sessionId, "ses_owned");
+  assert.equal(context.cwd, "/tmp/owned-project");
 });

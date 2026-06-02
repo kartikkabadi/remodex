@@ -6,7 +6,10 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { resolveModelCapabilities } = require("../src/provider-capabilities");
+const {
+  resolveModelCapabilities,
+  resolveOpenCodeCatalogCapabilities,
+} = require("../src/provider-capabilities");
 
 test("Codex provider has standard capabilities (no agent selection)", () => {
   const capabilities = resolveModelCapabilities("codex", {});
@@ -29,7 +32,7 @@ test("OpenCode provider has agent selection enabled and fast/plan/voice/desktop/
   assert.equal(capabilities.supportsFastMode, false);
   assert.equal(capabilities.supportsPlanMode, false);
   assert.equal(capabilities.supportsVoice, false);
-  assert.equal(capabilities.supportsDesktopHandoff, false);
+  assert.equal(capabilities.supportsDesktopHandoff, true);
   assert.equal(capabilities.supportsWorktree, false);
   assert.equal(capabilities.supportsFork, true);
   assert.equal(capabilities.supportsApprovals, true);
@@ -93,4 +96,23 @@ test("OpenCode MCP is enabled", () => {
 test("Codex MCP is enabled", () => {
   const capabilities = resolveModelCapabilities("codex", {});
   assert.equal(capabilities.supportsMCP, true);
+});
+
+test("Codex supports structured skill input on turn/start", () => {
+  const capabilities = resolveModelCapabilities("codex", {});
+  assert.equal(capabilities.supportsStructuredSkillInput, true);
+});
+
+test("OpenCode supports structured skill input on turn/start", () => {
+  const capabilities = resolveModelCapabilities("opencode", {});
+  assert.equal(capabilities.supportsStructuredSkillInput, true);
+  assert.equal(capabilities.supportsSkillAutocomplete, true);
+});
+
+test("OpenCode catalog supportsDesktopHandoff is true after PR8 sign-off", () => {
+  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, true);
+  assert.equal(
+    resolveModelCapabilities("opencode", {}, {}).supportsDesktopHandoff,
+    true,
+  );
 });

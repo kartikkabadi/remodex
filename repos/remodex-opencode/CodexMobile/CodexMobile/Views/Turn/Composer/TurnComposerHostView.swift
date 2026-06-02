@@ -42,6 +42,9 @@ struct TurnComposerHostView: View {
     // Pass-through for the New Chat draft surface; defaults to true so every
     // existing call site keeps its meta bar.
     var showsSecondaryBar: Bool = true
+    var showsComposerDesktopHandoff: Bool = false
+    var isDesktopHandoffLoading: Bool = false
+    var onContinueOnDesktop: (() -> Void)?
 
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
@@ -63,11 +66,21 @@ struct TurnComposerHostView: View {
             hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
             isPlanModeArmed: viewModel.isPlanModeArmed
         ) && !availableForkDestinations.isEmpty
+        let modelProvider = codex.runtimeModelProviderForTurn(threadId: thread.id)
+        let slashSource = TurnComposerSlashCommandRouting.source(
+            supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            modelProvider: modelProvider
+        )
         let autocompleteState = TurnComposerAutocompleteState(
-            availableSlashCommands: TurnComposerSlashCommand.availableCommands(
-                allowsForkCommand: allowsForkCommand
+            availableSlashCommands: viewModel.availableSlashCommandItems(
+                allowsForkCommand: allowsForkCommand,
+                slashSource: slashSource
             ),
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            usesBridgeSlashCommands: slashSource == .bridgeCommands,
+            isLoadingBridgeSlashCommands: viewModel.isLoadingBridgeSlashCommands,
+            showsBridgeSlashCommandsEmptyHint: viewModel.showsBridgeSlashCommandsEmptyHint,
+            bridgeSlashCommandsLoadError: viewModel.bridgeSlashCommandsLoadError,
             supportsThreadFork: runtimeState.capabilities.supportsFork,
             supportsSkillAutocomplete: runtimeState.capabilities.supportsSkillAutocomplete,
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
@@ -251,6 +264,9 @@ struct TurnComposerHostView: View {
                 handleSlashCommandAutocomplete: { text in
                     viewModel.onInputChangedForSlashCommandAutocomplete(
                         text,
+                        codex: codex,
+                        thread: thread,
+                        supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
                         activeTurnID: activeTurnID
                     )
                     viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
@@ -268,28 +284,33 @@ struct TurnComposerHostView: View {
                 viewModel.onSelectPluginAutocomplete(plugin)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },
-            onSelectSlashCommand: { command in
-                switch command {
-                case .codeReview:
-                    viewModel.onSelectSlashCommand(command)
-                case .compact:
-                    viewModel.onSelectSlashCommand(command)
-                    Task {
-                        try? await codex.compactThread(thread.id)
+            onSelectSlashCommand: { item in
+                switch item {
+                case .bridge:
+                    viewModel.onSelectSlashCommandItem(item)
+                case .codex(let command):
+                    switch command {
+                    case .codeReview:
+                        viewModel.onSelectSlashCommand(command)
+                    case .compact:
+                        viewModel.onSelectSlashCommand(command)
+                        Task {
+                            try? await codex.compactThread(thread.id)
+                        }
+                    case .feedback:
+                        viewModel.onSelectSlashCommand(command)
+                        onOpenFeedbackMail()
+                    case .fork:
+                        viewModel.onSelectSlashCommand(
+                            command,
+                            availableForkDestinations: availableForkDestinations
+                        )
+                    case .status:
+                        viewModel.onSelectSlashCommand(command)
+                        onShowStatus()
+                    case .subagents:
+                        viewModel.onSelectSlashCommand(command)
                     }
-                case .feedback:
-                    viewModel.onSelectSlashCommand(command)
-                    onOpenFeedbackMail()
-                case .fork:
-                    viewModel.onSelectSlashCommand(
-                        command,
-                        availableForkDestinations: availableForkDestinations
-                    )
-                case .status:
-                    viewModel.onSelectSlashCommand(command)
-                    onShowStatus()
-                case .subagents:
-                    viewModel.onSelectSlashCommand(command)
                 }
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },
@@ -307,6 +328,9 @@ struct TurnComposerHostView: View {
                 }
             },
             onCloseSlashCommandPanel: viewModel.closeSlashCommandPanel,
+            onRetryBridgeSlashCommands: {
+                viewModel.retryBridgeSlashCommandsLoad(codex: codex, thread: thread)
+            },
             onRemoveMentionedFile: { mentionID in
                 viewModel.removeMentionedFile(id: mentionID)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
@@ -344,7 +368,10 @@ struct TurnComposerHostView: View {
                 viewModel.removeQueuedDraft(id: draftID, codex: codex, threadID: thread.id)
             },
             onSend: onSend,
-            showsSecondaryBar: showsSecondaryBar
+            showsSecondaryBar: showsSecondaryBar,
+            showsComposerDesktopHandoff: showsComposerDesktopHandoff,
+            isDesktopHandoffLoading: isDesktopHandoffLoading,
+            onContinueOnDesktop: onContinueOnDesktop
         )
         }
     }

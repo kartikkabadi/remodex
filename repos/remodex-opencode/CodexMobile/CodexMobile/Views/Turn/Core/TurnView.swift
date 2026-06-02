@@ -40,6 +40,7 @@ struct TurnView: View {
     @State private var isShowingMacHandoffConfirm = false
     @State private var worktreeOverlayRoute: TurnWorktreeOverlayRoute?
     @State private var macHandoffErrorMessage: String?
+    @State private var macHandoffSuccessMessage: String?
     @State private var isHandingOffToMac = false
     @State private var isStartingSiblingChat = false
     @State private var isForkingThread = false
@@ -523,7 +524,9 @@ struct TurnView: View {
             isShowingNothingToCommitAlert: isShowingNothingToCommitAlertBinding,
             gitSyncAlert: gitSyncAlertBinding,
             isShowingMacHandoffConfirm: $isShowingMacHandoffConfirm,
+            macHandoffConfirmMessage: macHandoffConfirmMessage,
             macHandoffErrorMessage: $macHandoffErrorMessage,
+            macHandoffSuccessMessage: $macHandoffSuccessMessage,
             onDeclineApproval: { request in
                 viewModel.decline(request, codex: codex) { didSucceed in
                     if didSucceed {
@@ -650,6 +653,19 @@ struct TurnView: View {
         codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsDesktopHandoff ?? false
     }
 
+    private var macHandoffConfirmMessage: String {
+        TurnViewModel.macHandoffConfirmMessage(for: thread, codex: codex)
+    }
+
+    private var showsComposerDesktopHandoff: Bool {
+        supportsDesktopHandoff
+            && CodexModelOption.normalizedProvider(
+                thread.modelProvider
+                    ?? codex.selectedModelOption(threadId: thread.id)?.modelProvider
+                    ?? "codex"
+            ) == "opencode"
+    }
+
     private var supportsApprovals: Bool {
         codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsApprovals ?? true
     }
@@ -728,8 +744,12 @@ struct TurnView: View {
             defer { isHandingOffToMac = false }
 
             do {
-                let handoffService = DesktopHandoffService(codex: codex)
-                try await handoffService.continueOnDesktopApp(threadId: thread.id)
+                switch try await viewModel.continueOnDesktop(codex: codex, thread: thread) {
+                case .opencode(let result):
+                    macHandoffSuccessMessage = result.userFacingSummary
+                case .codex, .none:
+                    break
+                }
             } catch {
                 macHandoffErrorMessage = error.localizedDescription
             }
@@ -1493,7 +1513,12 @@ struct TurnView: View {
                 voiceRecordingDuration: voiceTranscriptionManager.recordingDuration,
                 onTapVoice: handleVoiceButtonTap,
                 onCancelVoiceRecording: cancelVoiceRecordingIfNeeded,
-                onSend: handleSend
+                onSend: handleSend,
+                showsComposerDesktopHandoff: showsComposerDesktopHandoff,
+                isDesktopHandoffLoading: isHandingOffToMac,
+                onContinueOnDesktop: showsComposerDesktopHandoff && codex.isConnected
+                    ? { isShowingMacHandoffConfirm = true }
+                    : nil
             )
         }
     }

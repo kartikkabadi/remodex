@@ -811,6 +811,8 @@ test("runtime/catalog clears reasonCode when OpenCode is enabled with agents", a
   assert.equal(opencodeRuntime.unavailableReason, null);
   assert.equal(opencodeRuntime.capabilities.supportsSteer, false);
   assert.equal(opencodeRuntime.capabilities.supportsQueue, true);
+  assert.equal(opencodeRuntime.capabilities.supportsSkillAutocomplete, true);
+  assert.equal(opencodeRuntime.capabilities.supportsStructuredSkillInput, true);
 
   if (previousDisable === undefined) {
     delete process.env.REMODEX_DISABLE_OPENCODE;

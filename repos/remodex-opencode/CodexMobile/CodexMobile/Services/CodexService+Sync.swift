@@ -591,6 +591,7 @@ extension CodexService {
         hydratedThreadIDs.removeAll()
         loadingThreadIDs.removeAll()
         cancelAllPerThreadRefreshWork()
+        invalidateSlashCommandCache()
     }
 
     // Bumps the invalidation token used to reject stale async refresh completions.

@@ -16,6 +16,28 @@
 
 **Done bar:** All test files pass. Codex path tests pass when `REMODEX_DISABLE_OPENCODE` is unset (OpenCode on by default). OpenCode path tests pass with mocked SDK client.
 
+### OpenCode bridge tests
+
+**Harness:** `test/test-env.js` preloads `REMODEX_TEST=1` and sets `REMODEX_DISABLE_OPENCODE=1` by default so the full suite does not spawn `opencode serve`. Tests that exercise OpenCode unset that flag or inject mocked providers.
+
+**Focused command:** `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode`
+
+| File | What it guards |
+|------|----------------|
+| `test/opencode-regression.test.js` | Codex-only regression when OpenCode is disabled; router `command/list`, `skills/list`, and `desktop/continueOpenCode` handoff env gate (`REMODEX_OPENCODE_HANDOFF`) |
+| `test/opencode-restart-rehydrate.test.js` | Persisted `opencode-sessions.json` rehydration after a new provider instance (`thread/read`, `thread/turns/list`, `turn/start`) |
+| `test/opencode-handoff.test.js` | Handoff payload building, TUI selection, desktop-app fallback |
+| `test/opencode-session-lifecycle.test.js` | In-process thread/turn lifecycle with mocked SDK |
+| `test/runtime-provider-router.test.js` | Provider routing and merged catalog/model/command/skills paths |
+
+**Env knobs used in tests:**
+
+- `REMODEX_DISABLE_OPENCODE=1` — omit OpenCode from `runtime/catalog` and skip provider registration (Codex regression).
+- `REMODEX_ENABLE_OPENCODE=1` — opt-in for provider unit tests with mocked `serverFactory` / `clientFactory`.
+- `REMODEX_OPENCODE_HANDOFF=1` — allow `desktop/continueOpenCode`; default off returns `opencode_handoff_disabled`. Catalog advertises `supportsDesktopHandoff: true` for OpenCode after PR8 (independent of this env).
+
+**Done bar:** `npm run test:opencode` passes without a live `opencode` binary. Restart rehydration and handoff regressions stay mocked; integration tests that spawn real `opencode serve` remain optional (`test.skip` when binary missing).
+
 ### Bridge Integration Tests
 
 **Tool:** `node:test`

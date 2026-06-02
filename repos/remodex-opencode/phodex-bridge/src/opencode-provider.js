@@ -449,8 +449,8 @@ function createOpenCodeProvider({
     }
 
     const model = normalizeOpenCodeModel(params.model || thread.model);
-    const { inputText, prompt } = buildPromptFromTurnInput(params.input);
-    if (!prompt) {
+    const { inputText, prompt, parts } = buildPromptFromTurnInput(params.input);
+    if (!prompt && (!Array.isArray(parts) || parts.length === 0)) {
       const error = new Error("OpenCode turn/start requires text input.");
       error.errorCode = "opencode_input_required";
       throw error;
@@ -508,11 +508,11 @@ function createOpenCodeProvider({
 
     emit("turn/started", { threadId: thread.id, turnId, turn: { id: turnId, status: "running" } });
 
-    setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, thread.cwd));
+    setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, parts, thread.cwd));
     return { turnId, turn: { id: turnId, threadId: thread.id, status: "running" } };
   }
 
-  async function executeTurn(active, model, agent, effort, prompt, cwd) {
+  async function executeTurn(active, model, agent, effort, prompt, parts, cwd) {
     try {
       await ensureStarted();
 
@@ -554,7 +554,7 @@ function createOpenCodeProvider({
         await client.setEffort({ sessionID: active.sessionId, effort });
       }
 
-      await client.prompt({ sessionID: active.sessionId, prompt, cwd });
+      await client.prompt({ sessionID: active.sessionId, prompt, parts, cwd });
       active.started = true;
     } catch (error) {
       completeTurn({
@@ -788,6 +788,56 @@ function createOpenCodeProvider({
     return catalogUnavailable ? { ...catalogUnavailable } : null;
   }
 
+  async function getHandoffContext(threadId, { sessionId = "", directory = "" } = {}) {
+    const normalizedThreadId = readThreadId({ threadId });
+    if (!normalizedThreadId) {
+      throw threadNotFoundError(threadId);
+    }
+
+    const thread = await requireThread(normalizedThreadId);
+    // Client-supplied sessionId/directory are hints only; never override owned thread state.
+    const requestedSessionId = readString(sessionId);
+    const requestedDirectory = readString(directory);
+    if (requestedSessionId && requestedSessionId !== thread.sessionId) {
+      console.warn(
+        `${logPrefix} Ignoring untrusted handoff sessionId for thread ${normalizedThreadId}`,
+      );
+    }
+    if (requestedDirectory && requestedDirectory !== thread.cwd) {
+      console.warn(
+        `${logPrefix} Ignoring untrusted handoff directory for thread ${normalizedThreadId}`,
+      );
+    }
+
+    if (!thread.sessionId) {
+      const expired = new Error("OpenCode session is missing for this thread.");
+      expired.errorCode = ERROR_CODES.OPENCODE_SESSION_EXPIRED.errorCode;
+      expired.action = ERROR_CODES.OPENCODE_SESSION_EXPIRED.action;
+      throw expired;
+    }
+
+    return {
+      threadId: thread.id,
+      sessionId: thread.sessionId,
+      cwd: thread.cwd,
+      model: thread.model,
+      agent: thread.agent,
+      title: thread.title,
+    };
+  }
+
+  async function selectTuiSession(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return false;
+    }
+    await ensureStarted();
+    if (!client || typeof client.selectTuiSession !== "function") {
+      return false;
+    }
+    return client.selectTuiSession(normalizedSessionId);
+  }
+
   return {
     id: OPENCODE_PROVIDER_ID,
     ownsThread,
@@ -801,6 +851,8 @@ function createOpenCodeProvider({
     warmup,
     shutdown,
     getCatalogAvailability,
+    getHandoffContext,
+    selectTuiSession,
   };
 }
 

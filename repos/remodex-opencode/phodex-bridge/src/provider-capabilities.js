@@ -2,10 +2,11 @@
 // Purpose: Defines capability flags for runtimes. Used by runtime/catalog and model/list
 //          to drive iOS composer visibility/grey-out without hardcoded provider checks.
 // Layer: Bridge runtime utility
-// Exports: CAPABILITIES, resolveModelCapabilities, hasReasoningEffort
+// Exports: CAPABILITIES, resolveModelCapabilities, resolveOpenCodeCatalogCapabilities, hasReasoningEffort
 // Depends on: ./opencode-models
 
 const { CODEX_PROVIDER_ID, OPENCODE_PROVIDER_ID } = require("./opencode-models");
+
 
 const CAPABILITIES = [
   "supportsAgentSelection",
@@ -21,6 +22,7 @@ const CAPABILITIES = [
   "supportsSlashCommands",
   "supportsMCP",
   "supportsSkillAutocomplete",
+  "supportsStructuredSkillInput",
   "supportsSteer",
   "supportsQueue",
 ];
@@ -39,6 +41,7 @@ const CODEX_CAPABILITIES = {
   supportsSlashCommands: true,
   supportsMCP: true,
   supportsSkillAutocomplete: true,
+  supportsStructuredSkillInput: true,
   supportsSteer: true,
   supportsQueue: true,
 };
@@ -49,7 +52,7 @@ const OPENCODE_CAPABILITIES = {
   supportsFastMode: false,
   supportsPlanMode: false,
   supportsVoice: false,
-  supportsDesktopHandoff: false,
+  supportsDesktopHandoff: true,
   supportsWorktree: false,
   supportsFork: true,
   supportsApprovals: true,
@@ -57,17 +60,22 @@ const OPENCODE_CAPABILITIES = {
   supportsSlashCommands: true,
   supportsMCP: true,
   supportsSkillAutocomplete: true,
+  supportsStructuredSkillInput: true,
   supportsSteer: false,
   supportsQueue: true,
 };
 
-function resolveModelCapabilities(providerId, modelData = {}) {
+function resolveOpenCodeCatalogCapabilities(_env = process.env) {
+  return { ...OPENCODE_CAPABILITIES };
+}
+
+function resolveModelCapabilities(providerId, modelData = {}, env = process.env) {
   modelData = modelData || {};
   const base =
     providerId === CODEX_PROVIDER_ID
       ? { ...CODEX_CAPABILITIES }
       : providerId === OPENCODE_PROVIDER_ID
-        ? { ...OPENCODE_CAPABILITIES }
+        ? resolveOpenCodeCatalogCapabilities(env)
         : { ...CODEX_CAPABILITIES };
 
   if (Array.isArray(modelData.supportedReasoningEfforts)) {
@@ -104,6 +112,7 @@ module.exports = {
   CAPABILITIES,
   CODEX_CAPABILITIES,
   OPENCODE_CAPABILITIES,
+  resolveOpenCodeCatalogCapabilities,
   resolveModelCapabilities,
   hasReasoningEffort,
 };

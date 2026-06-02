@@ -33,6 +33,8 @@ Use this after bridge and iOS changes land. Run Mac steps in **Terminal.app** (n
 | 7 | Session | Start OpenCode thread, send prompt, receive streaming reply |
 | 8 | Composer | Fork, slash commands, queue (if enabled), skills autocomplete match catalog flags |
 
+Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md).
+
 ## Regression
 
 | Step | Check | Pass criterion |

@@ -115,16 +115,42 @@ Each row in the composer has three visibility states:
 - **Hidden on OpenCode threads entirely.**
 - This is NOT the same as the OpenCode "plan" agent. Codex Plan mode is a different feature.
 
+### Slash commands
+
+Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which command list is shown is **provider-driven** (`modelProvider` from the selected model or locked thread).
+
+| Condition | Command source |
+|-----------|----------------|
+| `supportsSlashCommands == false` | Panel hidden / greyed (`ComposerCapabilityCopy.slashCommands`) |
+| Provider **opencode** + flag true | Bridge `command/list` → `[BridgeSlashCommand]` |
+| Provider **codex** (or default) + flag true | `TurnComposerSlashCommand` enum (six Codex commands) |
+
+**OpenCode RPC:** `command/list` with `{ "directory": "<thread.gitWorkingDirectory>" }` (bridge accepts `cwd` alias).
+
+**`BridgeSlashCommand` decode shape:**
+
+```json
+{ "commands": [{ "token": "/build", "title": "Build", "description": "Build the project" }] }
+```
+
+**Cache (iOS):** `CodexService.fetchSlashCommands(directory:)` caches successful responses per normalized directory for ~60s. Failures are not cached. Invalidate on relay disconnect (`clearHydrationCaches` → `invalidateSlashCommandCache`) and when `thread.gitWorkingDirectory` changes (ViewModel cancels in-flight fetch, bumps a generation token, and refetches for the new directory).
+
+**Selection:** Codex commands keep existing behaviors (review targets, fork destinations, compact RPC, etc.). OpenCode bridge commands insert `token` into the draft only; send path includes the `/token` text in `turn/start`.
+
+**Empty OpenCode list:** After a successful fetch with zero commands, show inline hint “No commands for this project” (no `reasonCode` until bridge adds one).
+
+**Fetch failure:** Show “Couldn't load commands. Tap to retry.” with a Retry control; do not show the empty-project hint until a successful fetch returns zero commands.
+
 ### Other Controls
 
 | Control | Codex Threads | OpenCode Threads |
 |---------|--------------|------------------|
 | Voice recording | Visible, enabled | Hidden (voice not supported) |
-| Slash commands /$ | Visible, enabled | Visible, greyed (if per-matrix) |
+| Slash commands /$ | Visible, enabled | Visible when `supportsSlashCommands` (dynamic `command/list`) |
 | Approvals UI | Visible, enabled | Visible, partial |
 | Fork thread | Visible, enabled | Visible, greyed (if not supported) |
 | Steer/Queue | Visible, enabled | Visible, greyed (if not supported) |
-| Desktop handoff | Visible, enabled | Hidden |
+| Desktop handoff | Visible, enabled (`desktop/continueOnDesktop`) | Visible when `supportsDesktopHandoff` (`desktop/continueOpenCode`; Mac bridge requires `REMODEX_OPENCODE_HANDOFF=1` for RPC) |
 
 ## Grey-Out Modifier
 
@@ -205,3 +231,30 @@ The composer state is per-thread. Switching threads in the sidebar changes:
 4. **Very long agent lists:** Agent picker scrolls. Default agent is pinned to top.
 
 5. **Fast mode + reasoning together:** Both rows can appear simultaneously. No mutual exclusivity.
+
+## Desktop handoff
+
+**Visibility:** `supportsDesktopHandoff` from `runtime/catalog` / `model/list` capabilities (not hardcoded provider checks in views). OpenCode catalog advertises `true` after device E2E sign-off; `desktop/continueOpenCode` still requires `REMODEX_OPENCODE_HANDOFF=1` on the Mac bridge.
+
+**Orchestration (provider selects RPC, capability gates UI):**
+
+| Provider | RPC | iOS entry |
+|----------|-----|-----------|
+| `codex` | `desktop/continueOnDesktop` | Toolbar “Hand off to Desktop”; Codex confirm explains force-close/reopen |
+| `opencode` | `desktop/continueOpenCode` | Toolbar + composer secondary bar “Continue on Desktop” when `supportsDesktopHandoff` |
+
+**OpenCode params** (`CodexService.continueOnDesktopOpenCode` / `OpenCodeDesktopHandoffParams`):
+
+```json
+{
+  "threadId": "opencode-thread-…",
+  "sessionId": "ses_…",
+  "directory": "/path/to/project"
+}
+```
+
+`sessionId` and `directory` are optional; the bridge resolves session context from thread ownership when omitted.
+
+**OpenCode result UX:** iOS surfaces `instructions` (fallback: `handoffMode` copy) in a success alert after handoff. Errors map bridge `errorCode` values (`opencode_handoff_disabled`, `wrong_provider`, `opencode_session_expired`, etc.) via `DesktopHandoffError`.
+
+**Composer:** `TurnComposerHostView` passes `showsComposerDesktopHandoff` only for OpenCode threads with `supportsDesktopHandoff`. Codex threads keep handoff in the thread toolbar menu only.

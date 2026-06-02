@@ -140,14 +140,35 @@ Body: { sessionID: "ses_abc123" }
 ### Turn Execution: `client.session.prompt()`
 
 ```
-POST /session/prompt
+POST /session/{sessionID}/prompt?directory=/path/to/project
 Body: {
-  sessionID: "ses_abc123",
-  prompt: "Fix the login bug in auth.ts"
+  parts: [
+    { "type": "text", "text": "Please review this change" },
+    {
+      "type": "file",
+      "mime": "text/markdown",
+      "url": "file:///path/to/project/.agents/skills/review/SKILL.md",
+      "filename": "review"
+    }
+  ]
 }
 
-→ { sessionID: "ses_abc123" }    // Returns immediately, streaming via events
+→ { info, parts }    // Returns immediately; streaming via events
 ```
+
+The SDK requires a `parts` array (`TextPartInput`, `FilePartInput`, `AgentPartInput`, or `SubtaskPartInput`). The bridge no longer sends a bare string `prompt` field.
+
+**Structured skills from iOS (`turn/start` input items):**
+
+| iOS / Codex input item | Bridge → OpenCode `parts` |
+|------------------------|---------------------------|
+| `{ type: "text", text: "…" }` | `{ type: "text", text: "…" }` |
+| `{ type: "skill", id, name?, path? }` with `path` | `{ type: "file", mime: "text/markdown", url: file://…, filename: name\|id }` |
+| `{ type: "skill", … }` without `path` | `{ type: "text", text: "$name" }` (text fallback) |
+| `{ type: "mention", name, path }` | `{ type: "file", mime: "text/plain", url: file://…, filename: name }` |
+| Image attachment items | `{ type: "file", … }` when a path/URL is present, else `[image attached]` text placeholder |
+
+Skill-only turns include a minimal leading `{ type: "text", text: " " }` part so the SDK always receives at least one text part alongside skill file attachments.
 
 **Bridge subscribes to events BEFORE calling prompt** to avoid missing early events.
 
