@@ -292,6 +292,7 @@ All fields optional. Omit for first page.
         "supportsSlashCommands": true,
         "supportsMCP": true,
         "supportsSkillAutocomplete": true,
+        "supportsStructuredSkillInput": true,
         "supportsSteer": true,
         "supportsQueue": true
       }
@@ -320,7 +321,8 @@ All fields optional. Omit for first page.
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
         "supportsMCP": true,
-        "supportsSkillAutocomplete": false,
+        "supportsSkillAutocomplete": true,
+        "supportsStructuredSkillInput": true,
         "supportsSteer": false,
         "supportsQueue": true
       }
@@ -382,6 +384,10 @@ Optional project directory for slash-command discovery. `directory` is preferred
 **Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
 
 **Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+
+**OpenCode-only notes:** When `REMODEX_ENABLE_OPENCODE` is set and the OpenCode provider is registered, `listOpenCodeSkillsBuckets` calls `opencodeProvider.listSkills(cwd)` per requested cwd (defaulting to `process.cwd()` when none are supplied). SDK failures return empty buckets with a bridge warning; Codex buckets are still returned.
+
+**Structured turn input (OpenCode `turn/start`):** iOS may send `input` items with `type: "skill"` (`id`, optional `name`, optional `path`) when `supportsStructuredSkillInput` is true on `runtime/catalog`. The bridge maps each skill to an OpenCode `session.prompt` **file** part (`mime: text/markdown`, `url: file://…`, `filename: name`) when `path` is present, or a **text** part (`$skillName`) when only the name/id is known. User text and `@mention` items are mapped to text/file parts respectively. This is separate from `supportsSkillAutocomplete` (composer `$` autocomplete only).
 
 ### thread/fork
 

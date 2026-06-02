@@ -6,6 +6,8 @@
 // Exports: OpenCode provider constants plus model/provider parsing, serialization, and sort helpers.
 // Depends on: ./normalize
 
+const path = require("path");
+const { pathToFileURL } = require("url");
 const { readString, resolvedParam } = require("./normalize");
 
 const CODEX_PROVIDER_ID = "codex";
@@ -152,27 +154,132 @@ function publicThread(thread) {
   };
 }
 
+function readSkillName(item) {
+  return readString(item?.name || item?.id);
+}
+
+function fileUrlForPath(filePath) {
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+  return pathToFileURL(resolved).href;
+}
+
+function skillItemToPromptPart(item) {
+  const name = readSkillName(item);
+  const skillPath = resolvedParam(item, "path");
+  if (skillPath) {
+    return {
+      type: "file",
+      mime: "text/markdown",
+      url: fileUrlForPath(skillPath),
+      filename: name || path.basename(skillPath),
+    };
+  }
+  if (name) {
+    return { type: "text", text: `$${name}` };
+  }
+  return null;
+}
+
+function mentionItemToPromptPart(item) {
+  const name = readString(item?.name);
+  const mentionPath = resolvedParam(item, "path");
+  if (mentionPath && name) {
+    return {
+      type: "file",
+      mime: "text/plain",
+      url: fileUrlForPath(mentionPath),
+      filename: name,
+    };
+  }
+  if (name) {
+    return { type: "text", text: `@${name}` };
+  }
+  return null;
+}
+
+function imageItemToPromptPart(item) {
+  const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
+  if (imagePath) {
+    return {
+      type: "file",
+      mime: readString(item.mime || item.contentType) || "application/octet-stream",
+      url: imagePath.startsWith("data:") || /^https?:\/\//i.test(imagePath)
+        ? imagePath
+        : fileUrlForPath(imagePath),
+      filename: readString(item.filename || item.name) || "attachment",
+    };
+  }
+  return { type: "text", text: "[image attached]" };
+}
+
 function buildPromptFromTurnInput(input) {
-  if (typeof input === "string") return { inputText: input.trim(), prompt: input.trim() };
-  if (!Array.isArray(input)) return { inputText: "", prompt: "" };
+  if (typeof input === "string") {
+    const text = input.trim();
+    return {
+      inputText: text,
+      prompt: text,
+      parts: text ? [{ type: "text", text }] : [],
+    };
+  }
+  if (!Array.isArray(input)) {
+    return { inputText: "", prompt: "", parts: [] };
+  }
 
   const textParts = [];
+  const parts = [];
+
   for (const item of input) {
     if (typeof item === "string") {
       appendNonEmpty(textParts, item);
       continue;
     }
     if (!item || typeof item !== "object") continue;
+
     const type = readString(item.type).toLowerCase();
+    if (type === "skill") {
+      const part = skillItemToPromptPart(item);
+      if (part) {
+        parts.push(part);
+        if (part.type === "text") {
+          appendNonEmpty(textParts, part.text);
+        }
+      }
+      continue;
+    }
+    if (type === "mention") {
+      const part = mentionItemToPromptPart(item);
+      if (part) {
+        parts.push(part);
+        if (part.type === "text") {
+          appendNonEmpty(textParts, part.text);
+        }
+      }
+      continue;
+    }
     if (type.includes("image")) {
-      const imagePath = resolvedParam(item, 'path', 'url', 'image_url', 'dataURL');
+      parts.push(imageItemToPromptPart(item));
+      const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
       appendNonEmpty(textParts, imagePath ? `[image attached: ${imagePath}]` : "[image attached]");
       continue;
     }
-    appendNonEmpty(textParts, item.text || item.content || item.message);
+
+    const text = readString(item.text || item.content || item.message);
+    if (text) {
+      appendNonEmpty(textParts, text);
+      parts.push({ type: "text", text });
+    }
   }
-  const prompt = textParts.join("\n\n").trim();
-  return { inputText: prompt, prompt };
+
+  const userText = textParts.join("\n\n").trim();
+  const hasTextPart = parts.some((part) => part.type === "text");
+  if (userText && !hasTextPart) {
+    parts.push({ type: "text", text: userText });
+  } else if (!hasTextPart && parts.length > 0) {
+    parts.unshift({ type: "text", text: userText || " " });
+  }
+
+  const prompt = userText || parts.filter((part) => part.type === "text").map((part) => part.text).join("\n\n").trim();
+  return { inputText: prompt, prompt, parts };
 }
 
 function messagesToTurns(messages, threadId) {
@@ -330,6 +437,8 @@ module.exports = {
   buildOpenCodeModelOption,
   slimModelForMobileList,
   buildPromptFromTurnInput,
+  mentionItemToPromptPart,
+  skillItemToPromptPart,
   compareThreadsByUpdatedAt,
   displayNameForOpenCodeModel,
   isCodexProvider,

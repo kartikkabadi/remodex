@@ -21,6 +21,7 @@ const CAPABILITIES = [
   "supportsSlashCommands",
   "supportsMCP",
   "supportsSkillAutocomplete",
+  "supportsStructuredSkillInput",
   "supportsSteer",
   "supportsQueue",
 ];
@@ -39,6 +40,7 @@ const CODEX_CAPABILITIES = {
   supportsSlashCommands: true,
   supportsMCP: true,
   supportsSkillAutocomplete: true,
+  supportsStructuredSkillInput: true,
   supportsSteer: true,
   supportsQueue: true,
 };
@@ -57,6 +59,7 @@ const OPENCODE_CAPABILITIES = {
   supportsSlashCommands: true,
   supportsMCP: true,
   supportsSkillAutocomplete: true,
+  supportsStructuredSkillInput: true,
   supportsSteer: false,
   supportsQueue: true,
 };

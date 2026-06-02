@@ -69,12 +69,28 @@ async function createOpenCodeClient({ baseUrl, logPrefix = "[remodex]" } = {}) {
     return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function prompt({ sessionID, prompt, cwd }) {
+  async function prompt({ sessionID, prompt, parts, cwd }) {
+    const resolvedParts =
+      Array.isArray(parts) && parts.length > 0
+        ? parts
+        : [{ type: "text", text: readString(prompt) || "" }];
+    const bodyParts = resolvedParts.filter(
+      (part) =>
+        part &&
+        (part.type === "file" ||
+          part.type === "agent" ||
+          part.type === "subtask" ||
+          readString(part.text)),
+    );
+    if (bodyParts.length === 0) {
+      throw new Error("OpenCode prompt requires at least one part.");
+    }
+
     return withTimeout(
       client.session.prompt({
         sessionID,
-        prompt,
-        cwd,
+        directory: readString(cwd) || process.cwd(),
+        parts: bodyParts,
       }),
       REQUEST_TIMEOUT_MS,
     );

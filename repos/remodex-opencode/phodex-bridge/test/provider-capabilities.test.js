@@ -94,3 +94,14 @@ test("Codex MCP is enabled", () => {
   const capabilities = resolveModelCapabilities("codex", {});
   assert.equal(capabilities.supportsMCP, true);
 });
+
+test("Codex supports structured skill input on turn/start", () => {
+  const capabilities = resolveModelCapabilities("codex", {});
+  assert.equal(capabilities.supportsStructuredSkillInput, true);
+});
+
+test("OpenCode supports structured skill input on turn/start", () => {
+  const capabilities = resolveModelCapabilities("opencode", {});
+  assert.equal(capabilities.supportsStructuredSkillInput, true);
+  assert.equal(capabilities.supportsSkillAutocomplete, true);
+});
