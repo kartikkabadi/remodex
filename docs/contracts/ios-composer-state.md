@@ -115,12 +115,36 @@ Each row in the composer has three visibility states:
 - **Hidden on OpenCode threads entirely.**
 - This is NOT the same as the OpenCode "plan" agent. Codex Plan mode is a different feature.
 
+### Slash commands
+
+Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which command list is shown is **provider-driven** (`modelProvider` from the selected model or locked thread).
+
+| Condition | Command source |
+|-----------|----------------|
+| `supportsSlashCommands == false` | Panel hidden / greyed (`ComposerCapabilityCopy.slashCommands`) |
+| Provider **opencode** + flag true | Bridge `command/list` → `[BridgeSlashCommand]` |
+| Provider **codex** (or default) + flag true | `TurnComposerSlashCommand` enum (six Codex commands) |
+
+**OpenCode RPC:** `command/list` with `{ "directory": "<thread.gitWorkingDirectory>" }` (bridge accepts `cwd` alias).
+
+**`BridgeSlashCommand` decode shape:**
+
+```json
+{ "commands": [{ "token": "/build", "title": "Build", "description": "Build the project" }] }
+```
+
+**Cache (iOS):** `CodexService.fetchSlashCommands(directory:)` caches per normalized directory for ~60s. Invalidate on relay disconnect (`clearHydrationCaches` → `invalidateSlashCommandCache`) and when `thread.gitWorkingDirectory` changes (ViewModel refetches for the new directory).
+
+**Selection:** Codex commands keep existing behaviors (review targets, fork destinations, compact RPC, etc.). OpenCode bridge commands insert `token` into the draft only; send path includes the `/token` text in `turn/start`.
+
+**Empty OpenCode list:** After a successful fetch with zero commands, show inline hint “No commands for this project” (no `reasonCode` until bridge adds one).
+
 ### Other Controls
 
 | Control | Codex Threads | OpenCode Threads |
 |---------|--------------|------------------|
 | Voice recording | Visible, enabled | Hidden (voice not supported) |
-| Slash commands /$ | Visible, enabled | Visible, greyed (if per-matrix) |
+| Slash commands /$ | Visible, enabled | Visible when `supportsSlashCommands` (dynamic `command/list`) |
 | Approvals UI | Visible, enabled | Visible, partial |
 | Fork thread | Visible, enabled | Visible, greyed (if not supported) |
 | Steer/Queue | Visible, enabled | Visible, greyed (if not supported) |

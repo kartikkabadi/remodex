@@ -92,7 +92,7 @@ struct TurnComposerView: View {
     let onSelectFileAutocomplete: (CodexFuzzyFileMatch) -> Void
     let onSelectSkillAutocomplete: (CodexSkillMetadata) -> Void
     let onSelectPluginAutocomplete: (CodexPluginMetadata) -> Void
-    let onSelectSlashCommand: (TurnComposerSlashCommand) -> Void
+    let onSelectSlashCommand: (TurnComposerSlashCommandItem) -> Void
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
@@ -299,7 +299,7 @@ private struct TurnComposerAutocompletePanels: View {
     let onSelectFileAutocomplete: (CodexFuzzyFileMatch) -> Void
     let onSelectSkillAutocomplete: (CodexSkillMetadata) -> Void
     let onSelectPluginAutocomplete: (CodexPluginMetadata) -> Void
-    let onSelectSlashCommand: (TurnComposerSlashCommand) -> Void
+    let onSelectSlashCommand: (TurnComposerSlashCommandItem) -> Void
     let onSelectCodeReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
@@ -366,6 +366,9 @@ private struct TurnComposerAutocompletePanels: View {
                     state: state.slashCommandPanelState,
                     availableCommands: state.availableSlashCommands,
                     supportsSlashCommands: state.supportsSlashCommands,
+                    usesBridgeSlashCommands: state.usesBridgeSlashCommands,
+                    isLoadingBridgeSlashCommands: state.isLoadingBridgeSlashCommands,
+                    showsBridgeSlashCommandsEmptyHint: state.showsBridgeSlashCommandsEmptyHint,
                     supportsThreadFork: state.supportsThreadFork,
                     hasComposerContentConflictingWithReview: state.hasComposerContentConflictingWithReview,
                     isThreadRunning: state.isThreadRunning,
@@ -652,8 +655,11 @@ private struct ComposerPreviewContent: View {
                 voiceRecordingDuration: 0
             ),
             autocompleteState: TurnComposerAutocompleteState(
-                availableSlashCommands: TurnComposerSlashCommand.allCommands,
+                availableSlashCommands: TurnComposerSlashCommand.allCommands.map { .codex($0) },
                 supportsSlashCommands: true,
+                usesBridgeSlashCommands: false,
+                isLoadingBridgeSlashCommands: false,
+                showsBridgeSlashCommandsEmptyHint: false,
                 supportsThreadFork: true,
                 supportsSkillAutocomplete: true,
                 fileAutocompleteItems: [],

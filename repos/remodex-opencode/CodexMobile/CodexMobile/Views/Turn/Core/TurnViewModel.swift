@@ -231,6 +231,11 @@ final class TurnViewModel {
     var isPluginAutocompleteLoading = false
     var pluginAutocompleteQuery = ""
     var slashCommandPanelState: TurnComposerSlashCommandPanelState = .hidden
+    var bridgeSlashCommands: [BridgeSlashCommand] = []
+    var isLoadingBridgeSlashCommands = false
+    var didLoadBridgeSlashCommandsSuccessfully = false
+    @ObservationIgnored private var bridgeSlashCommandsDirectory: String?
+    @ObservationIgnored private var bridgeSlashCommandsFetchTask: Task<Void, Never>?
     // MARK: - Git state
 
     var runningGitAction: TurnGitActionKind? = nil
@@ -1072,6 +1077,9 @@ final class TurnViewModel {
     // Keeps `/` command discovery separate from @/$ autocomplete while supporting a bare trailing slash.
     func onInputChangedForSlashCommandAutocomplete(
         _ text: String,
+        codex: CodexService,
+        thread: CodexThread,
+        supportsSlashCommands: Bool,
         activeTurnID: String?
     ) {
         clearComposerReviewSelectionIfNeededForInput(text)
@@ -1099,6 +1107,71 @@ final class TurnViewModel {
         resetSkillAutocompleteState()
         resetPluginAutocompleteState()
         slashCommandPanelState = .commands(query: token.query)
+
+        let modelProvider = codex.runtimeModelProviderForTurn(threadId: thread.id)
+        let slashSource = TurnComposerSlashCommandRouting.source(
+            supportsSlashCommands: supportsSlashCommands,
+            modelProvider: modelProvider
+        )
+        guard slashSource == .bridgeCommands else {
+            bridgeSlashCommandsFetchTask?.cancel()
+            bridgeSlashCommandsFetchTask = nil
+            resetBridgeSlashCommandState()
+            return
+        }
+
+        loadBridgeSlashCommandsIfNeeded(codex: codex, thread: thread)
+    }
+
+    func availableSlashCommandItems(
+        allowsForkCommand: Bool,
+        slashSource: TurnComposerSlashCommandSource
+    ) -> [TurnComposerSlashCommandItem] {
+        switch slashSource {
+        case .disabled:
+            return []
+        case .codexEnum:
+            return TurnComposerSlashCommand.availableCommands(allowsForkCommand: allowsForkCommand)
+                .map { .codex($0) }
+        case .bridgeCommands:
+            return bridgeSlashCommands.map { .bridge($0) }
+        }
+    }
+
+    var showsBridgeSlashCommandsEmptyHint: Bool {
+        didLoadBridgeSlashCommandsSuccessfully
+            && bridgeSlashCommands.isEmpty
+            && !isLoadingBridgeSlashCommands
+    }
+
+    // Inserts an OpenCode bridge slash token into the draft and dismisses the picker.
+    func onSelectBridgeSlashCommand(_ command: BridgeSlashCommand) {
+        if let updatedInput = Self.replacingTrailingSlashCommandToken(
+            in: input,
+            with: command.token
+        ) {
+            input = updatedInput
+        } else {
+            let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedToken.isEmpty else {
+                resetSlashCommandState(clearPendingSelection: true)
+                return
+            }
+            input = trimmedToken
+        }
+        resetSlashCommandState(clearPendingSelection: true)
+    }
+
+    func onSelectSlashCommandItem(
+        _ item: TurnComposerSlashCommandItem,
+        availableForkDestinations: [TurnComposerForkDestination] = [.local]
+    ) {
+        switch item {
+        case .bridge(let command):
+            onSelectBridgeSlashCommand(command)
+        case .codex(let command):
+            onSelectSlashCommand(command, availableForkDestinations: availableForkDestinations)
+        }
     }
 
     // Turns the selected slash command into the matching inline composer behavior.
@@ -2605,6 +2678,40 @@ final class TurnViewModel {
         }
         if clearPendingSelection, composerReviewSelection?.target == nil {
             composerReviewSelection = nil
+        }
+    }
+
+    private func resetBridgeSlashCommandState() {
+        bridgeSlashCommandsFetchTask?.cancel()
+        bridgeSlashCommandsFetchTask = nil
+        bridgeSlashCommands = []
+        bridgeSlashCommandsDirectory = nil
+        isLoadingBridgeSlashCommands = false
+        didLoadBridgeSlashCommandsSuccessfully = false
+    }
+
+    private func loadBridgeSlashCommandsIfNeeded(codex: CodexService, thread: CodexThread) {
+        let directory = thread.gitWorkingDirectory
+        if bridgeSlashCommandsDirectory != directory {
+            bridgeSlashCommands = []
+            didLoadBridgeSlashCommandsSuccessfully = false
+            bridgeSlashCommandsDirectory = directory
+        }
+
+        guard !isLoadingBridgeSlashCommands else {
+            return
+        }
+
+        bridgeSlashCommandsFetchTask?.cancel()
+        isLoadingBridgeSlashCommands = true
+
+        bridgeSlashCommandsFetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let commands = await codex.fetchSlashCommands(directory: directory)
+            guard !Task.isCancelled else { return }
+            self.bridgeSlashCommands = commands
+            self.isLoadingBridgeSlashCommands = false
+            self.didLoadBridgeSlashCommandsSuccessfully = true
         }
     }
 

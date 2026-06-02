@@ -1,10 +1,119 @@
 // FILE: TurnComposerCommandState.swift
 // Purpose: Owns slash-command/review/fork state types and pure parsing helpers used by the composer.
 // Layer: View Support
-// Exports: TurnComposerSlashCommand, TurnComposerForkDestination, TurnComposerReviewTarget, TurnComposerReviewSelection, TurnComposerSlashCommandPanelState, TurnTrailingSlashCommandToken, TurnComposerCommandLogic
-// Depends on: Foundation, CodexReviewTarget
+// Exports: BridgeSlashCommand, TurnComposerSlashCommand, TurnComposerSlashCommandItem,
+//   TurnComposerSlashCommandSource, TurnComposerForkDestination, TurnComposerReviewTarget,
+//   TurnComposerReviewSelection, TurnComposerSlashCommandPanelState, TurnTrailingSlashCommandToken,
+//   TurnComposerCommandLogic
+// Depends on: Foundation, CodexReviewTarget, CodexModelOption
 
 import Foundation
+
+struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
+    let token: String
+    let title: String
+    let description: String
+
+    var id: String { token }
+
+    private var searchBlob: String {
+        "\(title) \(description) \(token)".lowercased()
+    }
+
+    static func filtered(
+        matching query: String,
+        within commands: [BridgeSlashCommand]
+    ) -> [BridgeSlashCommand] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmedQuery.isEmpty else {
+            return commands
+        }
+        return commands.filter { $0.searchBlob.contains(trimmedQuery) }
+    }
+}
+
+enum TurnComposerSlashCommandSource: Equatable, Sendable {
+    case disabled
+    case codexEnum
+    case bridgeCommands
+}
+
+enum TurnComposerSlashCommandRouting {
+    static func source(
+        supportsSlashCommands: Bool,
+        modelProvider: String
+    ) -> TurnComposerSlashCommandSource {
+        guard supportsSlashCommands else {
+            return .disabled
+        }
+        if CodexService.usesBridgeSlashCommands(modelProvider: modelProvider) {
+            return .bridgeCommands
+        }
+        return .codexEnum
+    }
+}
+
+enum TurnComposerSlashCommandItem: Identifiable, Equatable, Sendable {
+    case codex(TurnComposerSlashCommand)
+    case bridge(BridgeSlashCommand)
+
+    var id: String {
+        switch self {
+        case .codex(let command):
+            return "codex:\(command.rawValue)"
+        case .bridge(let command):
+            return "bridge:\(command.token)"
+        }
+    }
+
+    var commandToken: String {
+        switch self {
+        case .codex(let command):
+            return command.commandToken
+        case .bridge(let command):
+            return command.token
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .codex(let command):
+            return command.title
+        case .bridge(let command):
+            return command.title
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .codex(let command):
+            return command.subtitle
+        case .bridge(let command):
+            return command.description
+        }
+    }
+
+    var codexCommand: TurnComposerSlashCommand? {
+        if case .codex(let command) = self {
+            return command
+        }
+        return nil
+    }
+
+    static func filtered(
+        matching query: String,
+        within commands: [TurnComposerSlashCommandItem]
+    ) -> [TurnComposerSlashCommandItem] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmedQuery.isEmpty else {
+            return commands
+        }
+        return commands.filter { item in
+            let blob = "\(item.title) \(item.subtitle) \(item.commandToken)".lowercased()
+            return blob.contains(trimmedQuery)
+        }
+    }
+}
 
 enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendable {
     case codeReview

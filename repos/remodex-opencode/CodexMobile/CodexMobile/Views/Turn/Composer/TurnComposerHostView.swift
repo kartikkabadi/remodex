@@ -63,11 +63,20 @@ struct TurnComposerHostView: View {
             hasSubagentsSelection: viewModel.isSubagentsSelectionArmed,
             isPlanModeArmed: viewModel.isPlanModeArmed
         ) && !availableForkDestinations.isEmpty
+        let modelProvider = codex.runtimeModelProviderForTurn(threadId: thread.id)
+        let slashSource = TurnComposerSlashCommandRouting.source(
+            supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            modelProvider: modelProvider
+        )
         let autocompleteState = TurnComposerAutocompleteState(
-            availableSlashCommands: TurnComposerSlashCommand.availableCommands(
-                allowsForkCommand: allowsForkCommand
+            availableSlashCommands: viewModel.availableSlashCommandItems(
+                allowsForkCommand: allowsForkCommand,
+                slashSource: slashSource
             ),
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            usesBridgeSlashCommands: slashSource == .bridgeCommands,
+            isLoadingBridgeSlashCommands: viewModel.isLoadingBridgeSlashCommands,
+            showsBridgeSlashCommandsEmptyHint: viewModel.showsBridgeSlashCommandsEmptyHint,
             supportsThreadFork: runtimeState.capabilities.supportsFork,
             supportsSkillAutocomplete: runtimeState.capabilities.supportsSkillAutocomplete,
             fileAutocompleteItems: viewModel.fileAutocompleteItems,
@@ -251,6 +260,9 @@ struct TurnComposerHostView: View {
                 handleSlashCommandAutocomplete: { text in
                     viewModel.onInputChangedForSlashCommandAutocomplete(
                         text,
+                        codex: codex,
+                        thread: thread,
+                        supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
                         activeTurnID: activeTurnID
                     )
                     viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
@@ -268,28 +280,33 @@ struct TurnComposerHostView: View {
                 viewModel.onSelectPluginAutocomplete(plugin)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },
-            onSelectSlashCommand: { command in
-                switch command {
-                case .codeReview:
-                    viewModel.onSelectSlashCommand(command)
-                case .compact:
-                    viewModel.onSelectSlashCommand(command)
-                    Task {
-                        try? await codex.compactThread(thread.id)
+            onSelectSlashCommand: { item in
+                switch item {
+                case .bridge:
+                    viewModel.onSelectSlashCommandItem(item)
+                case .codex(let command):
+                    switch command {
+                    case .codeReview:
+                        viewModel.onSelectSlashCommand(command)
+                    case .compact:
+                        viewModel.onSelectSlashCommand(command)
+                        Task {
+                            try? await codex.compactThread(thread.id)
+                        }
+                    case .feedback:
+                        viewModel.onSelectSlashCommand(command)
+                        onOpenFeedbackMail()
+                    case .fork:
+                        viewModel.onSelectSlashCommand(
+                            command,
+                            availableForkDestinations: availableForkDestinations
+                        )
+                    case .status:
+                        viewModel.onSelectSlashCommand(command)
+                        onShowStatus()
+                    case .subagents:
+                        viewModel.onSelectSlashCommand(command)
                     }
-                case .feedback:
-                    viewModel.onSelectSlashCommand(command)
-                    onOpenFeedbackMail()
-                case .fork:
-                    viewModel.onSelectSlashCommand(
-                        command,
-                        availableForkDestinations: availableForkDestinations
-                    )
-                case .status:
-                    viewModel.onSelectSlashCommand(command)
-                    onShowStatus()
-                case .subagents:
-                    viewModel.onSelectSlashCommand(command)
                 }
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },

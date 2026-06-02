@@ -52,6 +52,7 @@
 		A4B0C1D2E3F4051627384A10 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4B0C1D2E3F4051627384A0F /* UIKit.framework */; };
 		A9F1B2C3D4E5F60718293A40 /* TurnSkillAutocompleteTokenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1B2C3D4E5F60718293A41 /* TurnSkillAutocompleteTokenTests.swift */; };
 		A9F1B2C3D4E5F60718293A42 /* CodexSkillsListDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1B2C3D4E5F60718293A43 /* CodexSkillsListDecodeTests.swift */; };
+		B2C3D4E5F60718293A4B5C6D /* BridgeSlashCommandDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60718293A4B5C6E /* BridgeSlashCommandDecodeTests.swift */; };
 		A9F1B2C3D4E5F60718293A44 /* CodexTurnInputPayloadSkillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1B2C3D4E5F60718293A45 /* CodexTurnInputPayloadSkillTests.swift */; };
 		A9F1B2C3D4E5F60718293A46 /* CodexStructuredUserInputDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1B2C3D4E5F60718293A47 /* CodexStructuredUserInputDecodeTests.swift */; };
 		AB1C2D3E4F5061728394A5B7 /* TurnComposerReviewModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1C2D3E4F5061728394A5B6 /* TurnComposerReviewModeTests.swift */; };
@@ -176,6 +177,7 @@
 		A932BE773A84EFEA525DF684 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = CodexMobile/Assets.xcassets; sourceTree = "<group>"; };
 		A9F1B2C3D4E5F60718293A41 /* TurnSkillAutocompleteTokenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TurnSkillAutocompleteTokenTests.swift; sourceTree = "<group>"; };
 		A9F1B2C3D4E5F60718293A43 /* CodexSkillsListDecodeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexSkillsListDecodeTests.swift; sourceTree = "<group>"; };
+		B2C3D4E5F60718293A4B5C6E /* BridgeSlashCommandDecodeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeSlashCommandDecodeTests.swift; sourceTree = "<group>"; };
 		A9F1B2C3D4E5F60718293A45 /* CodexTurnInputPayloadSkillTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexTurnInputPayloadSkillTests.swift; sourceTree = "<group>"; };
 		A9F1B2C3D4E5F60718293A47 /* CodexStructuredUserInputDecodeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexStructuredUserInputDecodeTests.swift; sourceTree = "<group>"; };
 		AAB2091CCBD8647AD8C4CE46 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -320,6 +322,7 @@
 				B0C1D2E3F40516273849A5B6 /* TurnSlashCommandTokenTests.swift */,
 				A9F1B2C3D4E5F60718293A41 /* TurnSkillAutocompleteTokenTests.swift */,
 				A9F1B2C3D4E5F60718293A43 /* CodexSkillsListDecodeTests.swift */,
+				B2C3D4E5F60718293A4B5C6E /* BridgeSlashCommandDecodeTests.swift */,
 				A9F1B2C3D4E5F60718293A45 /* CodexTurnInputPayloadSkillTests.swift */,
 				A9F1B2C3D4E5F60718293A47 /* CodexStructuredUserInputDecodeTests.swift */,
 				B3C4D5E6F708192A3B4C5D6F /* CodexPlanModeTests.swift */,
@@ -731,6 +734,7 @@
 				B0C1D2E3F40516273849A5B7 /* TurnSlashCommandTokenTests.swift in Sources */,
 				A9F1B2C3D4E5F60718293A40 /* TurnSkillAutocompleteTokenTests.swift in Sources */,
 				A9F1B2C3D4E5F60718293A42 /* CodexSkillsListDecodeTests.swift in Sources */,
+				B2C3D4E5F60718293A4B5C6D /* BridgeSlashCommandDecodeTests.swift in Sources */,
 				A9F1B2C3D4E5F60718293A44 /* CodexTurnInputPayloadSkillTests.swift in Sources */,
 				A9F1B2C3D4E5F60718293A46 /* CodexStructuredUserInputDecodeTests.swift in Sources */,
 				B3C4D5E6F708192A3B4C5D6E /* CodexPlanModeTests.swift in Sources */,
