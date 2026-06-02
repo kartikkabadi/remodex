@@ -65,6 +65,10 @@ remodex:opencode/
 │   └── litter/                       #    Reference Rust-cored mobile client
 ```
 
+## Phase 2 (OpenCode gaps)
+
+Completed in `repos/remodex-opencode` on base `38ad72b`. See `repos/remodex-opencode/AGENTS.md` Phase 2 table. PR8 catalog handoff flip remains blocked on device E2E.
+
 ## Workflow
 
 ### Branch strategy

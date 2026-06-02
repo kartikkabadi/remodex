@@ -77,3 +77,21 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 | PR5 handoff regression | Done — `opencode-handoff.test.js` + `desktop-handler.test.js` negatives; `005-error-taxonomy.md` aligned |
 | PR6 handoff iOS routing | Done — `DesktopHandoffService` / `TurnViewModel+DesktopHandoff` / toolbar capability gate |
 | PR8 `supportsDesktopHandoff` | **Blocked** — catalog stays `false`; flip after device E2E checklist 8c |
+
+## Phase 2 (done — base `38ad72b`)
+
+| PR | Status | Notes |
+|----|--------|-------|
+| PR9 push | Done | `push-notification-opencode.test.js`; observability push path |
+| PR10 SSE | Done | `session.next.*` in `opencode-client.js`; idle dedupe in provider |
+| PR11 multimodal | Done | file URL parts; composer attach grey-out; `opencode-sdk.md` |
+| PR12 MCP | Done | Settings + `ComposerCapabilityCopy` honesty |
+| PR13 auth | Done | `authConfigured` probe; catalog `opencode` block; Settings summary |
+| PR17 access | Done | Access bar hidden on OpenCode; no sandbox on `turn/start` |
+| PR15 bridge-status | Done | `publishBridgeStatus` + menu bar OpenCode row |
+| PR16 version skew | Done | TurnView banner; `opencode_version_below_minimum` |
+| PR14 launchd | Done | `docs/operations/launchd-opencode-env.md` |
+| PR18 git writer | Done | Codex-only git writer picker models |
+| PR19a plugins | Done | `opencode-sdk.md` spike; no `plugin/list` |
+| PR19 plugin UI | Done | `@plugin` autocomplete gated for OpenCode |
+| PR20 slash | Done | `openCodeExcludedTokens`; `availableCommandsForProvider` test |
