@@ -20,6 +20,18 @@ The bridge publishes status updates via `bridge-status.js`. The status object:
 - `activeTurns: number`
 - `ownedThreads: number`
 
+**OpenCode subsection** (`bridge-status.json` → `opencode`, same object as `runtime/catalog` → `runtimes[].opencode`):
+- `enabled`, `serveUrl`, `version`, `minVersion`, `versionBelowMinimum`
+- `sessionCount`, `lastError`, `command`, `handoffEnvEnabled`, `authConfigured`
+
+### Push notifications (OpenCode)
+
+OpenCode turns use the **same** `pushNotificationTracker.handleOutbound` path as Codex (`bridge.js` outbound relay). Any application message with `turn/completed` and a tracked `threadId`/`turnId` can trigger a completion push when the push service URL is configured.
+
+Signals to watch:
+- `[remodex]` turn lifecycle logs (no `sessionId` in logs)
+- Duplicate `turn/completed` from `session.idle` after `turn.completed` — provider dedupes by `completedTurnIds`
+
 ## Logging
 
 ### Levels

@@ -293,6 +293,39 @@ try {
 }
 ```
 
+## SSE: `session.next.*` (Phase 2)
+
+Newer OpenCode servers emit `session.next.text.delta`, `session.next.tool.called`, `session.next.reasoning.delta`, and related events (including `.1` suffix variants). The bridge `opencode-client.js` maps these to Remodex timeline methods:
+
+| OpenCode event | Bridge method |
+|----------------|---------------|
+| `session.next.text.delta` | `item/agentMessage/delta` |
+| `session.next.text.ended` | `item/agentMessage/delta` + `item/completed` |
+| `session.next.reasoning.delta` | `item/reasoning/textDelta` |
+| `session.next.tool.called` | `item/toolCall` |
+| `session.next.tool.progress` / `success` | `item/toolCallUpdate` |
+| `session.idle` | `turn/completed` (deduped in provider if turn already completed) |
+
+Legacy `message.part.*` events remain supported.
+
+## Multimodal honesty (Phase 2)
+
+When the iOS composer has a local file path, `buildPromptFromTurnInput` sends `{ type: "file", url: file://... }` parts. Without a path, a text placeholder is sent. The composer greys out photo/camera attach on OpenCode threads until device E2E verifies multimodal.
+
+## Plugin discovery (Phase 2 spike — PR19a)
+
+- OpenCode SDK exposes `app.agents`, `app.skills`, and `command.list` — **no** `plugin/list` RPC equivalent to Codex `plugin/list`.
+- Remodex does not synthesize Codex plugin metadata for OpenCode threads.
+- iOS `@plugin` autocomplete is disabled when `runtimeModelProviderForTurn` is `opencode`.
+- Future: if OpenCode adds `app.plugins` or similar, bridge can add a merge path; until then, `supportsPluginMentions` stays UI-gated by provider identity (not a 16th catalog flag).
+
+## Provider auth probe (Phase 2)
+
+`runtime/catalog` → `runtimes[].opencode.authConfigured`:
+- `true` when `provider.list().connected` is non-empty after server start
+- `false` when list succeeds but nothing is connected
+- `null` when the probe cannot run (server down or SDK error)
+
 ## Reference Implementation
 
 dpcode's `apps/server/src/provider/Layers/OpenCodeAdapter.ts` is the reference for all SDK usage patterns. The Remodex bridge adapts these patterns to CommonJS without Effect-TS dependency injection.
