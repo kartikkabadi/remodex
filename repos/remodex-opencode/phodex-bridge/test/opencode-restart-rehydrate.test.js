@@ -238,3 +238,42 @@ test("expired SDK session removes store entry and returns opencode_session_expir
   assert.equal(sessionStore.get("opencode-thread-stale"), null);
   await provider.shutdown();
 });
+
+test("transient getSession failure keeps store entry and propagates error", async () => {
+  const fs = fakeFs();
+  const sessionStore = createOpenCodeSessionStore({
+    storagePath: "/tmp/rehydrate-transient.json",
+    fsImpl: fs,
+  });
+  const ownershipStore = fakeOwnershipStore();
+
+  sessionStore.set("opencode-thread-transient", "ses_ok", {
+    cwd: "/tmp/proj",
+    model: "openai/gpt-5.5",
+    agent: "build",
+  });
+  ownershipStore.setOwnership("opencode-thread-transient", "opencode");
+
+  const provider = makeProvider({
+    sessionStore,
+    ownershipStore,
+    clientFactory: () =>
+      fakeClient({
+        getSessionImpl: async () => {
+          throw new Error("OpenCode SDK request timed out after 90000ms");
+        },
+      }),
+  });
+
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        method: "thread/read",
+        params: { threadId: "opencode-thread-transient" },
+      }),
+    (error) =>
+      error.message.includes("timed out") && error.errorCode !== "opencode_session_expired",
+  );
+  assert.equal(sessionStore.get("opencode-thread-transient"), "ses_ok");
+  await provider.shutdown();
+});

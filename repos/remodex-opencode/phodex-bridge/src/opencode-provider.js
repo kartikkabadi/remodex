@@ -184,14 +184,11 @@ function createOpenCodeProvider({
     try {
       sdkSession = await client.getSession(sessionId);
     } catch (error) {
+      if (!isInvalidOpenCodeSessionError(error)) {
+        throw error;
+      }
       sessions.remove(normalizedThreadId);
-      const expired = new Error(
-        `OpenCode session expired for thread ${normalizedThreadId}. Start a new thread.`,
-      );
-      expired.errorCode = ERROR_CODES.OPENCODE_SESSION_EXPIRED.errorCode;
-      expired.action = ERROR_CODES.OPENCODE_SESSION_EXPIRED.action;
-      expired.reasonCode = "opencode_session_expired";
-      throw expired;
+      throw createOpenCodeSessionExpiredError(normalizedThreadId);
     }
 
     const now = new Date().toISOString();
@@ -805,6 +802,40 @@ function createOpenCodeProvider({
     shutdown,
     getCatalogAvailability,
   };
+}
+
+function isInvalidOpenCodeSessionError(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const status = Number(error.status ?? error.statusCode ?? error.response?.status);
+  if (status === 404) {
+    return true;
+  }
+
+  const message = readString(error.message).toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return (
+    message.includes("session not found") ||
+    message.includes("unknown session") ||
+    message.includes("invalid session") ||
+    message.includes("session does not exist") ||
+    message.includes("session id not found")
+  );
+}
+
+function createOpenCodeSessionExpiredError(threadId) {
+  const expired = new Error(
+    `OpenCode session expired for thread ${threadId}. Start a new thread.`,
+  );
+  expired.errorCode = ERROR_CODES.OPENCODE_SESSION_EXPIRED.errorCode;
+  expired.action = ERROR_CODES.OPENCODE_SESSION_EXPIRED.action;
+  expired.reasonCode = "opencode_session_expired";
+  return expired;
 }
 
 function unsupportedMethodError(method) {
