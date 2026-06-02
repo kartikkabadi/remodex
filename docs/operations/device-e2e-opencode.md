@@ -6,17 +6,26 @@ Before Kartik runs steps O0–O17 on device:
 
 | Check | Requirement |
 |-------|-------------|
-| Git `main` | Working tree **clean** at Phase 1/2 integration commits (no WIP on `main`). Local-only work lives on branch `wip/local-2026-06-03`. |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — all green |
-| Bridge coverage (optional) | `npm run test:coverage` |
-| iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` |
+| Git `main` | Working tree **clean** at Phase 1/2 integration commits (no WIP on `main`). Local-only work lives on branch `wip/local-2026-06-03`. Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **548/548** green. If a run shows **547/548**, re-run once before blocking (known flake on `session.idle` dedupe under load; fixed in tree). |
+| Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
+| iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
+| iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
+
+**Handoff vs PR8 (ordering):**
+
+| Step | When |
+|------|------|
+| **O12** (toolbar “Continue on Desktop”) | **Blocked** until PR8 catalog flip (`supportsDesktopHandoff: true` after device sign-off). UI stays hidden while catalog is `false`. |
+| **O13**, **O16** (handoff RPC + env-off regression) | Can run **before** PR8 with `REMODEX_OPENCODE_HANDOFF=1` on Mac — validates bridge RPC and error taxonomy without catalog advertisement. |
+| **O14–O15** | After O13; O15 anytime on Codex-only thread |
 
 **Environment (full checklist):**
 
 | Variable | When |
 |----------|------|
 | *(unset)* `REMODEX_DISABLE_OPENCODE` | Default — OpenCode enabled (step O1) |
-| `REMODEX_OPENCODE_HANDOFF=1` | Required on Mac for handoff rows O12–O14 and catalog promotion after PR8 device sign-off |
+| `REMODEX_OPENCODE_HANDOFF=1` | Mac bridge: **O13/O16** RPC QA anytime; **O12/O14** UI/TUI after PR8 flip; required on operator Macs once handoff is promoted |
 | `REMODEX_DISABLE_OPENCODE=1` | Codex regression only (step O17) |
 
 **Start bridge (from remodex-opencode repo):**

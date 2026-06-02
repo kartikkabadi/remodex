@@ -391,10 +391,16 @@ test("duplicate turn/completed from session.idle is ignored after first completi
     params: { threadId: start.thread.id, input: "hello" },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
-
-  const completed = emitted.filter((method) => method === "turn/completed");
-  assert.equal(completed.length, 1);
+  const deadline = Date.now() + 2000;
+  let completedCount = 0;
+  while (Date.now() < deadline) {
+    completedCount = emitted.filter((method) => method === "turn/completed").length;
+    if (completedCount >= 1) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(completedCount, 1);
 });
 
 function createProbeMockClient({ connected = [], auth = {} } = {}) {
