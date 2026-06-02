@@ -11,24 +11,41 @@ The iOS app must not make runtime-specific decisions ("if provider is OpenCode, 
 
 ## Decision
 
-Use **12 capability flags** as the single source of truth for what the iOS composer shows, hides, or greys out.
+Use **15 capability flags** as the single source of truth for what the iOS composer shows, hides, or greys out. The authoritative list and per-runtime defaults live in `phodex-bridge/src/provider-capabilities.js` (`CAPABILITIES`, `CODEX_CAPABILITIES`, `OPENCODE_CAPABILITIES`).
 
-### The 12 Flags
+### The 15 Flags
 
-| Flag | What it controls |
-|------|-----------------|
-| `supportsAgentSelection` | Show/hide the OpenCode agent submenu (build/plan/custom) |
-| `supportsReasoningEffort` | Show/hide/grey the Intelligence/Reasoning picker row |
-| `supportsFastMode` | Show/hide/grey the Fast mode toggle |
-| `supportsPlanMode` | Show/hide the Codex Plan mode (+) toggle |
-| `supportsVoice` | Show/hide the Voice recording button |
-| `supportsDesktopHandoff` | Show/hide "Hand off to Mac" button |
-| `supportsWorktree` | Enable/disable worktree operations in git panel |
-| `supportsFork` | Enable/disable thread forking |
-| `supportsApprovals` | Enable/disable approval UI on tool calls |
-| `supportsStreamingTools` | Enable/render-beta tool call blocks in timeline |
-| `supportsSlashCommands` | Enable/disable slash command autocomplete |
-| `supportsMCP` | Show/grey MCP settings row |
+| Flag | What it controls | Codex default | OpenCode default |
+|------|-----------------|---------------|------------------|
+| `supportsAgentSelection` | Show/hide the OpenCode agent submenu (build/plan/custom) | false | true |
+| `supportsReasoningEffort` | Show/hide/grey the Intelligence/Reasoning picker row | true | false* |
+| `supportsFastMode` | Show/hide/grey the Fast mode toggle | true | false* |
+| `supportsPlanMode` | Show/hide the Codex Plan mode (+) toggle | true | false |
+| `supportsVoice` | Show/hide the Voice recording button | true | false |
+| `supportsDesktopHandoff` | Show/hide "Hand off to Mac" button | true | false |
+| `supportsWorktree` | Enable/disable worktree operations in git panel | true | false |
+| `supportsFork` | Enable/disable thread forking | true | true |
+| `supportsApprovals` | Enable/disable approval UI on tool calls | true | true |
+| `supportsStreamingTools` | Enable/render-beta tool call blocks in timeline | true | true |
+| `supportsSlashCommands` | Enable/disable slash command autocomplete | true | true |
+| `supportsMCP` | Show/grey MCP settings row | true | true |
+| `supportsSkillAutocomplete` | Enable/disable `$skill` autocomplete in composer | true | true |
+| `supportsSteer` | Enable/disable mid-turn steer | true | false |
+| `supportsQueue` | Enable/disable iOS-local draft queue | true | true |
+
+\*OpenCode per-model overrides: `resolveModelCapabilities()` sets `supportsReasoningEffort` / `supportsFastMode` to `true` when the SDK lists efforts or fast mode for that model.
+
+### OpenCode runtime enablement
+
+OpenCode is **enabled by default** when the bridge starts. Operators opt out for Codex-only regression:
+
+| Env var | Effect |
+|---------|--------|
+| *(default)* | OpenCode runtime registered and advertised in `runtime/catalog` |
+| `REMODEX_DISABLE_OPENCODE=1` (or `true`) | OpenCode disabled — Codex-only regression |
+| `REMODEX_ENABLE_OPENCODE=0` (legacy) | Same as disable (backward compat) |
+
+Policy implementation: `phodex-bridge/src/opencode-runtime-policy.js`. Tests: `phodex-bridge/test/opencode-runtime-policy.test.js`.
 
 ### Capability Cascade
 
@@ -62,4 +79,4 @@ Every UI row has exactly three states:
 
 **New runtimes self-document.** A new runtime's capability map tells the iOS composer exactly what to show. No coordination needed between bridge and iOS teams.
 
-**The parity matrix is maintainable.** `docs/operations/release-compatibility.md` tracks a matrix of feature × runtime → enabled/greyed/n/a. This is the user-facing view of the capability system.
+**The parity matrix is maintainable.** `docs/operations/release-compatibility.md` tracks a matrix of feature × runtime → enabled/greyed/partial/n/a. This is the user-facing view of the capability system.

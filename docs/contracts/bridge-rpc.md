@@ -69,7 +69,10 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
-        "supportsMCP": true
+        "supportsMCP": true,
+        "supportsSkillAutocomplete": true,
+        "supportsSteer": false,
+        "supportsQueue": true
       }
     }
   ],
@@ -320,7 +323,7 @@ All fields optional. Omit for first page.
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
         "supportsMCP": true,
-        "supportsSkillAutocomplete": false,
+        "supportsSkillAutocomplete": true,
         "supportsSteer": false,
         "supportsQueue": true
       }
@@ -329,18 +332,25 @@ All fields optional. Omit for first page.
 }
 ```
 
+### OpenCode runtime enablement
+
+OpenCode is **on by default**. Disable for Codex-only regression with `REMODEX_DISABLE_OPENCODE=1` (or `true`). Legacy opt-out: `REMODEX_ENABLE_OPENCODE=0` (or `false`). See `opencode-runtime-policy.js` and `docs/architecture/002-capability-model.md`.
+
+When disabled, `runtime/catalog` still returns an OpenCode entry with `enabled: false`, empty `agents`, and full `capabilities` (so iOS can render greyed copy consistently).
+
 **`reasonCode`** (structured, optional per runtime): machine-readable companion to `unavailableReason`. iOS switches on this field instead of substring-matching human copy.
 
 | Value | When |
 |-------|------|
 | `null` | Runtime is available (or Codex, which is always available) |
-| `"opencode_not_enabled"` | `REMODEX_ENABLE_OPENCODE` is not `"1"` or OpenCode command is missing |
-| `"opencode_agents_unavailable"` | OpenCode is enabled but `listAgents()` failed |
+| `"opencode_not_enabled"` | `REMODEX_DISABLE_OPENCODE` is set, OpenCode provider not registered, or `opencode` command missing on PATH |
+| `"opencode_agents_unavailable"` | OpenCode is registered but `listAgents()` failed |
+| `"opencode_server_failed"` | `opencode serve` could not start or health check failed (see catalog builder) |
 
-**When OpenCode is unavailable** (binary missing or `REMODEX_ENABLE_OPENCODE` not set):
+**When OpenCode is unavailable** (`REMODEX_DISABLE_OPENCODE=1`, missing binary, or provider not registered):
 - `enabled: false`
 - `reasonCode: "opencode_not_enabled"`
-- `unavailableReason: "OpenCode is not enabled on this Mac"` (human-readable)
+- `unavailableReason: "OpenCode is not available on this Mac"` (human-readable; exact string may vary)
 - `agents: []`
 
 ### command/list
@@ -368,7 +378,7 @@ Optional project directory for slash-command discovery. `directory` is preferred
 
 **Routing behavior:** Router calls `opencodeProvider.listCommands(directory)` when the OpenCode harness is registered. Otherwise returns `{ commands: [] }`. Does not consult thread ownership and does not call the Codex app-server.
 
-**OpenCode-only notes:** Requires `REMODEX_ENABLE_OPENCODE` and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`.
+**OpenCode-only notes:** Requires OpenCode runtime not disabled (`REMODEX_DISABLE_OPENCODE` unset) and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`. iOS still uses a Codex-hardcoded slash enum until PR3 wires `command/list` for OpenCode threads — parity matrix marks slash as **partial** until then.
 
 ### skills/list
 

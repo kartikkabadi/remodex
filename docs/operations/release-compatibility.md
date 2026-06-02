@@ -35,7 +35,7 @@
 | Reasoning/effort | enabled per model | enabled/greyed per model | Greyed if no effort levels |
 | Fast mode | enabled per model | enabled/greyed per model | Greyed if unsupported |
 | Codex Plan mode (+) | enabled | n/a | Hidden on OpenCode threads |
-| Slash commands | enabled | enabled | Slash commands supported by OpenCode runtime |
+| Slash commands | enabled | partial | Bridge `command/list` works; iOS still Codex-hardcoded enum until PR3 |
 | Skills /$ | enabled | partial | Bridge merges `skills/list` with OpenCode `app.skills()` when SDK returns data; device E2E required |
 | MCP settings | enabled | enabled | MCP supported by OpenCode runtime |
 | Git actions | enabled | enabled | Bridge-local, works on all threads |
@@ -73,6 +73,6 @@ Run before parity sign-off. Bridge: `cd phodex-bridge && npm start` (OpenCode is
 5. Fork and desktop handoff hidden on OpenCode threads.
 6. Disable OpenCode on Mac; composer shows unavailable banner with mapped copy.
 7. Bridge restart; OpenCode thread still routes correctly (thread ownership).
-8. Codex regression: bridge without `REMODEX_ENABLE_OPENCODE` — composer unchanged.
+8. Codex regression: `REMODEX_DISABLE_OPENCODE=1` on Mac — composer unchanged for Codex threads.
 9. Settings: default OpenCode agent persists across relaunch.
 10. Sidebar: provider badge and Beta capsule on OpenCode threads.
