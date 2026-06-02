@@ -79,11 +79,11 @@ function fakeServer() {
   };
 }
 
-function fakeClient({ getSessionImpl, getMessagesImpl } = {}) {
+function fakeClient({ getSessionImpl, getMessagesImpl, createSessionImpl } = {}) {
   return {
     listModels: async () => [],
     listAgents: async () => [{ id: "build", label: "Build" }],
-    createSession: async () => "ses_new",
+    createSession: createSessionImpl || (async () => "ses_new"),
     getSession:
       getSessionImpl ||
       (async (sessionId) => ({
@@ -237,4 +237,65 @@ test("expired SDK session removes store entry and returns opencode_session_expir
   );
   assert.equal(sessionStore.get("opencode-thread-stale"), null);
   await provider.shutdown();
+});
+
+test("turn/start rehydrates from persisted session after provider restart", async () => {
+  const fs = fakeFs();
+  const sessionStore = createOpenCodeSessionStore({
+    storagePath: "/tmp/rehydrate-turn-start.json",
+    fsImpl: fs,
+  });
+  const ownershipStore = fakeOwnershipStore();
+  let createSessionCalls = 0;
+
+  const provider1 = makeProvider({
+    sessionStore,
+    ownershipStore,
+    clientFactory: () =>
+      fakeClient({
+        createSessionImpl: async () => {
+          createSessionCalls += 1;
+          return "ses_persisted";
+        },
+      }),
+  });
+
+  const started = await provider1.handleRequest({
+    method: "thread/start",
+    params: { cwd: "/tmp/rehydrate-turn-start", model: "openai/gpt-5.5" },
+  });
+  const threadId = started.thread.id;
+
+  await provider1.handleRequest({
+    method: "turn/start",
+    params: { threadId, input: "first message" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await provider1.shutdown();
+
+  assert.equal(createSessionCalls, 1);
+  assert.equal(sessionStore.get(threadId), "ses_persisted");
+
+  const provider2 = makeProvider({
+    sessionStore,
+    ownershipStore,
+    clientFactory: () =>
+      fakeClient({
+        createSessionImpl: async () => {
+          createSessionCalls += 1;
+          return "ses_should_not_happen";
+        },
+      }),
+  });
+
+  const turn = await provider2.handleRequest({
+    method: "turn/start",
+    params: { threadId, input: "after restart" },
+  });
+
+  assert.ok(turn.turnId);
+  assert.equal(turn.turn.threadId, threadId);
+  assert.equal(createSessionCalls, 1, "rehydrated turn should reuse persisted session");
+  await new Promise((resolve) => setImmediate(resolve));
+  await provider2.shutdown();
 });

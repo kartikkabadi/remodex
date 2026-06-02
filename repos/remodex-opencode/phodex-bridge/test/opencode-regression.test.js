@@ -1,6 +1,6 @@
 // FILE: opencode-regression.test.js
-// Purpose: Verifies that explicit OpenCode disable flags keep Codex-only routing:
-//          runtime catalog excludes opencode, and the provider is not created.
+// Purpose: Verifies OpenCode disable flags, router lifecycle RPCs (command/list,
+//          skills/list, desktop/continueOpenCode handoff), and Codex-only regression.
 // Layer: Unit test
 // Exports: node:test suite
 // Depends on: node:test, node:assert/strict, ../src/runtime-provider-router, ./test-env (preload)
@@ -17,9 +17,88 @@ if (process.env.REMODEX_TEST !== "1") {
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createRuntimeProviderRouter } = require("../src/runtime-provider-router");
+const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
 function waitOneTick() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function mockOpenCodeProvider(overrides = {}) {
+  return {
+    id: "opencode",
+    async listModels() {
+      return [];
+    },
+    async listAgents() {
+      return [{ id: "build", label: "Build" }];
+    },
+    async listCommands(directory) {
+      return [
+        { token: "/build", title: "Build", description: "Build the project", directory },
+      ];
+    },
+    async listSkills(directory) {
+      return [
+        {
+          name: "opencode-skill",
+          description: "From OpenCode",
+          path: `${directory}/.agents/skills/opencode-skill/SKILL.md`,
+          scope: "project",
+          enabled: true,
+        },
+      ];
+    },
+    async getHandoffContext(threadId) {
+      return {
+        threadId,
+        sessionId: "ses_handoff",
+        cwd: "/tmp/handoff-project",
+        model: "openai/gpt-5.5",
+        agent: "build",
+        title: "Handoff thread",
+      };
+    },
+    async selectTuiSession(sessionId) {
+      assert.equal(sessionId, "ses_handoff");
+      return true;
+    },
+    listThreads: async () => ({ data: [] }),
+    ownsThread() {
+      return false;
+    },
+    handleRequest() {},
+    ...overrides,
+  };
+}
+
+function createTestRouter(overrides = {}) {
+  let payload = null;
+  let resolveResponse;
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse(message) {
+      payload = JSON.parse(message);
+      resolveResponse?.();
+    },
+    sendRuntimeMessage: () => {},
+    logPrefix: "[test]",
+    ...overrides,
+  });
+  return {
+    router,
+    async request(request, { timeoutMs = 5000 } = {}) {
+      payload = null;
+      const responsePromise = new Promise((resolve) => {
+        resolveResponse = resolve;
+      });
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(resolve, timeoutMs);
+      });
+      router.handleApplicationMessage(JSON.stringify(request));
+      await Promise.race([responsePromise, timeoutPromise]);
+      return payload;
+    },
+  };
 }
 
 test("runtime catalog excludes opencode when flag is off", async () => {
@@ -168,5 +247,170 @@ test("provider is created by default", async (t) => {
     delete process.env.REMODEX_ENABLE_OPENCODE;
   } else {
     process.env.REMODEX_ENABLE_OPENCODE = previousEnable;
+  }
+});
+
+test("command/list returns empty when OpenCode provider is absent", async () => {
+  const { request } = createTestRouter({ providers: [] });
+  const response = await request({
+    id: "cmd-off",
+    method: "command/list",
+    params: { directory: "/tmp/repo" },
+  });
+
+  assert.equal(response.id, "cmd-off");
+  assert.deepEqual(response.result.commands, []);
+});
+
+test("command/list returns OpenCode slash commands when provider is registered", async () => {
+  const { request } = createTestRouter({ providers: [mockOpenCodeProvider()] });
+  const response = await request({
+    id: "cmd-on",
+    method: "command/list",
+    params: { directory: "/tmp/repo" },
+  });
+
+  assert.equal(response.id, "cmd-on");
+  assert.equal(response.result.commands.length, 1);
+  assert.equal(response.result.commands[0].token, "/build");
+});
+
+test("skills/list omits OpenCode skills when provider is absent", async () => {
+  const { request } = createTestRouter({
+    providers: [],
+    sendCodexRequest: async () => ({
+      data: [
+        {
+          cwd: "/tmp/repo",
+          skills: [
+            {
+              name: "codex-skill",
+              description: "From Codex",
+              path: "/tmp/repo/.agents/skills/codex-skill/SKILL.md",
+              scope: "project",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  const response = await request({
+    id: "skills-off",
+    method: "skills/list",
+    params: { cwds: ["/tmp/repo"] },
+  });
+
+  const bucket = response.result.data.find((entry) => entry.cwd === "/tmp/repo");
+  assert.deepEqual(bucket.skills.map((skill) => skill.name), ["codex-skill"]);
+});
+
+test("skills/list merges OpenCode skills when provider is registered", async () => {
+  const { request } = createTestRouter({
+    providers: [mockOpenCodeProvider()],
+    sendCodexRequest: async () => ({
+      data: [
+        {
+          cwd: "/tmp/repo",
+          skills: [
+            {
+              name: "codex-skill",
+              description: "From Codex",
+              path: "/tmp/repo/.agents/skills/codex-skill/SKILL.md",
+              scope: "project",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  const response = await request({
+    id: "skills-on",
+    method: "skills/list",
+    params: { cwds: ["/tmp/repo"] },
+  });
+
+  const bucket = response.result.data.find((entry) => entry.cwd === "/tmp/repo");
+  assert.deepEqual(bucket.skills.map((skill) => skill.name).sort(), [
+    "codex-skill",
+    "opencode-skill",
+  ]);
+});
+
+test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate is off", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-handoff-disabled-ownership.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
+
+  const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
+  delete process.env.REMODEX_OPENCODE_HANDOFF;
+
+  const { request } = createTestRouter({
+    providers: [mockOpenCodeProvider()],
+    ownershipStore,
+  });
+  const response = await request({
+    id: "handoff-off",
+    method: "desktop/continueOpenCode",
+    params: { threadId: "opencode-thread-handoff" },
+  });
+
+  assert.equal(response.id, "handoff-off");
+  assert.equal(response.error.data.errorCode, "opencode_handoff_disabled");
+
+  if (previousHandoff === undefined) {
+    delete process.env.REMODEX_OPENCODE_HANDOFF;
+  } else {
+    process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
+  }
+});
+
+test("desktop/continueOpenCode succeeds when handoff env gate is on", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-handoff-enabled-ownership.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
+
+  const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
+  process.env.REMODEX_OPENCODE_HANDOFF = "1";
+
+  const { request } = createTestRouter({
+    providers: [mockOpenCodeProvider()],
+    ownershipStore,
+  });
+  const response = await request({
+    id: "handoff-on",
+    method: "desktop/continueOpenCode",
+    params: { threadId: "opencode-thread-handoff" },
+  });
+
+  assert.equal(response.id, "handoff-on");
+  assert.equal(response.result.success, true);
+  assert.equal(response.result.sessionId, "ses_handoff");
+  assert.equal(response.result.handoffMode, "tui");
+  assert.equal(response.result.sessionSelected, true);
+
+  if (previousHandoff === undefined) {
+    delete process.env.REMODEX_OPENCODE_HANDOFF;
+  } else {
+    process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
   }
 });
