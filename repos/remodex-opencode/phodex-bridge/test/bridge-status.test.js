@@ -66,3 +66,32 @@ test("status publisher heartbeat emits stale relay downgrade without mutating la
   assert.equal(published.at(-1).connectionStatus, "disconnected");
   assert.equal(publisher.latest().connectionStatus, "connected");
 });
+
+test("bridge status publisher accepts opencode subsection on publish payload", () => {
+  const published = [];
+  const publisher = createBridgeStatusPublisher({
+    onBridgeStatus(status) {
+      published.push(status);
+    },
+    getCodexLaunchState() {
+      return "connected";
+    },
+  });
+
+  publisher.publish({
+    state: "running",
+    connectionStatus: "connected",
+    pid: 99,
+    lastError: "",
+    opencode: {
+      enabled: true,
+      version: "2.1.0",
+      sessionCount: 3,
+      authConfigured: true,
+    },
+  });
+
+  assert.equal(published[0].opencode.enabled, true);
+  assert.equal(published[0].opencode.sessionCount, 3);
+  assert.equal(published[0].opencode.authConfigured, true);
+});

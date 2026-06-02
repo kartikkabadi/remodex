@@ -100,10 +100,14 @@ struct BridgeMenuBarContentView: View {
             if let opencode = store.snapshot?.bridgeStatus?.opencode {
                 let versionLabel = opencode.version?.nonEmptyTrimmed ?? "unknown"
                 let enabledLabel = (opencode.enabled == true) ? "enabled" : "disabled"
-                LabelValueRow(
-                    label: "OpenCode",
-                    value: "\(enabledLabel) · v\(versionLabel) · \(opencode.sessionCount ?? 0) sessions"
-                )
+                var detail = "\(enabledLabel) · v\(versionLabel) · \(opencode.sessionCount ?? 0) sessions"
+                if opencode.versionBelowMinimum == true {
+                    detail += " · below minimum"
+                }
+                if let lastError = opencode.lastError?.nonEmptyTrimmed {
+                    detail += " · \(lastError)"
+                }
+                LabelValueRow(label: "OpenCode", value: detail)
             }
         }
         .padding(12)

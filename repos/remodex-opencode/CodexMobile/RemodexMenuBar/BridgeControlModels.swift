@@ -37,6 +37,7 @@ struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
     let lastError: String?
     let command: String?
     let handoffEnvEnabled: Bool?
+    let authConfigured: Bool?
 }
 
 struct BridgeRuntimeStatus: Codable, Equatable {
