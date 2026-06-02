@@ -22,7 +22,10 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node ./bin/remodex.js up",
-    "test": "node -r ./test/test-env.js --test ./test/*.test.js",
+    "test": "node -r ./test/test-env.js --test --test-timeout=60000 --test-force-exit ./test/*.test.js",
+    "test:fast": "node -r ./test/test-env.js --test --test-timeout=30000 --test-force-exit ./test/*.test.js",
+    "test:full": "env REMODEX_TEST_FULL=1 node -r ./test/test-env.js --test --test-timeout=120000 --test-force-exit ./test/*.test.js",
+    "test:opencode": "node -r ./test/test-env.js --test --test-timeout=30000 --test-force-exit ./test/opencode-regression.test.js ./test/opencode-runtime-policy.test.js ./test/runtime-provider-router.test.js ./test/provider-capabilities.test.js ./test/json-file-store.test.js ./test/resolvedParam.test.js ./test/opencode-models.test.js",
     "lint": "node ./node_modules/oxlint/bin/oxlint",
     "fmt": "node ./node_modules/oxfmt/bin/oxfmt",
     "fmt:check": "node ./node_modules/oxfmt/bin/oxfmt --check",

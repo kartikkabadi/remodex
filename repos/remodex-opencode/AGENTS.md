@@ -9,10 +9,14 @@ cd phodex-bridge
 npm start
 ```
 
-For full bridge tests:
+Install deps once, then run tests:
 ```bash
 cd phodex-bridge
-npm test
+npm install
+npm run test:fast    # default (~25s model-list budget → 100ms in test-env)
+npm test             # same harness, 60s per-test cap
+npm run test:full    # production model-list budget (~25s) for realism
+npm run test:opencode # OpenCode + router subset only
 ```
 
 ## Where Everything Lives

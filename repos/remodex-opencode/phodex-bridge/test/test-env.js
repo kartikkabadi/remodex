@@ -11,3 +11,21 @@ if (!process.env.REMODEX_TEST) {
 if (!process.env.REMODEX_DISABLE_OPENCODE) {
   process.env.REMODEX_DISABLE_OPENCODE = "1";
 }
+
+// Default unit-test budget (production default is ~25s). Skipped when REMODEX_TEST_FULL=1.
+if (
+  !process.env.REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS &&
+  process.env.REMODEX_TEST_FULL !== "1"
+) {
+  process.env.REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS = "100";
+}
+
+// Shorten opencode serve start/health waits in unit tests (production: 15s / 5s).
+if (process.env.REMODEX_TEST_FULL !== "1") {
+  if (!process.env.REMODEX_OPENCODE_START_TIMEOUT_MS) {
+    process.env.REMODEX_OPENCODE_START_TIMEOUT_MS = "250";
+  }
+  if (!process.env.REMODEX_OPENCODE_HEALTH_TIMEOUT_MS) {
+    process.env.REMODEX_OPENCODE_HEALTH_TIMEOUT_MS = "250";
+  }
+}

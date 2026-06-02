@@ -10,9 +10,17 @@ const { spawn } = require("child_process");
 const http = require("http");
 const net = require("net");
 
-const START_TIMEOUT_MS = 15_000;
+function resolveTimeoutMs(envKey, defaultMs) {
+  const numeric = Number(readString(process.env[envKey]));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return defaultMs;
+  }
+  return Math.min(Math.floor(numeric), defaultMs);
+}
+
+const START_TIMEOUT_MS = resolveTimeoutMs("REMODEX_OPENCODE_START_TIMEOUT_MS", 15_000);
 const SHUTDOWN_TIMEOUT_MS = 5_000;
-const HEALTH_TIMEOUT_MS = 5_000;
+const HEALTH_TIMEOUT_MS = resolveTimeoutMs("REMODEX_OPENCODE_HEALTH_TIMEOUT_MS", 5_000);
 const PORT_RANGE_START = 4200;
 const PORT_RANGE_END = 4299;
 const SERVE_HOST = "127.0.0.1";
