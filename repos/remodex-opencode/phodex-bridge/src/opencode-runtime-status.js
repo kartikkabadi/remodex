@@ -41,6 +41,7 @@ function buildOpenCodeRuntimeStatus({
   lastError = "",
   command = "",
   handoffEnvEnabled = false,
+  authConfigured = null,
 } = {}) {
   const normalizedVersion = readString(version);
   const versionBelowMinimum =
@@ -56,7 +57,8 @@ function buildOpenCodeRuntimeStatus({
     lastError: readString(lastError) || null,
     command: readString(command) || "opencode",
     handoffEnvEnabled: Boolean(handoffEnvEnabled),
-    authConfigured: null,
+    authConfigured:
+      authConfigured === true || authConfigured === false ? authConfigured : null,
   };
 }
 

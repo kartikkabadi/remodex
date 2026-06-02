@@ -31,3 +31,15 @@ test("buildOpenCodeRuntimeStatus marks versionBelowMinimum", () => {
   assert.equal(status.sessionCount, 2);
   assert.equal(status.handoffEnvEnabled, true);
 });
+
+test("buildOpenCodeRuntimeStatus preserves authConfigured tri-state", () => {
+  assert.equal(
+    buildOpenCodeRuntimeStatus({ authConfigured: true }).authConfigured,
+    true,
+  );
+  assert.equal(
+    buildOpenCodeRuntimeStatus({ authConfigured: false }).authConfigured,
+    false,
+  );
+  assert.equal(buildOpenCodeRuntimeStatus({}).authConfigured, null);
+});
