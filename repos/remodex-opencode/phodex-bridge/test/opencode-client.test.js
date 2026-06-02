@@ -297,3 +297,78 @@ test("dispatchEvent maps session.next.reasoning.delta", () => {
   );
   assert.deepEqual(events, ["item/reasoning/textDelta"]);
 });
+
+test("dispatchEvent maps session.idle to turn/completed", () => {
+  const events = [];
+  dispatchEvent(
+    { type: "session.idle", properties: { sessionID: "ses-1", turnID: "turn-9" } },
+    (method, payload) => events.push([method, payload]),
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0][0], "turn/completed");
+  assert.equal(events[0][1].status, "completed");
+});
+
+function createProbeMockClient({ connected = [], auth = {} } = {}) {
+  return function createOpencodeClient() {
+    return {
+      provider: {
+        list: async () => ({ connected }),
+        auth: async () => auth,
+      },
+      app: { agents: async () => ({ data: [] }), skills: async () => [] },
+      session: {
+        create: async () => "ses_probe",
+        get: async () => ({}),
+        prompt: async () => ({}),
+        setConfig: async () => ({}),
+        abort: async () => ({}),
+        messages: async () => ({ messages: [] }),
+        fork: async () => "ses_fork",
+      },
+      permission: { reply: async () => ({}) },
+      command: { list: async () => [] },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* empty() {})(),
+          close: () => {},
+        }),
+      },
+      tui: { selectSession: async () => ({}) },
+    };
+  };
+}
+
+test("probeConnectedProviders returns false when connected list is empty", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: createProbeMockClient({ connected: [] }),
+  });
+  assert.equal(await client.probeConnectedProviders(), false);
+});
+
+test("probeConnectedProviders returns true when connected providers exist", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: createProbeMockClient({ connected: ["anthropic"] }),
+  });
+  assert.equal(await client.probeConnectedProviders(), true);
+});
+
+test("probeProviderAuthState returns true when auth methods are configured", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: createProbeMockClient({
+      auth: { anthropic: ["oauth"], openai: ["api"] },
+    }),
+  });
+  assert.equal(await client.probeProviderAuthState(), true);
+});
+
+test("probeProviderAuthState returns false when auth payload has no methods", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: createProbeMockClient({ auth: { anthropic: [] } }),
+  });
+  assert.equal(await client.probeProviderAuthState(), false);
+});

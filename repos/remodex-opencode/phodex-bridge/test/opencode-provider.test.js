@@ -6,6 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { createOpenCodeClient, dispatchEvent } = require("../src/opencode-client");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
 
 const activeProviders = [];
@@ -368,8 +369,11 @@ test("duplicate turn/completed from session.idle is ignored after first completi
       ...fakeClient(),
       subscribeToEvents: (handler) => {
         setImmediate(() => {
-          handler("turn/completed", { status: "completed" });
-          handler("turn/completed", { status: "completed" });
+          dispatchEvent({ type: "turn/completed", status: "completed" }, handler);
+          dispatchEvent(
+            { type: "session.idle", properties: { sessionID: "ses_fake123" } },
+            handler,
+          );
         });
         return () => {};
       },
@@ -391,6 +395,54 @@ test("duplicate turn/completed from session.idle is ignored after first completi
 
   const completed = emitted.filter((method) => method === "turn/completed");
   assert.equal(completed.length, 1);
+});
+
+function createProbeMockClient({ connected = [], auth = {} } = {}) {
+  return async () =>
+    createOpenCodeClient({
+      baseUrl: "http://127.0.0.1:4291",
+      createOpencodeClientImpl: () => () => ({
+        provider: {
+          list: async () => ({ connected }),
+          auth: async () => auth,
+        },
+        app: { agents: async () => ({ data: [] }), skills: async () => [] },
+        session: {
+          create: async () => "ses_probe",
+          get: async () => ({}),
+          prompt: async () => ({}),
+          setConfig: async () => ({}),
+          abort: async () => ({}),
+          messages: async () => ({ messages: [] }),
+          fork: async () => "ses_fork",
+        },
+        permission: { reply: async () => ({}) },
+        command: { list: async () => [] },
+        event: {
+          subscribe: async () => ({
+            stream: (async function* empty() {})(),
+            close: () => {},
+          }),
+        },
+        tui: { selectSession: async () => ({}) },
+      }),
+    });
+}
+
+test("getRuntimeStatus exposes authConfigured after connected provider probe", async () => {
+  const probeClient = {
+    ...fakeClient(),
+    probeConnectedProviders: async () => true,
+    probeProviderAuthState: async () => null,
+  };
+  const provider = makeProvider({
+    clientFactory: async () => probeClient,
+  });
+
+  await provider.warmup();
+
+  const status = provider.getRuntimeStatus();
+  assert.equal(status.authConfigured, true);
 });
 
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
