@@ -77,9 +77,9 @@ struct SettingsRuntimeDefaultsCard: View {
             }
             .pickerStyle(.menu)
             .tint(settingsAccentColor)
-            .disabled(gitWriterModelOptions.isEmpty)
+            .disabled(!isGitWriterModelPickerEnabled)
 
-            Text("Used for AI-generated commit messages and PR drafts. Defaults to GPT-5.4 Mini when available.")
+            Text("Used for AI-generated commit messages and PR drafts on Codex. OpenCode threads still use Codex git writer models on the bridge.")
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
@@ -91,15 +91,29 @@ struct SettingsRuntimeDefaultsCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(ComposerCapabilityCopy.capabilityReason(for: .mcp))
+            Text("Configure MCP in OpenCode on your Mac — not from Remodex.")
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
         }
     }
 
     private func openCodeRuntimeFootnote(_ runtime: RuntimeInfo) -> String {
+        let details = runtime.opencode
         if runtime.enabled {
-            return "OpenCode is available on your Mac bridge. Desktop handoff stays greyed until device E2E (checklist step 8c)."
+            var summary = ComposerCapabilityCopy.openCodeStatusSummary(
+                version: details?.version,
+                minVersion: details?.minVersion,
+                handoffEnvEnabled: details?.handoffEnvEnabled ?? false
+            )
+            if let auth = details?.authConfigured {
+                summary += auth ? " · Auth configured" : " · Auth not configured on Mac"
+            } else {
+                summary += " · Auth status unknown"
+            }
+            if details?.versionBelowMinimum == true {
+                summary += " · Upgrade OpenCode on your Mac"
+            }
+            return summary
         }
         return runtime.unavailableReason ?? "OpenCode is not available on this Mac bridge."
     }
@@ -171,9 +185,14 @@ struct SettingsRuntimeDefaultsCard: View {
     }
 
     private var gitWriterModelOptions: [CodexModelOption] {
-        TurnComposerMetaMapper.orderedModels(from: codex.availableModels.filter {
-            $0.modelProvider == CodexModelOption.normalizedProvider("codex")
-        })
+        let codexOnly = codex.availableModels.filter {
+            CodexModelOption.normalizedProvider($0.modelProvider) == "codex"
+        }
+        return TurnComposerMetaMapper.orderedModels(from: codexOnly)
+    }
+
+    private var isGitWriterModelPickerEnabled: Bool {
+        !gitWriterModelOptions.isEmpty
     }
 
     private var gitWriterModelSelection: Binding<String> {

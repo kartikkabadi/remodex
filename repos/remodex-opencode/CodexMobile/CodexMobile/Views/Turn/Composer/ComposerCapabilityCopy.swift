@@ -79,6 +79,11 @@ enum ComposerCapabilityCopy {
                 return ("OpenCode is not enabled on this Mac", "Enable OpenCode on your Mac bridge to use this runtime.")
             case "opencode_agents_unavailable":
                 return ("OpenCode agents could not be listed", "Check OpenCode on your Mac, then refresh the connection.")
+            case "opencode_version_below_minimum":
+                return (
+                    "OpenCode on your Mac is too old",
+                    "Upgrade OpenCode on your Mac, then reconnect Remodex."
+                )
             default:
                 break
             }

@@ -303,6 +303,10 @@ struct ComposerBottomBar: View {
                     RemodexIcon.menuLabel("Photo library", systemName: "photo")
                 }
                 .disabled(remainingAttachmentSlots == 0)
+                .capabilityGreyOut(
+                    isEnabled: supportsImageAttachments,
+                    reason: ComposerCapabilityCopy.capabilityReason(for: .imageAttachments)
+                )
 
                 Button {
                     HapticFeedback.shared.triggerImpactFeedback()
@@ -311,6 +315,10 @@ struct ComposerBottomBar: View {
                     RemodexIcon.menuLabel("Take a photo", systemName: "camera.fill")
                 }
                 .disabled(remainingAttachmentSlots == 0)
+                .capabilityGreyOut(
+                    isEnabled: supportsImageAttachments,
+                    reason: ComposerCapabilityCopy.capabilityReason(for: .imageAttachments)
+                )
             }
         } label: {
             RemodexIcon.image(systemName: "plus")
@@ -331,6 +339,10 @@ struct ComposerBottomBar: View {
 
     private var fastModePlusMenuIconName: String {
         runtimeState.isSelectedServiceTier(.fast) ? "bolt.fill" : "bolt"
+    }
+
+    private var supportsImageAttachments: Bool {
+        runtimeState.showsComposerAccessMode
     }
 
     private var queueBadge: some View {

@@ -303,6 +303,17 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         )
     }
 
+    func testAvailableCommandsForOpenCodeProviderExcludeReviewAndSubagents() {
+        let commands = TurnComposerSlashCommand.availableCommandsForProvider(
+            allowsForkCommand: true,
+            modelProvider: "opencode"
+        )
+        let tokens = Set(commands.map(\.commandToken))
+        XCTAssertFalse(tokens.contains("/review"))
+        XCTAssertFalse(tokens.contains("/subagents"))
+        XCTAssertTrue(tokens.contains("/compact"))
+    }
+
     func testSlashCommandRoutingUsesBridgeListForOpenCodeProvider() {
         XCTAssertEqual(
             TurnComposerSlashCommandRouting.source(

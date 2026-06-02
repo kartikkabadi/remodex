@@ -662,6 +662,50 @@ struct TurnView: View {
             && CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: thread.id)) == "opencode"
     }
 
+    private var openCodeVersionSkewBanner: AnyView? {
+        guard CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: thread.id)) == "opencode",
+              let runtime = codex.openCodeRuntimeCatalogEntry else {
+            return nil
+        }
+        if runtime.opencode?.versionBelowMinimum == true {
+            let message = ComposerCapabilityCopy.runtimeUnavailableMessage(
+                runtime.unavailableReason,
+                reasonCode: "opencode_version_below_minimum"
+            )
+            return AnyView(openCodeBannerView(title: message.title, hint: message.hint))
+        }
+        if !runtime.enabled, let reason = runtime.unavailableReason, !reason.isEmpty {
+            let message = ComposerCapabilityCopy.runtimeUnavailableMessage(
+                reason,
+                reasonCode: runtime.reasonCode
+            )
+            return AnyView(openCodeBannerView(title: message.title, hint: message.hint))
+        }
+        return nil
+    }
+
+    private func openCodeBannerView(title: String, hint: String?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(AppFont.subheadline(weight: .semibold))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AppFont.subheadline(weight: .semibold))
+                if let hint {
+                    Text(hint)
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 20))
+    }
+
     private var supportsApprovals: Bool {
         codex.selectedModelOption(threadId: thread.id)?.capabilities.supportsApprovals ?? true
     }
@@ -1403,6 +1447,12 @@ struct TurnView: View {
 
             if isForkingThread {
                 forkLoadingNotice
+                    .padding(.horizontal, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if let skewBanner = openCodeVersionSkewBanner {
+                skewBanner
                     .padding(.horizontal, 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

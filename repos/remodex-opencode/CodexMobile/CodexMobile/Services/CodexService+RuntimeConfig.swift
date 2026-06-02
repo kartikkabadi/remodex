@@ -130,10 +130,14 @@ extension CodexService {
         return isConnected && isInitialized
     }
 
-    private var openCodeRuntimeCatalogEntry: RuntimeInfo? {
+    var openCodeRuntimeCatalogEntry: RuntimeInfo? {
         availableRuntimes.first {
             CodexModelOption.normalizedProvider($0.id) == "opencode"
         }
+    }
+
+    var openCodeRuntimeDetails: OpenCodeRuntimeDetails? {
+        openCodeRuntimeCatalogEntry?.opencode
     }
 
     func listModels() async throws {
@@ -457,6 +461,12 @@ extension CodexService {
 
             let showsBetaLabel = runtimeObj["showsBetaLabel"]?.boolValue ?? false
 
+            var opencodeDetails: OpenCodeRuntimeDetails?
+            if let opencodeObj = runtimeObj["opencode"]?.objectValue,
+               let opencodeData = try? JSONEncoder().encode(opencodeObj) {
+                opencodeDetails = try? JSONDecoder().decode(OpenCodeRuntimeDetails.self, from: opencodeData)
+            }
+
             let runtimeInfo = RuntimeInfo(
                 id: runtimeId,
                 label: label,
@@ -465,7 +475,8 @@ extension CodexService {
                 reasonCode: reasonCode,
                 showsBetaLabel: showsBetaLabel,
                 capabilities: capabilities,
-                agents: agents
+                agents: agents,
+                opencode: opencodeDetails
             )
             nextRuntimes.append(runtimeInfo)
             nextAgents.append(contentsOf: agents)
@@ -781,6 +792,16 @@ extension CodexService {
     }
 
     func sendRequestWithSandboxFallback(method: String, baseParams: RPCObject) async throws -> RPCMessage {
+        if method == "turn/start",
+           let threadId = baseParams["threadId"]?.stringValue,
+           CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId)) == "opencode" {
+            return try await sendRequestWithApprovalPolicyFallback(
+                method: method,
+                baseParams: baseParams,
+                context: "opencode-minimal"
+            )
+        }
+
         var firstAttemptParams = baseParams
         firstAttemptParams["sandboxPolicy"] = runtimeSandboxPolicyObject(for: selectedAccessMode)
 

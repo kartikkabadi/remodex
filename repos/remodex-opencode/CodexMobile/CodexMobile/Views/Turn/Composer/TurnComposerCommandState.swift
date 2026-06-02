@@ -236,6 +236,17 @@ enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendabl
         }
     }
 
+    static func availableCommandsForProvider(
+        allowsForkCommand: Bool,
+        modelProvider: String
+    ) -> [TurnComposerSlashCommand] {
+        let includeCodexOnly = CodexModelOption.normalizedProvider(modelProvider) != "opencode"
+        return availableCommands(
+            allowsForkCommand: allowsForkCommand,
+            includeCodexOnlyCommands: includeCodexOnly
+        )
+    }
+
     static let openCodeExcludedTokens: Set<String> = ["/review", "/subagents"]
 }
 
