@@ -242,7 +242,7 @@ async function createOpenCodeClient({
       client.session.messages({ sessionID: sessionId }),
       REQUEST_TIMEOUT_MS,
     );
-    return response?.messages || [];
+    return normalizeSessionMessagesResponse(response);
   }
 
   async function replyToPermission(requestId, allow) {
@@ -487,6 +487,22 @@ function readOpenCodeEventProperties(event) {
   return event || {};
 }
 
+function normalizeSessionMessagesResponse(response) {
+  if (Array.isArray(response)) {
+    return response;
+  }
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+  if (Array.isArray(response?.messages)) {
+    return response.messages;
+  }
+  if (Array.isArray(response?.items)) {
+    return response.items;
+  }
+  return [];
+}
+
 function openCodeToolContentText(content) {
   if (!Array.isArray(content)) {
     return "";
@@ -511,10 +527,14 @@ function dispatchEvent(event, handler) {
       break;
 
     case "message.part.added": {
-      const partType = readString(event.part?.type || event.partType);
-      const turnId = readString(event.turnID || event.turnId);
-      const itemId = readString(event.partID || event.partId) || `part-${Date.now()}`;
-      const text = readString(event.part?.text || event.text || event.content);
+      const props = readOpenCodeEventProperties(event);
+      const part = props.part && typeof props.part === "object" ? props.part : event.part || {};
+      const partType = readString(part.type || event.partType);
+      const turnId = readString(props.turnID || props.turnId || event.turnID || event.turnId);
+      const itemId =
+        readString(part.id || props.partID || props.partId || event.partID || event.partId) ||
+        `part-${Date.now()}`;
+      const text = readString(part.text || props.text || event.text || event.content);
       if (partType === "tool_call" || partType === "tool") {
         handler("item/toolCall", {
           turnId,
@@ -536,26 +556,33 @@ function dispatchEvent(event, handler) {
     }
 
     case "message.part.delta": {
-      const partType = readString(event.part?.type || event.partType);
-      const turnId = readString(event.turnID || event.turnId);
-      const itemId = readString(event.partID || event.partId) || `agent-${Date.now()}`;
+      const props = readOpenCodeEventProperties(event);
+      const field = readString(props.field).toLowerCase();
+      const partType = readString(props.partType || event.partType || field);
+      const turnId = readString(props.turnID || props.turnId || event.turnID || event.turnId);
+      const itemId =
+        readString(props.partID || props.partId || event.partID || event.partId) ||
+        `agent-${Date.now()}`;
+      const delta = readString(props.delta || event.delta || event.text || event.textDelta);
 
-      if (partType === "reasoning" || event.isReasoning) {
-        const delta = readString(event.delta || event.text || event.textDelta);
+      if (partType === "reasoning" || field === "reasoning" || event.isReasoning) {
         if (delta) {
           handler("item/reasoning/textDelta", {
             turnId,
             itemId,
             delta,
             textDelta: delta,
+            sessionId: readString(props.sessionID || props.sessionId),
           });
         }
       } else if (partType === "tool_call" || partType === "tool") {
-        const toolName = readString(event.tool?.name || event.toolName || event.name);
-        const toolId = readString(event.tool?.id || event.toolID || event.toolId) || `tool-${Date.now()}`;
-        const state = readString(event.state || event.status);
-        const args = event.args || event.tool?.args || {};
-        const output = readString(event.output || event.delta || event.text || event.textDelta);
+        const toolName = readString(props.tool || event.tool?.name || event.toolName || event.name);
+        const toolId =
+          readString(props.callID || props.callId || event.tool?.id || event.toolID || event.toolId) ||
+          `tool-${Date.now()}`;
+        const state = readString(props.state || event.state || event.status);
+        const args = props.input || props.args || event.args || event.tool?.args || {};
+        const output = readString(props.output || props.delta || event.output || delta);
 
         if (output) {
           handler("item/toolCallUpdate", {
@@ -565,6 +592,7 @@ function dispatchEvent(event, handler) {
             args,
             output,
             status: state || "running",
+            sessionId: readString(props.sessionID || props.sessionId),
           });
         } else {
           handler("item/toolCall", {
@@ -573,43 +601,90 @@ function dispatchEvent(event, handler) {
             toolName,
             args,
             status: state || "running",
+            sessionId: readString(props.sessionID || props.sessionId),
           });
         }
-      } else {
-        const delta = readString(event.delta || event.text || event.textDelta);
-        if (delta) {
-          handler("item/agentMessage/delta", {
-            turnId,
-            itemId,
-            delta,
-            textDelta: delta,
-            assistantPhase: "final",
-          });
-        }
+      } else if (delta) {
+        handler("item/agentMessage/delta", {
+          turnId,
+          itemId,
+          delta,
+          textDelta: delta,
+          assistantPhase: "final",
+          sessionId: readString(props.sessionID || props.sessionId),
+        });
       }
       break;
     }
 
     case "message.part.updated": {
-      const state = readString(event.state);
-      if (state === "pending" || state === "in_progress") {
+      const props = readOpenCodeEventProperties(event);
+      const part = props.part && typeof props.part === "object" ? props.part : {};
+      const partType = readString(part.type);
+      const turnId = readString(props.turnID || props.turnId || event.turnID || event.turnId);
+      const itemId = readString(part.id || props.partID || props.partId || event.partID || event.partId);
+      const sessionId = readString(props.sessionID || props.sessionId || part.sessionID);
+
+      if (partType === "text") {
+        const text = readString(part.text);
+        if (text) {
+          handler("item/agentMessage/delta", {
+            turnId,
+            itemId,
+            delta: text,
+            textDelta: text,
+            assistantPhase: "final",
+            sessionId,
+          });
+          if (part.time?.end != null || part.time?.completed != null) {
+            handler("item/completed", {
+              turnId,
+              itemId,
+              message: text,
+              assistantPhase: "final_answer",
+              sessionId,
+            });
+          }
+        }
+        break;
+      }
+
+      if (partType === "reasoning") {
+        const text = readString(part.text);
+        if (text) {
+          handler("item/reasoning/textDelta", {
+            turnId,
+            itemId,
+            delta: text,
+            textDelta: text,
+            sessionId,
+          });
+        }
+        break;
+      }
+
+      const state = readString(part.state?.status || part.state || event.state);
+      if (state === "pending" || state === "in_progress" || state === "running") {
         handler("item/toolCall", {
-          turnId: readString(event.turnID || event.turnId),
-          itemId: readString(event.partID || event.partId),
-          toolName: readString(event.tool?.name || event.toolName),
-          status: state === "in_progress" ? "running" : "pending",
+          turnId,
+          itemId,
+          toolName: readString(part.name || part.tool?.name || event.toolName),
+          status: state === "in_progress" || state === "running" ? "running" : "pending",
+          sessionId,
         });
       } else if (state === "completed") {
         handler("item/toolCallUpdate", {
-          turnId: readString(event.turnID || event.turnId),
-          itemId: readString(event.partID || event.partId),
+          turnId,
+          itemId,
           status: "completed",
+          sessionId,
         });
       } else if (state === "error" || state === "failed") {
         handler("item/toolCallUpdate", {
-          turnId: readString(event.turnID || event.turnId),
-          itemId: readString(event.partID || event.partId),
+          turnId,
+          itemId,
           status: "failed",
+          sessionId,
         });
       }
       break;
@@ -629,6 +704,7 @@ function dispatchEvent(event, handler) {
         turnId: readString(event.turnID || event.turnId),
         status: readString(event.status) || "completed",
         sessionId: readString(event.sessionID || event.sessionId),
+        completionSource: "turn.completed",
       });
       break;
 
@@ -645,6 +721,7 @@ function dispatchEvent(event, handler) {
         turnId: readString(event.turnID || event.turnId || event.properties?.turnID),
         status: "completed",
         sessionId: readString(event.sessionID || event.sessionId || event.properties?.sessionID),
+        completionSource: "session.idle",
       });
       break;
 
@@ -985,6 +1062,7 @@ function resolveProviderAuthPayload(response) {
 module.exports = {
   createOpenCodeClient,
   dispatchEvent,
+  normalizeSessionMessagesResponse,
   flattenProviderModels,
   buildModelFromAny,
   resolveAgentsList,

@@ -285,26 +285,101 @@ function buildPromptFromTurnInput(input) {
   return { inputText: prompt, prompt, parts };
 }
 
+function readOpenCodeMessageRole(message) {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const type = readString(message.type).toLowerCase();
+  if (type === "user" || type === "assistant") {
+    return type;
+  }
+  if (message.info && typeof message.info === "object") {
+    return readString(message.info.role).toLowerCase();
+  }
+  return readString(message.role).toLowerCase();
+}
+
+function extractOpenCodeMessageText(message) {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+
+  if (message.info && Array.isArray(message.parts)) {
+    return message.parts
+      .map((part) => {
+        if (!part || typeof part !== "object") {
+          return "";
+        }
+        const partType = readString(part.type);
+        if (partType !== "text" && partType !== "reasoning") {
+          return "";
+        }
+        if (partType === "text" && (part.synthetic === true || part.ignored === true)) {
+          return "";
+        }
+        return readString(part.text);
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const directText = readString(message.text);
+  if (directText) {
+    return directText;
+  }
+
+  const content = message.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (!part || typeof part !== "object") {
+          return "";
+        }
+        if (readString(part.type) && readString(part.type) !== "text") {
+          return "";
+        }
+        return readString(part.text);
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return readString(message.content);
+}
+
+function isOpenCodeAssistantMessage(message) {
+  const role = readOpenCodeMessageRole(message);
+  return role === "assistant";
+}
+
 function messagesToTurns(messages, threadId) {
   const turns = [];
   let currentTurn = null;
   for (const msg of messages) {
     if (!msg) continue;
-    const role = readString(msg.role);
+    const role = readOpenCodeMessageRole(msg);
+    const text = extractOpenCodeMessageText(msg);
+    const createdAt =
+      msg.createdAt ||
+      (msg.info?.time?.created ? new Date(msg.info.time.created).toISOString() : null) ||
+      new Date().toISOString();
     if (role === "user") {
       currentTurn = {
         id: `turn-${turns.length}`,
         model: "",
         status: "completed",
-        createdAt: msg.createdAt || new Date().toISOString(),
+        createdAt,
         items: [
           {
             id: `user-${turns.length}`,
             type: "userMessage",
             role: "user",
-            text: readString(msg.content || msg.text),
-            content: textContent(readString(msg.content || msg.text)),
-            createdAt: msg.createdAt || new Date().toISOString(),
+            text,
+            content: textContent(text),
+            createdAt,
           },
         ],
         metadata: { threadId, provider: OPENCODE_PROVIDER_ID },
@@ -316,9 +391,9 @@ function messagesToTurns(messages, threadId) {
         type: "agentMessage",
         role: "assistant",
         phase: "final",
-        text: readString(msg.content || msg.text),
-        content: textContent(readString(msg.content || msg.text)),
-        createdAt: msg.createdAt || new Date().toISOString(),
+        text,
+        content: textContent(text),
+        createdAt,
       });
     }
   }
@@ -455,6 +530,9 @@ module.exports = {
   isCodexProvider,
   isOpenCodeProvider,
   messagesToTurns,
+  readOpenCodeMessageRole,
+  extractOpenCodeMessageText,
+  isOpenCodeAssistantMessage,
   normalizeOpenCodeModel,
   normalizeOpenCodeModelReference,
   normalizeRuntimeProvider,

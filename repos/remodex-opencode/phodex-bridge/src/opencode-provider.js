@@ -8,7 +8,7 @@
 
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
-const { createOpenCodeClient } = require("./opencode-client");
+const { createOpenCodeClient, normalizeSessionMessagesResponse } = require("./opencode-client");
 const {
   DEFAULT_OPENCODE_MODEL,
   OPENCODE_PROVIDER_ID,
@@ -17,6 +17,8 @@ const {
   buildPromptFromTurnInput,
   compareThreadsByUpdatedAt,
   messagesToTurns,
+  extractOpenCodeMessageText,
+  isOpenCodeAssistantMessage,
   normalizeOpenCodeModel,
   publicThread,
   readThreadId,
@@ -408,7 +410,7 @@ function createOpenCodeProvider({
     };
 
     try {
-      const messages = await client.getMessages(sessionId);
+      const messages = normalizeSessionMessagesResponse(await client.getMessages(sessionId));
       if (messages && messages.length > 0) {
         thread.turns = messagesToTurns(messages, normalizedThreadId);
       }
@@ -833,7 +835,7 @@ function createOpenCodeProvider({
     if (thread.sessionId) {
       try {
         await ensureStarted();
-        const messages = await client.getMessages(thread.sessionId);
+        const messages = normalizeSessionMessagesResponse(await client.getMessages(thread.sessionId));
         if (messages && messages.length > 0) {
           const sdkTurns = messagesToTurns(messages, threadId);
           return { data: sdkTurns.slice(0, limit), nextCursor: null };
@@ -925,6 +927,113 @@ function createOpenCodeProvider({
     return { turnId, turn: { id: turnId, threadId: thread.id, status: "running" } };
   }
 
+  function extractLatestAssistantText(messages) {
+    if (!Array.isArray(messages)) {
+      return "";
+    }
+    let latest = "";
+    for (const message of messages) {
+      if (!isOpenCodeAssistantMessage(message)) {
+        continue;
+      }
+      const text = extractOpenCodeMessageText(message);
+      if (text) {
+        latest = text;
+      }
+    }
+    return latest;
+  }
+
+  async function hydrateAssistantFromSessionMessages(active) {
+    if (!client || !readString(active.sessionId) || active.completed) {
+      return false;
+    }
+
+    let messages = [];
+    try {
+      messages = normalizeSessionMessagesResponse(await client.getMessages(active.sessionId));
+    } catch (error) {
+      console.log(
+        JSON.stringify({
+          event: "opencode_hydrate_messages_error",
+          threadId: active.thread.id,
+          turnId: active.turn.id,
+          message: readString(error?.message) || "getMessages failed",
+        }),
+      );
+      return false;
+    }
+
+    const text = extractLatestAssistantText(messages);
+    if (!text) {
+      return false;
+    }
+
+    const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
+    if (!assistantItem) {
+      return false;
+    }
+
+    const hadText = Boolean(readString(assistantItem.text));
+    assistantItem.text = text;
+    if (!hadText) {
+      emit("item/agentMessage/delta", {
+        threadId: active.thread.id,
+        turnId: active.turn.id,
+        itemId: assistantItem.id,
+        delta: text,
+        textDelta: text,
+        assistantPhase: "final",
+      });
+    }
+
+    emit("item/completed", {
+      threadId: active.thread.id,
+      turnId: active.turn.id,
+      itemId: assistantItem.id,
+      message: text,
+      assistantPhase: "final_answer",
+      item: {
+        id: assistantItem.id,
+        turnId: active.turn.id,
+        type: "agentMessage",
+        phase: "final",
+        text,
+      },
+    });
+
+    console.log(
+      JSON.stringify({
+        event: "opencode_turn_hydrated",
+        threadId: active.thread.id,
+        turnId: active.turn.id,
+        assistantLen: text.length,
+        hadStreamedText: hadText,
+      }),
+    );
+    return true;
+  }
+
+  function delayMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function pollForAssistantCompletion(active) {
+    const intervalMs = readString(env.REMODEX_TEST) === "1" ? 10 : 2000;
+    const deadline = Date.now() + resolveOpenCodeTurnWatchdogMs(env);
+    while (!active.completed && Date.now() < deadline) {
+      if (await hydrateAssistantFromSessionMessages(active)) {
+        completeTurn({ status: "completed", active, source: "poll_messages" });
+        return;
+      }
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await delayMs(Math.min(intervalMs, remainingMs));
+    }
+  }
+
   async function executeTurn(active, model, agent, effort, prompt, parts, cwd) {
     const threadId = active.thread.id;
     inFlightThreadIds.add(threadId);
@@ -966,16 +1075,21 @@ function createOpenCodeProvider({
 
       const scheduleWatchdog = () => {
         clearWatchdog();
-        active.watchdogTimer = setTimeout(() => {
-          if (!active.completed) {
-            completeTurn({
-              status: "failed",
-              errorMessage: "OpenCode turn timed out waiting for completion.",
-              errorCode: "opencode_turn_watchdog_timeout",
-              active,
-              source: "watchdog",
-            });
+        active.watchdogTimer = setTimeout(async () => {
+          if (active.completed) {
+            return;
           }
+          if (await hydrateAssistantFromSessionMessages(active)) {
+            completeTurn({ status: "completed", active, source: "watchdog_hydrate" });
+            return;
+          }
+          completeTurn({
+            status: "failed",
+            errorMessage: "OpenCode turn timed out waiting for completion.",
+            errorCode: "opencode_turn_watchdog_timeout",
+            active,
+            source: "watchdog",
+          });
         }, resolveOpenCodeTurnWatchdogMs(env));
         if (readString(process.env.REMODEX_TEST) === "1" && typeof active.watchdogTimer?.unref === "function") {
           active.watchdogTimer.unref();
@@ -1031,12 +1145,26 @@ function createOpenCodeProvider({
           if (eventTurnId && eventTurnId !== active.turn.id) {
             return;
           }
-          completeTurn({
-            status: readString(params.status) || "completed",
-            active,
-            source: "turn_completed",
-          });
-          clearWatchdog();
+          const completionSource = readString(params.completionSource);
+          void (async () => {
+            if (completionSource === "session.idle") {
+              const hydrated = await hydrateAssistantFromSessionMessages(active);
+              if (!hydrated) {
+                return;
+              }
+            } else {
+              await hydrateAssistantFromSessionMessages(active);
+            }
+            if (active.completed) {
+              return;
+            }
+            completeTurn({
+              status: readString(params.status) || "completed",
+              active,
+              source: completionSource || "turn_completed",
+            });
+            clearWatchdog();
+          })();
           return;
         }
 
@@ -1070,35 +1198,29 @@ function createOpenCodeProvider({
 
       scheduleWatchdog();
 
-      await client.prompt({
-        sessionID: active.sessionId,
-        prompt,
-        parts,
-        cwd,
-        model: parsedModel || model,
-        agent,
-        variant,
-        threadId: active.thread.id,
-        turnId: active.turn.id,
-      });
-      if (active.completed) {
-        return;
-      }
-      active.started = true;
+      const pollTask = pollForAssistantCompletion(active);
       try {
-        const messages = await client.getMessages(active.sessionId);
-        const hasAssistantText =
-          Array.isArray(messages) &&
-          messages.some((message) => {
-            const role = readString(message?.role).toLowerCase();
-            const text = readString(message?.text || message?.content);
-            return text.length > 0 && (role === "assistant" || role === "");
-          });
-        if (hasAssistantText) {
-          completeTurn({ status: "completed", active, source: "prompt_return_messages" });
+        await client.prompt({
+          sessionID: active.sessionId,
+          prompt,
+          parts,
+          cwd,
+          model: parsedModel || model,
+          agent,
+          variant,
+          threadId: active.thread.id,
+          turnId: active.turn.id,
+        });
+      } finally {
+        if (!active.completed) {
+          await hydrateAssistantFromSessionMessages(active);
         }
-      } catch {
-        // Watchdog armed before prompt() covers hung prompt and getMessages failures.
+      }
+      if (!active.completed) {
+        await pollTask;
+      }
+      if (!active.completed) {
+        active.started = true;
       }
     } catch (error) {
       if (!active.completed) {
@@ -1166,14 +1288,6 @@ function createOpenCodeProvider({
       });
     }
 
-    emit("turn/completed", {
-      threadId: active.thread.id,
-      turnId,
-      model: active.thread.model,
-      status,
-      turn: { id: turnId, status, error: errorMessage ? { message: errorMessage } : undefined },
-    });
-
     const completionEvent = status === "failed" ? "opencode_turn_failed" : "opencode_turn_completed";
     console.log(
       JSON.stringify({
@@ -1188,6 +1302,14 @@ function createOpenCodeProvider({
           : {}),
       }),
     );
+
+    emit("turn/completed", {
+      threadId: active.thread.id,
+      turnId,
+      model: active.thread.model,
+      status,
+      turn: { id: turnId, status, error: errorMessage ? { message: errorMessage } : undefined },
+    });
 
     resetIdleTimer();
     return true;

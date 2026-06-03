@@ -413,6 +413,28 @@ test("dispatchEvent maps session.idle to turn/completed", () => {
   assert.equal(events.length, 1);
   assert.equal(events[0][0], "turn/completed");
   assert.equal(events[0][1].status, "completed");
+  assert.equal(events[0][1].completionSource, "session.idle");
+});
+
+test("dispatchEvent maps message.part.delta properties to agentMessage delta", () => {
+  const events = [];
+  dispatchEvent(
+    {
+      type: "message.part.delta",
+      properties: {
+        sessionID: "ses-1",
+        messageID: "msg-1",
+        partID: "part-1",
+        field: "text",
+        delta: "Hello",
+      },
+    },
+    (method, payload) => events.push([method, payload]),
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0][0], "item/agentMessage/delta");
+  assert.equal(events[0][1].delta, "Hello");
+  assert.equal(events[0][1].itemId, "part-1");
 });
 
 function createProbeMockClient({ connected = [], auth = {} } = {}) {

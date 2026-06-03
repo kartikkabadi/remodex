@@ -672,6 +672,7 @@ function startBridge({
       return;
     }
     const params = parsed?.params && typeof parsed.params === "object" ? parsed.params : {};
+    const turnObject = params.turn && typeof params.turn === "object" ? params.turn : {};
     console.log(
       JSON.stringify({
         event: "bridge_notify_forward",
@@ -679,7 +680,8 @@ function startBridge({
         provider: readStringOrNull(provider) || "unknown",
         threadId: extractThreadId(method, params),
         turnId: extractTurnId(method, params),
-        hasMobile: socket?.readyState === WebSocket.OPEN,
+        status: readStringOrNull(params.status) || readStringOrNull(turnObject.status),
+        hasMacRelaySocket: socket?.readyState === WebSocket.OPEN,
       }),
     );
   }

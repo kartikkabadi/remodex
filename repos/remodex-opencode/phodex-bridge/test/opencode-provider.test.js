@@ -520,6 +520,12 @@ test("duplicate turn/completed from session.idle is ignored after first completi
     },
     clientFactory: () => ({
       ...fakeClient(),
+      getMessages: async () => [
+        {
+          info: { id: "msg-1", role: "assistant", time: { created: Date.now(), completed: Date.now() } },
+          parts: [{ id: "part-1", type: "text", text: "done" }],
+        },
+      ],
       subscribeToEvents: (handler) => {
         setImmediate(() => {
           dispatchEvent({ type: "turn/completed", status: "completed" }, handler);
@@ -868,6 +874,53 @@ test("prompt resolves without turn/completed still completes via getMessages", a
   assert.equal(completed, true);
 });
 
+test("poll hydration completes via getMessages info/parts snapshots", async () => {
+  let completed = false;
+  let deltas = 0;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        deltas += 1;
+      }
+      if (payload.method === "turn/completed" && payload.params.status === "completed") {
+        completed = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => ({
+        data: [
+          {
+            info: {
+              id: "msg-assistant",
+              role: "assistant",
+              time: { created: Date.now(), completed: Date.now() },
+            },
+            parts: [{ id: "part-text", type: "text", text: "Hey back from OpenCode" }],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.ok(deltas >= 1, "expected assistant delta from hydration");
+  assert.equal(completed, true);
+});
+
 test("threadArchive stub-only removes ownership and session", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();
@@ -1001,7 +1054,10 @@ test("watchdog completes hung prompt with opencode_turn_watchdog_timeout", async
     method: "turn/start",
     params: { threadId: start.thread.id, input: "hang" },
   });
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  const deadline = Date.now() + 500;
+  while (!completedPayload && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.ok(completedPayload);
   assert.equal(completedPayload.params.status, "failed");
   assert.match(
