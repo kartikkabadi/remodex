@@ -704,6 +704,9 @@ final class CodexService {
     var backgroundTurnGraceExpiredUntilForeground = false
     var secureSession: CodexSecureSession?
     var pendingHandshake: CodexPendingHandshake?
+    // Records the most recent successful secure handshake so post-init recovery can
+    // distinguish trusted reconnects from fresh QR bootstrap.
+    var lastCompletedSecureHandshakeMode: CodexSecureHandshakeMode?
     var phoneIdentityState: CodexPhoneIdentityState
     var trustedMacRegistry: CodexTrustedMacRegistry
     var currentTrustedMacDeviceId: String?

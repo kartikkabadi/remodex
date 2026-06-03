@@ -108,6 +108,7 @@ extension CodexService {
             isConnected = true
             lastErrorMessage = nil
             try await initializeSession()
+            await finishTrustedReconnectSessionBootstrapIfNeeded()
             shouldAutoReconnectOnForeground = false
             connectionRecoveryState = .idle
             trustedReconnectFailureCount = 0
@@ -840,14 +841,15 @@ extension CodexService {
                 ?? "This relay pairing is no longer valid. Scan a new QR code to reconnect.")
             : nil
         let explicitRelayDropMessage = explicitRelayDropMessage(for: relayCloseCode)
+        let isExplicitRelayDrop = explicitRelayDropMessage != nil
         let isBenignDisconnect = isBenignBackgroundDisconnect(error)
         let shouldSuppressMessage = isBenignDisconnect && !isActivelyForegroundedForConnectionUI()
         // Foreground relay drops should reconnect too, otherwise Stop disappears mid-run.
         let shouldAttemptAutoRecovery = !shouldClearSavedRelaySession
-            && explicitRelayDropMessage == nil
             && (retryableSessionUnavailableMessage != nil
                 || isRecoverableTransientConnectionError(error)
-                || isBenignDisconnect)
+                || isBenignDisconnect
+                || isExplicitRelayDrop)
 
         let connectionRecoveryState: CodexConnectionRecoveryState = shouldAttemptAutoRecovery
             ? .retrying(attempt: 0, message: recoveryStatusMessage(for: error))

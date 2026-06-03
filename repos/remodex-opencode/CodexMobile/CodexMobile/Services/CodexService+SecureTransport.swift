@@ -202,6 +202,16 @@ extension CodexService {
                 lastAppliedBridgeOutboundSeq: lastAppliedBridgeOutboundSeq
             )
         )
+        lastCompletedSecureHandshakeMode = handshakeMode
+    }
+
+    // Runs protected-thread catch-up after trusted reconnect once initialize has finished.
+    func finishTrustedReconnectSessionBootstrapIfNeeded() async {
+        guard lastCompletedSecureHandshakeMode == .trustedReconnect else {
+            return
+        }
+
+        await reconcileProtectedThreadsAfterTrustedReconnect()
     }
 
     // Handles raw relay JSON before any JSON-RPC decoding so secure controls stay separate.

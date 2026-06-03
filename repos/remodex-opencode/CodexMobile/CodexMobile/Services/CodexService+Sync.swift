@@ -668,6 +668,18 @@ extension CodexService {
 
     // Runs the full "running thread catch-up" pipeline once per thread so the
     // display-open, sync-loop, and post-connect flows do not stack duplicate work.
+    // Reconciles mid-turn trusted reconnects without waiting for cold post-connect sync.
+    func reconcileProtectedThreadsAfterTrustedReconnect() async {
+        let threadIDs = protectedRunningFallbackThreadIDs.union(Set(activeTurnIdByThread.keys))
+        guard !threadIDs.isEmpty else {
+            return
+        }
+
+        for threadId in threadIDs.sorted() {
+            _ = await catchUpRunningThreadIfNeeded(threadId: threadId, shouldForceResume: true)
+        }
+    }
+
     func catchUpRunningThreadIfNeeded(
         threadId: String,
         shouldForceResume: Bool,

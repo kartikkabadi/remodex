@@ -169,6 +169,25 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
     }
 
+    func testTurnCompletedWithoutTurnIDClearsProtectedRunningFallback() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+
+        service.setProtectedRunningFallback(true, for: threadID)
+        XCTAssertTrue(service.protectedRunningFallbackThreadIDs.contains(threadID))
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+
+        service.handleNotification(
+            method: "turn/completed",
+            params: .object([
+                "threadId": .string(threadID),
+            ])
+        )
+
+        XCTAssertFalse(service.protectedRunningFallbackThreadIDs.contains(threadID))
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .ready)
+    }
+
     func testAgentDeltaRestoresActiveTurnIDAfterStaleRunningClear() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
@@ -756,12 +775,15 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
             XCTAssertFalse(service.isConnected)
             XCTAssertFalse(service.isInitialized)
             XCTAssertTrue(service.shouldAutoReconnectOnForeground)
-            XCTAssertEqual(service.connectionRecoveryState, .idle)
+            XCTAssertEqual(
+                service.connectionRecoveryState,
+                .retrying(attempt: 0, message: "Reconnecting...")
+            )
             XCTAssertEqual(service.relaySessionId, SecureStore.readString(for: CodexSecureKeys.relaySessionId))
             XCTAssertEqual(service.relayUrl, SecureStore.readString(for: CodexSecureKeys.relayUrl))
             XCTAssertEqual(
                 service.lastErrorMessage,
-                "The Mac was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
+                "The paired device was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
             )
         }
     }
