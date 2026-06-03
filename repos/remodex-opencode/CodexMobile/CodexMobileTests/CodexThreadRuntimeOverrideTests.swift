@@ -500,6 +500,63 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         )
     }
 
+    func testNilModelProvider_withoutOwnershipSource_returnsCodex() {
+        let service = makeService()
+        service.availableModels = [makeGPT55Model()]
+        service.setSelectedModelId("codex:gpt-5.5")
+        service.upsertThread(
+            CodexThread(
+                id: "thread-nil-provider",
+                cwd: "/tmp/project",
+                model: "big-pickle",
+                modelProvider: nil
+            )
+        )
+
+        XCTAssertEqual(service.runtimeModelProviderForTurn(threadId: "thread-nil-provider"), "codex")
+    }
+
+    func testTurnStartParamsUseThreadOwnershipProviderDespiteGlobalCodexSelection() throws {
+        let service = makeService()
+        service.availableModels = [makeOpenCodeModel(), makeGPT55Model()]
+        service.setSelectedModelId("codex:gpt-5.5")
+        service.upsertThread(
+            CodexThread(
+                id: "thread-opencode-owned",
+                cwd: "/tmp/project",
+                model: "big-pickle",
+                modelProvider: "opencode"
+            )
+        )
+
+        let params = try service.buildTurnStartRequestParams(
+            threadId: "thread-opencode-owned",
+            userInput: "Hey",
+            attachments: [],
+            skillMentions: [],
+            mentionMentions: [],
+            imageURLKey: "url",
+            includeStructuredSkillItems: false,
+            includeStructuredMentionItems: false,
+            collaborationMode: nil,
+            includeServiceTier: false
+        )
+
+        XCTAssertEqual(params["modelProvider"]?.stringValue, "opencode")
+    }
+
+    func testIncomingRunningSuppressedAfterTurnStartFailureUntilServerTurnId() {
+        let service = makeService()
+        let threadID = "thread-mirror-suppress"
+        service.mirroredRunningSuppressedAfterTurnStartFailureThreadIDs.insert(threadID)
+
+        XCTAssertFalse(service.shouldAcceptIncomingRunningMark(threadId: threadID, turnId: "turn-late"))
+        service.setActiveTurnID("turn-confirmed", for: threadID)
+        XCTAssertTrue(
+            service.shouldAcceptIncomingRunningMark(threadId: threadID, turnId: "turn-confirmed")
+        )
+    }
+
     private func makeOpenCodeModel() -> CodexModelOption {
         CodexModelOption(
             id: "gpt-5.5",

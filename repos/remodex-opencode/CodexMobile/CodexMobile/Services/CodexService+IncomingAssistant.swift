@@ -26,10 +26,15 @@ extension CodexService {
         guard let delta = extractAssistantDeltaText(
             from: paramsObject,
             eventObject: eventObject
-        ) else { return }
+        ) else {
+            if let threadId = extractThreadID(from: paramsObject) {
+                traceAssistantDeltaDrop(threadId: threadId, reason: "missing_delta")
+            }
+            return
+        }
 
         if let directThreadId = extractThreadID(from: paramsObject), !directThreadId.isEmpty {
-            markThreadAsRunning(directThreadId)
+            markIncomingThreadAsRunning(directThreadId, turnId: extractTurnID(from: paramsObject))
         }
 
         guard let context = resolveAssistantEventContext(
@@ -38,10 +43,13 @@ extension CodexService {
             requiresTurnId: true
         ),
         let turnId = context.identity.turnId else {
+            if let threadId = extractThreadID(from: paramsObject) {
+                traceAssistantDeltaDrop(threadId: threadId, reason: "missing_turn_id")
+            }
             return
         }
 
-        markThreadAsRunning(context.threadId)
+        markIncomingThreadAsRunning(context.threadId, turnId: turnId)
         if activeTurnID(for: context.threadId) == nil {
             setActiveTurnID(turnId, for: context.threadId)
             threadIdByTurnID[turnId] = context.threadId
@@ -241,7 +249,7 @@ extension CodexService {
         let eventObject = envelopeEventObject(from: paramsObject)
 
         if let directThreadId = extractThreadID(from: paramsObject), !directThreadId.isEmpty {
-            markThreadAsRunning(directThreadId)
+            markIncomingThreadAsRunning(directThreadId, turnId: extractTurnID(from: paramsObject))
         }
 
         guard let itemObject = extractIncomingItemObject(from: paramsObject, eventObject: eventObject) else {

@@ -766,6 +766,9 @@ extension CodexService {
     }
 
     func runtimeModelProviderForTurn(threadId: String? = nil) -> String {
+        if let enforced = enforcedThreadOwnershipModelProvider(for: threadId) {
+            return enforced
+        }
         if let selectedModel = selectedModelOption(threadId: threadId) {
             return selectedModel.modelProvider
         }
@@ -773,6 +776,17 @@ extension CodexService {
             return unresolvedIdentity.provider
         }
         return CodexModelOption.splitSelectionKey(selectedModelId).provider
+    }
+
+    // Thread list ownership wins over global composer selection on turn/start wire params.
+    func enforcedThreadOwnershipModelProvider(for threadId: String?) -> String? {
+        guard let normalizedThreadID = normalizedInterruptIdentifier(threadId),
+              let thread = threadByID[normalizedThreadID],
+              let modelProvider = thread.modelProvider else {
+            return nil
+        }
+        let normalizedProvider = CodexModelOption.normalizedProvider(modelProvider)
+        return isStrictRuntimeProvider(normalizedProvider) ? normalizedProvider : nil
     }
 
     func effectiveServiceTier(for threadId: String? = nil) -> CodexServiceTier? {

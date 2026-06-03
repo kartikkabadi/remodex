@@ -459,6 +459,7 @@ extension CodexService {
         desktopMirroredRunningThreadIDs.remove(threadId)
         desktopMirroredRunningStaleSnapshotCountsByThread.removeValue(forKey: threadId)
         desktopMirroredRunningLastActivityAtByThread.removeValue(forKey: threadId)
+        mirroredRunningSuppressedAfterTurnStartFailureThreadIDs.remove(threadId)
         clearMirroredRunningCatchupNeeded(for: threadId)
         refreshBusyRepoRootsAndDependentTimelineStates()
         refreshThreadTimelineState(for: threadId)
@@ -629,6 +630,27 @@ extension CodexService {
         if threadCompletionBanner?.threadId == threadId {
             threadCompletionBanner = nil
         }
+    }
+
+    // Honors post-failure suppression so late mirror deltas cannot resurrect "thinking".
+    func shouldAcceptIncomingRunningMark(threadId: String, turnId: String?) -> Bool {
+        guard mirroredRunningSuppressedAfterTurnStartFailureThreadIDs.contains(threadId) else {
+            return true
+        }
+        guard let turnId,
+              let activeTurn = activeTurnID(for: threadId),
+              turnId == activeTurn else {
+            return false
+        }
+        return true
+    }
+
+    func markIncomingThreadAsRunning(_ threadId: String, turnId: String? = nil) {
+        guard shouldAcceptIncomingRunningMark(threadId: threadId, turnId: turnId) else {
+            return
+        }
+        markThreadAsRunning(threadId)
+        markDesktopMirroredRunning(for: threadId)
     }
 
     // Marks thread as actively running while ensuring stale outcomes are cleared.

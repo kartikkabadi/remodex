@@ -686,6 +686,9 @@ final class CodexService {
     var runningThreadWatchByID: [String: CodexRunningThreadWatch] = [:]
     var mirroredRunningCatchupThreadIDs: Set<String> = []
     var desktopMirroredRunningThreadIDs: Set<String> = []
+    // Blocks desktop mirror/delta from re-marking a thread running after a local turn/start failure.
+    var mirroredRunningSuppressedAfterTurnStartFailureThreadIDs: Set<String> = []
+    var lastIncomingNotificationMethodByThread: [String: String] = [:]
     var desktopMirroredRunningStaleSnapshotCountsByThread: [String: Int] = [:]
     var desktopMirroredRunningLastActivityAtByThread: [String: Date] = [:]
     var lastMirroredRunningCatchupAtByThread: [String: Date] = [:]
