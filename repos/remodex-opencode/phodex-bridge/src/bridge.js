@@ -1794,6 +1794,15 @@ function extractThreadId(method, params) {
     );
   }
 
+  if (method === "item/agentMessage/delta" || method === "item/completed") {
+    return (
+      readStringOrNull(params?.threadId) ||
+      readStringOrNull(params?.thread_id) ||
+      readStringOrNull(params?.item?.threadId) ||
+      readStringOrNull(params?.item?.thread_id)
+    );
+  }
+
   return null;
 }
 
@@ -1806,6 +1815,16 @@ function extractTurnId(method, params) {
       readStringOrNull(params?.turn?.id) ||
       readStringOrNull(params?.turn?.turnId) ||
       readStringOrNull(params?.turn?.turn_id)
+    );
+  }
+
+  if (method === "item/agentMessage/delta" || method === "item/completed") {
+    return (
+      readStringOrNull(params?.turnId) ||
+      readStringOrNull(params?.turn_id) ||
+      readStringOrNull(params?.item?.turnId) ||
+      readStringOrNull(params?.item?.turn_id) ||
+      readStringOrNull(params?.item?.id)
     );
   }
 

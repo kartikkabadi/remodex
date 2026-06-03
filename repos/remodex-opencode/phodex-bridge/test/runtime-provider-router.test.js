@@ -909,3 +909,64 @@ test("rejects explicit provider switches on owned threads", async () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("turn/start logs bridge_turn_start_audit and bridge_ownership_mismatch", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-audit-"));
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.map((entry) => String(entry)).join(" "));
+  };
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned", "opencode");
+
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ items: [] }),
+      sendApplicationResponse: () => {},
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [makeProvider(["thread-owned"])],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "audit-mismatch",
+        method: "turn/start",
+        params: {
+          threadId: "thread-owned",
+          modelProvider: "codex",
+        },
+      }),
+    );
+    await waitOneTick();
+
+    const audit = logs
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    const turnStartAudit = audit.find((entry) => entry.event === "bridge_turn_start_audit");
+    const mismatchLog = audit.find((entry) => entry.event === "bridge_ownership_mismatch");
+    assert.equal(turnStartAudit?.threadId, "thread-owned");
+    assert.equal(turnStartAudit?.requestedProvider, "codex");
+    assert.equal(turnStartAudit?.storedProvider, "opencode");
+    assert.equal(turnStartAudit?.mismatch, true);
+    assert.equal(mismatchLog?.errorCode, "thread_provider_mismatch");
+  } finally {
+    console.log = originalLog;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

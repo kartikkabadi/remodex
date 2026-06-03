@@ -183,8 +183,13 @@ function createRuntimeProviderRouter({
       return false;
     }
 
+    if (method === "turn/start") {
+      logBridgeTurnStartAudit(parsed, threadOwnership);
+    }
+
     const ownershipMismatch = resolveThreadOwnershipMismatch(parsed, threadOwnership);
     if (ownershipMismatch) {
+      logBridgeOwnershipMismatch(parsed, threadOwnership, ownershipMismatch);
       respondAsync(parsed, async () => {
         throw ownershipMismatch;
       });
@@ -377,6 +382,54 @@ async function listProviderThreads(providers, params) {
     const payload = result.value;
     return Array.isArray(payload?.data) ? payload.data : [];
   });
+}
+
+function logBridgeTurnStartAudit(request, ownershipStore) {
+  const params = request.params || {};
+  const threadId = readThreadId(params);
+  const requestedProvider = readModelProvider(params);
+  const storedProvider = threadId ? ownershipStore.getOwnership(threadId) : null;
+  const normalizedRequested = requestedProvider
+    ? isOpenCodeProvider(requestedProvider)
+      ? OPENCODE_PROVIDER_ID
+      : CODEX_PROVIDER_ID
+    : null;
+
+  console.log(
+    JSON.stringify({
+      event: "bridge_turn_start_audit",
+      threadId,
+      rpcRequestId: request.id ?? null,
+      requestedProvider: normalizedRequested,
+      storedProvider: storedProvider || null,
+      mismatch: Boolean(
+        storedProvider && normalizedRequested && storedProvider !== normalizedRequested,
+      ),
+    }),
+  );
+}
+
+function logBridgeOwnershipMismatch(request, ownershipStore, error) {
+  const params = request.params || {};
+  const threadId = readThreadId(params);
+  const requestedProvider = readModelProvider(params);
+  const storedProvider = threadId ? ownershipStore.getOwnership(threadId) : null;
+  const normalizedRequested = requestedProvider
+    ? isOpenCodeProvider(requestedProvider)
+      ? OPENCODE_PROVIDER_ID
+      : CODEX_PROVIDER_ID
+    : null;
+
+  console.log(
+    JSON.stringify({
+      event: "bridge_ownership_mismatch",
+      threadId,
+      rpcRequestId: request.id ?? null,
+      requestedProvider: normalizedRequested,
+      storedProvider: storedProvider || null,
+      errorCode: error?.errorCode || "thread_provider_mismatch",
+    }),
+  );
 }
 
 function resolveThreadOwnershipMismatch(request, ownershipStore) {
