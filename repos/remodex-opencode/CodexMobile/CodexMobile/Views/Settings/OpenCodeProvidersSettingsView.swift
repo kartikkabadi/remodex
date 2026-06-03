@@ -89,7 +89,7 @@ struct OpenCodeProvidersSettingsView: View {
     }
 }
 
-private struct SettingsOpenCodeProvidersLink: View {
+struct SettingsOpenCodeProvidersLink: View {
     @Environment(CodexService.self) private var codex
 
     var body: some View {
