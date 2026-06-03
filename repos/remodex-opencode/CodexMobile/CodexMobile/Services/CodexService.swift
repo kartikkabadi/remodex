@@ -557,6 +557,8 @@ final class CodexService {
     @ObservationIgnored var webSocketKeepAliveIntervalOverrideNanoseconds: UInt64?
     @ObservationIgnored var webSocketForegroundProbeTimeoutOverrideNanoseconds: UInt64?
     @ObservationIgnored var webSocketKeepAlivePingOverride: (() async throws -> Void)?
+    // Test hook: records manual websocket drain ordering (pong vs text).
+    @ObservationIgnored var manualWebSocketDrainSequenceProbe: ((String) -> Void)?
     // Keeps the trusted-session HTTP lookup cancellable so manual retry can preempt a stuck resolve.
     @ObservationIgnored var trustedSessionResolveTask: Task<CodexTrustedSessionResolveResponse, Error>?
     @ObservationIgnored var trustedSessionResolveTaskID: UUID?
