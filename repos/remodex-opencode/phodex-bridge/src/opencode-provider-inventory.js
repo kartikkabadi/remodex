@@ -173,10 +173,91 @@ function buildConnectedProviderSummaries(preferredProviders) {
   });
 }
 
+function canonicalProviderId(id) {
+  return readString(id).trim().toLowerCase();
+}
+
+function formatProviderDisplayNameFromId(id) {
+  const normalized = readString(id);
+  if (!normalized) {
+    return "Unknown";
+  }
+  return normalized
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildProviderInventory(inventory, options = {}) {
+  const credentialProviderIDs = Array.isArray(options.credentialProviderIDs)
+    ? options.credentialProviderIDs
+    : [];
+  const connectedSet = new Set(
+    (Array.isArray(inventory?.connected) ? inventory.connected : []).map((id) =>
+      canonicalProviderId(id),
+    ),
+  );
+  const authenticatedSet = new Set(
+    credentialProviderIDs.map((id) => canonicalProviderId(id)).filter(Boolean),
+  );
+  const all = Array.isArray(inventory?.all) ? inventory.all : [];
+  const byCanonical = new Map();
+
+  for (const provider of all) {
+    const id = readString(provider.id || provider.providerId || provider.providerID);
+    if (!id) {
+      continue;
+    }
+    const canonical = canonicalProviderId(id);
+    byCanonical.set(canonical, {
+      id,
+      displayName: readString(provider.name) || formatProviderDisplayNameFromId(id),
+      connectedOnServe: connectedSet.has(canonical),
+      authenticated: authenticatedSet.has(canonical),
+      modelCount: modelsForProvider(provider).length,
+    });
+  }
+
+  for (const authId of credentialProviderIDs) {
+    const id = readString(authId);
+    if (!id) {
+      continue;
+    }
+    const canonical = canonicalProviderId(id);
+    if (byCanonical.has(canonical)) {
+      const entry = byCanonical.get(canonical);
+      entry.authenticated = true;
+      continue;
+    }
+    byCanonical.set(canonical, {
+      id,
+      displayName: formatProviderDisplayNameFromId(id),
+      connectedOnServe: connectedSet.has(canonical),
+      authenticated: true,
+      modelCount: null,
+    });
+  }
+
+  const entries = [...byCanonical.values()];
+  entries.sort((left, right) => {
+    if (left.connectedOnServe !== right.connectedOnServe) {
+      return left.connectedOnServe ? -1 : 1;
+    }
+    if (left.authenticated !== right.authenticated) {
+      return left.authenticated ? -1 : 1;
+    }
+    return left.displayName.localeCompare(right.displayName);
+  });
+  return entries;
+}
+
 async function refreshProviderInventory(client, options = {}) {
   const force = options.force === true;
   const credentialProviderIDs = options.credentialProviderIDs || [];
   const consoleManagedProviders = options.consoleManagedProviders || [];
+  const authDiscoveryReasonCode = readString(options.authDiscoveryReasonCode) || "ok";
+  const providerInventoryPartial = options.providerInventoryPartial === true;
   const cached = options.cached || null;
   const cacheTtlMs = Number.isFinite(options.cacheTtlMs) ? options.cacheTtlMs : 60_000;
   const now = Date.now();
@@ -188,6 +269,10 @@ async function refreshProviderInventory(client, options = {}) {
     now - cached.fetchedAt < cacheTtlMs
   ) {
     const models = cached.models || [];
+    const preferredCached = resolvePreferredProviders(cached.inventory, {
+      credentialProviderIDs,
+      consoleManagedProviders,
+    });
     return {
       inventory: cached.inventory,
       models,
@@ -195,12 +280,14 @@ async function refreshProviderInventory(client, options = {}) {
         ...(cached.meta || buildInventoryMeta({ inventory: cached.inventory, models })),
         stale: false,
       },
-      connectedProviders: cached.connectedProviders || buildConnectedProviderSummaries(
-        resolvePreferredProviders(cached.inventory, {
-          credentialProviderIDs,
-          consoleManagedProviders,
-        }),
-      ),
+      connectedProviders:
+        cached.connectedProviders || buildConnectedProviderSummaries(preferredCached),
+      providerInventory:
+        cached.providerInventory ||
+        buildProviderInventory(cached.inventory, { credentialProviderIDs }),
+      authDiscoveryReasonCode: cached.authDiscoveryReasonCode || authDiscoveryReasonCode,
+      providerInventoryPartial:
+        cached.providerInventoryPartial === true || providerInventoryPartial,
     };
   }
 
@@ -223,6 +310,9 @@ async function refreshProviderInventory(client, options = {}) {
         models: [],
         meta,
         connectedProviders: [],
+        providerInventory: buildProviderInventory(inventory, { credentialProviderIDs }),
+        authDiscoveryReasonCode,
+        providerInventoryPartial,
       };
     }
 
@@ -232,11 +322,26 @@ async function refreshProviderInventory(client, options = {}) {
       fetchedAt: new Date().toISOString(),
     });
     meta.reasonCode = reasonCode;
+    const providerInventory = buildProviderInventory(inventory, { credentialProviderIDs });
+    console.log(
+      JSON.stringify({
+        event: "provider_inventory_built",
+        connected: providerInventory.filter((entry) => entry.connectedOnServe).length,
+        authenticated: providerInventory.filter((entry) => entry.authenticated).length,
+        auth_only_synthetic: providerInventory.filter(
+          (entry) => entry.authenticated && !entry.connectedOnServe,
+        ).length,
+        auth_provider_ids_count: credentialProviderIDs.length,
+      }),
+    );
     return {
       inventory,
       models,
       meta,
       connectedProviders: buildConnectedProviderSummaries(preferred),
+      providerInventory,
+      authDiscoveryReasonCode,
+      providerInventoryPartial,
     };
   } catch (error) {
     if (cached?.inventory && Array.isArray(cached.models)) {
@@ -249,6 +354,10 @@ async function refreshProviderInventory(client, options = {}) {
           stale: true,
         },
         connectedProviders: cached.connectedProviders || [],
+        providerInventory: cached.providerInventory || [],
+        authDiscoveryReasonCode: cached.authDiscoveryReasonCode || authDiscoveryReasonCode,
+        providerInventoryPartial:
+          cached.providerInventoryPartial === true || providerInventoryPartial,
         error,
       };
     }
@@ -265,6 +374,9 @@ async function refreshProviderInventory(client, options = {}) {
         modelCountAfterCap: 0,
       },
       connectedProviders: [],
+      providerInventory: [],
+      authDiscoveryReasonCode,
+      providerInventoryPartial: true,
       error,
     };
   }
@@ -277,6 +389,8 @@ module.exports = {
   refreshProviderInventory,
   buildInventoryMeta,
   buildConnectedProviderSummaries,
+  buildProviderInventory,
+  canonicalProviderId,
   discoveryReasonCodeFromInventory,
   resolveInventoryReasonCode,
   isOpenCodeManagedProvider,

@@ -91,9 +91,6 @@ test("creates client when baseUrl is provided", async () => {
   assert.equal(typeof client.createSession, "function");
   assert.equal(typeof client.getSession, "function");
   assert.equal(typeof client.prompt, "function");
-  assert.equal(typeof client.setModel, "function");
-  assert.equal(typeof client.setMode, "function");
-  assert.equal(typeof client.setEffort, "function");
   assert.equal(typeof client.abort, "function");
   assert.equal(typeof client.getMessages, "function");
   assert.equal(typeof client.replyToPermission, "function");
@@ -370,6 +367,60 @@ test("probeProviderAuthState returns true when auth methods are configured", asy
     }),
   });
   assert.equal(await client.probeProviderAuthState(), true);
+});
+
+test("prompt passes parsed model agent and variant to session.prompt", async () => {
+  const captured = [];
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      provider: {
+        list: async () => ({
+          all: [{ id: "opencode-go", name: "OpenCode Go", models: {} }],
+          connected: ["opencode-go"],
+          default: {},
+        }),
+        auth: async () => ({}),
+      },
+      app: { agents: async () => ({ data: [] }), skills: async () => [] },
+      session: {
+        create: async () => ({ sessionID: "ses_prompt" }),
+        get: async () => ({}),
+        prompt: async (body) => {
+          captured.push(body);
+          return {};
+        },
+        abort: async () => ({}),
+        messages: async () => ({ messages: [] }),
+        fork: async () => ({ sessionID: "ses_fork" }),
+      },
+      permission: { reply: async () => ({}) },
+      command: { list: async () => [] },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* empty() {})(),
+          close: () => {},
+        }),
+      },
+      tui: { selectSession: async () => ({}) },
+    }),
+  });
+
+  await client.prompt({
+    sessionID: "ses_prompt",
+    prompt: "hi",
+    model: "opencode-go/deepseek-v4-flash",
+    agent: "build",
+    variant: "max",
+  });
+
+  assert.equal(captured.length, 1);
+  assert.deepEqual(captured[0].model, {
+    providerID: "opencode-go",
+    modelID: "deepseek-v4-flash",
+  });
+  assert.equal(captured[0].agent, "build");
+  assert.equal(captured[0].variant, "max");
 });
 
 test("probeProviderAuthState returns false when auth payload has no methods", async () => {

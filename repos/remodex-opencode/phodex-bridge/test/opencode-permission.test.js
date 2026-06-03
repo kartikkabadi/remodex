@@ -58,9 +58,7 @@ function fakeClient(replyBehavior) {
     createSession: async () => "ses_fake",
     getSession: async () => ({}),
     prompt: async () => Promise.resolve(),
-    setModel: async () => {},
-    setMode: async () => {},
-    setEffort: async () => {},
+
     abort: async () => {},
     getMessages: async () => [],
     replyToPermission:

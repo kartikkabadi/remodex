@@ -11,6 +11,8 @@ enum RuntimeProviderLogo {
     private static let assetsByProvider: [String: String] = [
         "codex": "provider-codex-logo",
         "opencode": "provider-opencode-logo",
+        "opencode-go": "provider-opencode-go-logo",
+        "opencode-zen": "provider-opencode-zen-logo",
     ]
 
     static func assetName(for provider: String) -> String? {

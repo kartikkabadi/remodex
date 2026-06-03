@@ -45,6 +45,9 @@ function buildOpenCodeRuntimeStatus({
   authConfigured = null,
   connectedProviders = null,
   providerDiscoveryReasonCode = null,
+  providerInventory = null,
+  authDiscoveryReasonCode = null,
+  providerInventoryPartial = null,
 } = {}) {
   const normalizedVersion = readString(version);
   const versionBelowMinimum =
@@ -64,6 +67,12 @@ function buildOpenCodeRuntimeStatus({
       authConfigured === true || authConfigured === false ? authConfigured : null,
     connectedProviders: Array.isArray(connectedProviders) ? connectedProviders : null,
     providerDiscoveryReasonCode: readString(providerDiscoveryReasonCode) || null,
+    providerInventory: Array.isArray(providerInventory) ? providerInventory : null,
+    authDiscoveryReasonCode: readString(authDiscoveryReasonCode) || null,
+    providerInventoryPartial:
+      providerInventoryPartial === true || providerInventoryPartial === false
+        ? providerInventoryPartial
+        : null,
   };
 }
 

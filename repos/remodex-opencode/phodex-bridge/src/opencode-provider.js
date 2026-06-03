@@ -31,6 +31,8 @@ const {
   OPENCODE_MIN_CLI_VERSION,
 } = require("./opencode-runtime-status");
 const { isOpenCodeHandoffEnabled } = require("./opencode-handoff");
+const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
+const { resolveOpenCodeVariantForPrompt } = require("./opencode-variant-resolve");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -81,6 +83,11 @@ function createOpenCodeProvider({
   let cachedAuthConfigured = null;
   let lastModelListMeta = null;
   let lastConnectedProviders = [];
+  let lastListedModels = [];
+  let lastCatalogAgents = [];
+  let lastProviderInventory = [];
+  let lastAuthDiscoveryReasonCode = "ok";
+  let lastProviderInventoryPartial = false;
 
   const threads = new Map();
   const activeTurns = new Map();
@@ -344,6 +351,38 @@ function createOpenCodeProvider({
     cachedAuthConfigured = false;
   }
 
+  async function resolveAuthCredentialBundle() {
+    const { readAuthProviderIds } = require("./opencode-auth-providers");
+    const fromFile = readAuthProviderIds();
+    let ids = fromFile.ids;
+    let authDiscoveryReasonCode = fromFile.authDiscoveryReasonCode;
+    let providerInventoryPartial = false;
+
+    if (fromFile.authDiscoveryReasonCode !== "ok" || ids.length === 0) {
+      try {
+        await ensureStarted();
+        const probeIds =
+          typeof client.listAuthProviderIds === "function"
+            ? await client.listAuthProviderIds()
+            : [];
+        if (probeIds.length > 0) {
+          ids = probeIds;
+          if (fromFile.authDiscoveryReasonCode !== "ok") {
+            authDiscoveryReasonCode = "auth_probe_ok";
+          }
+        } else if (fromFile.authDiscoveryReasonCode !== "ok") {
+          providerInventoryPartial = true;
+        }
+      } catch {
+        if (fromFile.authDiscoveryReasonCode !== "ok") {
+          providerInventoryPartial = true;
+        }
+      }
+    }
+
+    return { ids, authDiscoveryReasonCode, providerInventoryPartial };
+  }
+
   async function listModels(options = {}) {
     try {
       await ensureStarted();
@@ -361,20 +400,28 @@ function createOpenCodeProvider({
       };
     }
     const force = options.force === true || options.refreshProviders === true;
-    const result = await client.listModels({ force });
+    const authBundle = await resolveAuthCredentialBundle();
+    const result = await client.listModels({
+      force,
+      credentialProviderIDs: authBundle.ids,
+      authDiscoveryReasonCode: authBundle.authDiscoveryReasonCode,
+    });
     if (result && typeof result === "object" && Array.isArray(result.models)) {
-      if (force && typeof client.listProviderInventory === "function") {
-        try {
-          const inventory = await client.listProviderInventory({ force: true });
-          result.connectedProviders = inventory?.connectedProviders || [];
-        } catch {
-          // keep prior summaries
-        }
-      }
       syncAuthAndMetaFromListResult(result);
+      lastListedModels = result.models;
+      if (Array.isArray(result.providerInventory)) {
+        lastProviderInventory = result.providerInventory;
+      }
+      if (Array.isArray(result.connectedProviders)) {
+        lastConnectedProviders = result.connectedProviders;
+      }
+      lastAuthDiscoveryReasonCode = readString(result.authDiscoveryReasonCode) || authBundle.authDiscoveryReasonCode;
+      lastProviderInventoryPartial =
+        result.providerInventoryPartial === true || authBundle.providerInventoryPartial;
       return result;
     }
     const models = Array.isArray(result) ? result : [];
+    lastListedModels = models;
     return {
       models,
       meta: lastModelListMeta || {
@@ -406,7 +453,9 @@ function createOpenCodeProvider({
     } catch {
       return [];
     }
-    return client.listAgents();
+    const agents = await client.listAgents();
+    rememberCatalogAgents(agents);
+    return agents;
   }
 
   async function listCommands(directory) {
@@ -703,13 +752,35 @@ function createOpenCodeProvider({
       });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
 
-      await client.setModel({ sessionID: active.sessionId, model });
-      await client.setMode({ sessionID: active.sessionId, mode: agent });
-      if (effort) {
-        await client.setEffort({ sessionID: active.sessionId, effort });
+      const parsedModel = parseOpenCodeModelSlug(model);
+      const catalogModel = lastListedModels.find(
+        (entry) => readString(entry.id || entry.model) === readString(model),
+      );
+      const { variant, omittedReason } = resolveOpenCodeVariantForPrompt({
+        effort,
+        modelRecord: catalogModel?.serveVariants
+          ? { variants: catalogModel.serveVariants }
+          : null,
+      });
+      if (omittedReason) {
+        console.log(
+          JSON.stringify({
+            event: "opencode_turn_prompt",
+            variant_omitted_reason: omittedReason,
+            effort: readString(effort) || null,
+          }),
+        );
       }
 
-      await client.prompt({ sessionID: active.sessionId, prompt, parts, cwd });
+      await client.prompt({
+        sessionID: active.sessionId,
+        prompt,
+        parts,
+        cwd,
+        model: parsedModel || model,
+        agent,
+        variant,
+      });
       active.started = true;
     } catch (error) {
       completeTurn({
@@ -975,7 +1046,20 @@ function createOpenCodeProvider({
       authConfigured: cachedAuthConfigured,
       connectedProviders: lastConnectedProviders,
       providerDiscoveryReasonCode: readString(lastModelListMeta?.reasonCode) || null,
+      providerInventory: lastProviderInventory,
+      authDiscoveryReasonCode: lastAuthDiscoveryReasonCode,
+      providerInventoryPartial: lastProviderInventoryPartial,
     });
+  }
+
+  function getLastCatalogAgents() {
+    return lastCatalogAgents;
+  }
+
+  function rememberCatalogAgents(agents) {
+    if (Array.isArray(agents) && agents.length > 0) {
+      lastCatalogAgents = agents;
+    }
   }
 
   function getLastModelListMeta() {
@@ -1047,6 +1131,7 @@ function createOpenCodeProvider({
     getCatalogAvailability,
     getRuntimeStatus,
     getLastModelListMeta,
+    getLastCatalogAgents,
     getHandoffContext,
     selectTuiSession,
   };

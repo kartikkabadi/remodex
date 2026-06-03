@@ -13,6 +13,7 @@ const {
   displayNameForOpenCodeModel,
 } = require("./opencode-models");
 const { resolveModelCapabilities } = require("./provider-capabilities");
+const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
 
 
 let _createOpencodeClient = null;
@@ -41,7 +42,12 @@ async function createOpenCodeClient({
   let inventoryCache = null;
   let inventoryRefreshPromise = null;
 
-  async function listProviderInventory({ force = false } = {}) {
+  async function listProviderInventory({
+    force = false,
+    credentialProviderIDs = [],
+    authDiscoveryReasonCode = "ok",
+    providerInventoryPartial = false,
+  } = {}) {
     const cacheTtlMs = boundedProviderCacheTtlMs(process.env);
     if (inventoryRefreshPromise && !force) {
       return inventoryRefreshPromise;
@@ -51,12 +57,18 @@ async function createOpenCodeClient({
       force,
       cached: inventoryCache,
       cacheTtlMs,
+      credentialProviderIDs,
+      authDiscoveryReasonCode,
+      providerInventoryPartial,
     }).then((result) => {
       inventoryCache = {
         inventory: result.inventory,
         models: result.models,
         meta: result.meta,
         connectedProviders: result.connectedProviders,
+        providerInventory: result.providerInventory,
+        authDiscoveryReasonCode: result.authDiscoveryReasonCode,
+        providerInventoryPartial: result.providerInventoryPartial,
         fetchedAt: Date.parse(result.meta?.fetchedAt) || Date.now(),
       };
       return result;
@@ -70,9 +82,17 @@ async function createOpenCodeClient({
     return run;
   }
 
-  async function listModels({ force = false } = {}) {
+  async function listModels({
+    force = false,
+    credentialProviderIDs = [],
+    authDiscoveryReasonCode = "ok",
+  } = {}) {
     try {
-      const result = await listProviderInventory({ force });
+      const result = await listProviderInventory({
+        force,
+        credentialProviderIDs,
+        authDiscoveryReasonCode,
+      });
       return {
         models: result.models || [],
         meta: result.meta || {
@@ -84,6 +104,9 @@ async function createOpenCodeClient({
           modelCountAfterCap: 0,
         },
         connectedProviders: result.connectedProviders || [],
+        providerInventory: result.providerInventory || [],
+        authDiscoveryReasonCode: result.authDiscoveryReasonCode || authDiscoveryReasonCode,
+        providerInventoryPartial: result.providerInventoryPartial === true,
       };
     } catch (error) {
       console.warn(`${logPrefix} OpenCode provider inventory failed: ${error.message}`);
@@ -127,7 +150,7 @@ async function createOpenCodeClient({
     return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function prompt({ sessionID, prompt, parts, cwd }) {
+  async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant }) {
     const resolvedParts =
       Array.isArray(parts) && parts.length > 0
         ? parts
@@ -144,47 +167,45 @@ async function createOpenCodeClient({
       throw new Error("OpenCode prompt requires at least one part.");
     }
 
-    return withTimeout(
-      client.session.prompt({
-        sessionID,
-        directory: readString(cwd) || process.cwd(),
-        parts: bodyParts,
-      }),
-      REQUEST_TIMEOUT_MS,
-    );
-  }
+    let parsedModel = null;
+    if (model && typeof model === "object" && model.providerID && model.modelID) {
+      parsedModel = {
+        providerID: readString(model.providerID),
+        modelID: readString(model.modelID),
+      };
+    } else {
+      parsedModel = parseOpenCodeModelSlug(model);
+    }
 
-  async function setModel({ sessionID, model }) {
-    return withTimeout(
-      client.session.setConfig({
-        sessionID,
-        configId: "model",
-        value: model,
-      }),
-      REQUEST_TIMEOUT_MS,
-    );
-  }
+    const promptBody = {
+      sessionID,
+      directory: readString(cwd) || process.cwd(),
+      parts: bodyParts,
+    };
+    if (parsedModel?.providerID && parsedModel?.modelID) {
+      promptBody.model = parsedModel;
+    }
+    const normalizedAgent = readString(agent);
+    if (normalizedAgent) {
+      promptBody.agent = normalizedAgent;
+    }
+    const normalizedVariant = readString(variant);
+    if (normalizedVariant) {
+      promptBody.variant = normalizedVariant;
+    }
 
-  async function setMode({ sessionID, mode }) {
-    return withTimeout(
-      client.session.setConfig({
-        sessionID,
-        configId: "mode",
-        value: mode,
-      }),
-      REQUEST_TIMEOUT_MS,
-    );
-  }
+    console.log(
+      JSON.stringify({
+        event: "opencode_turn_prompt",
+        providerID: parsedModel?.providerID || null,
+        modelID: parsedModel?.modelID || null,
+        agent: normalizedAgent || null,
+        variant: normalizedVariant || null,
 
-  async function setEffort({ sessionID, effort }) {
-    return withTimeout(
-      client.session.setConfig({
-        sessionID,
-        configId: "effort",
-        value: effort,
       }),
-      REQUEST_TIMEOUT_MS,
     );
+
+    return withTimeout(client.session.prompt(promptBody), REQUEST_TIMEOUT_MS);
   }
 
   async function abort(sessionId) {
@@ -330,6 +351,16 @@ async function createOpenCodeClient({
     }
   }
 
+  async function listAuthProviderIds() {
+    try {
+      const response = await withTimeout(client.provider.auth(), REQUEST_TIMEOUT_MS);
+      const { authProviderIdsFromProbe } = require("./opencode-auth-providers");
+      return authProviderIdsFromProbe(response);
+    } catch {
+      return [];
+    }
+  }
+
   async function probeConnectedProviders() {
     try {
       const response = await withTimeout(client.provider.list(), REQUEST_TIMEOUT_MS);
@@ -351,9 +382,6 @@ async function createOpenCodeClient({
     createSession,
     getSession,
     prompt,
-    setModel,
-    setMode,
-    setEffort,
     abort,
     getMessages,
     replyToPermission,
@@ -364,6 +392,7 @@ async function createOpenCodeClient({
     selectTuiSession,
     probeProviderAuthState,
     probeConnectedProviders,
+    listAuthProviderIds,
   };
 }
 
@@ -858,6 +887,10 @@ function buildModelFromAny(model, upstreamProviderIdOrProvider) {
     capabilities,
     contextWindow: model.contextWindow || model.context_window || null,
     status: readString(model.status) || "active",
+    serveVariants:
+      model.variants && typeof model.variants === "object" && !Array.isArray(model.variants)
+        ? model.variants
+        : null,
   };
 }
 

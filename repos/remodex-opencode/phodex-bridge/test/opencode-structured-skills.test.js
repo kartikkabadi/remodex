@@ -116,9 +116,7 @@ test("turn/start forwards structured parts to OpenCode session.prompt", async ()
       prompt: async (payload) => {
         prompts.push(payload);
       },
-      setModel: async () => {},
-      setMode: async () => {},
-      setEffort: async () => {},
+
       abort: async () => {},
       fork: async () => "ses_fork",
       getMessages: async () => [],

@@ -252,6 +252,7 @@ const MODEL_LIST_PROVIDER_BUDGET_MS = 3_000;
 const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
   START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
 const RUNTIME_CATALOG_AGENT_BUDGET_MS = 2_000;
+let lastOpenCodeCatalogAgents = [];
 
 function readModelListBudgetMs(env, key, fallbackMs) {
   const numeric = Number(readString(env?.[key]));
@@ -754,15 +755,39 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       const raw = await withModelListBudget(
         opencodeProvider.listAgents(),
         RUNTIME_CATALOG_AGENT_BUDGET_MS,
-        [],
+        null,
       );
-      agents = (raw || []).map((a) => ({
+      const mapped = (raw || []).map((a) => ({
         id: readString(a?.id || a),
         label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
       }));
+      if (mapped.length > 0) {
+        lastOpenCodeCatalogAgents = mapped;
+        agents = mapped;
+      } else if (lastOpenCodeCatalogAgents.length > 0) {
+        console.log(JSON.stringify({ event: "runtime_catalog_agents_stale" }));
+        agents = lastOpenCodeCatalogAgents;
+      } else if (
+        typeof opencodeProvider.getLastCatalogAgents === "function" &&
+        opencodeProvider.getLastCatalogAgents().length > 0
+      ) {
+        console.log(JSON.stringify({ event: "runtime_catalog_agents_stale" }));
+        agents = opencodeProvider.getLastCatalogAgents().map((a) => ({
+          id: readString(a?.id || a),
+          label: readString(a?.label || a?.name || a?.displayName || a?.id || a),
+        }));
+        lastOpenCodeCatalogAgents = agents;
+      } else {
+        agents = [];
+      }
     } catch {
-      agents = [];
-      unavailableReason = "OpenCode agents could not be listed";
+      if (lastOpenCodeCatalogAgents.length > 0) {
+        console.log(JSON.stringify({ event: "runtime_catalog_agents_stale" }));
+        agents = lastOpenCodeCatalogAgents;
+      } else {
+        agents = [];
+        unavailableReason = "OpenCode agents could not be listed";
+      }
     }
   } else if (!hasCommand) {
     unavailableReason = "OpenCode command is not configured on this Mac";
@@ -792,6 +817,9 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       lastError: enabled ? null : runtimeStatus.lastError || unavailableReason,
       connectedProviders: runtimeStatus.connectedProviders || null,
       providerDiscoveryReasonCode: runtimeStatus.providerDiscoveryReasonCode || null,
+      providerInventory: runtimeStatus.providerInventory || null,
+      authDiscoveryReasonCode: runtimeStatus.authDiscoveryReasonCode || null,
+      providerInventoryPartial: runtimeStatus.providerInventoryPartial ?? null,
     },
   };
 }

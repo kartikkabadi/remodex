@@ -12,6 +12,14 @@ struct OpenCodeConnectedProviderSummary: Codable, Hashable, Sendable {
     let modelCount: Int?
 }
 
+struct OpenCodeProviderInventoryEntry: Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+    let connectedOnServe: Bool
+    let authenticated: Bool
+    let modelCount: Int?
+}
+
 struct OpenCodeModelListMeta: Codable, Hashable, Sendable {
     let reasonCode: String?
     let connectedProviderIds: [String]?
@@ -33,5 +41,8 @@ struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let handoffEnvEnabled: Bool?
     let authConfigured: Bool?
     let connectedProviders: [OpenCodeConnectedProviderSummary]?
+    let providerInventory: [OpenCodeProviderInventoryEntry]?
     let providerDiscoveryReasonCode: String?
+    let authDiscoveryReasonCode: String?
+    let providerInventoryPartial: Bool?
 }

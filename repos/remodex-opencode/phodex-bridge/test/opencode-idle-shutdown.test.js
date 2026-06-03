@@ -84,9 +84,7 @@ function fakeClient() {
     createSession: async () => "ses_idle",
     getSession: async () => ({}),
     prompt: async () => Promise.resolve(),
-    setModel: async () => {},
-    setMode: async () => {},
-    setEffort: async () => {},
+
     abort: async () => {},
     getMessages: async () => [],
     replyToPermission: async () => {},

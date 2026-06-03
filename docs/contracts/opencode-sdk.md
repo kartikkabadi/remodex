@@ -174,10 +174,18 @@ Skill-only turns include a minimal leading `{ type: "text", text: " " }` part so
 
 **Bridge subscribes to events BEFORE calling prompt** to avoid missing early events.
 
-**Config before prompt:** Bridge calls these before `prompt()`:
-- `client.session.setConfig({ sessionID, configId: "model", value: "openai/gpt-5.5" })`
-- `client.session.setConfig({ sessionID, configId: "mode", value: "build" })`
-- `client.session.setConfig({ sessionID, configId: "effort", value: "high" })` (if reasoning supported)
+**Prompt-time session config (Session2):** Bridge passes model, agent, and optional variant on a single `session.prompt()` call. `session.setConfig` is **not** used (removed from SDK Session2).
+
+```js
+client.session.prompt({
+  sessionID,
+  directory,
+  model: { providerID: "opencode-go", modelID: "deepseek-v4-flash" },
+  agent: "build",
+  variant: "max", // optional; only when effort matches a catalog variant key (KD-9)
+  parts: [...],
+});
+```
 
 ### Event Streaming: `client.event.subscribe()`
 

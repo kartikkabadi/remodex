@@ -9,6 +9,7 @@ const {
   flattenConnectedProviderModels,
   discoveryReasonCodeFromInventory,
   buildInventoryMeta,
+  buildProviderInventory,
 } = require("../src/opencode-provider-inventory");
 
 function makeProvider({ id, name, source = "api", models = {} }) {
@@ -156,6 +157,41 @@ describe("resolveInventoryReasonCode", () => {
     const preferred = resolvePreferredProviders(inventory, { credentialProviderIDs: [] });
     const models = flattenConnectedProviderModels(preferred);
     assert.equal(resolveInventoryReasonCode(inventory, models), "ok");
+  });
+});
+
+describe("buildProviderInventory", () => {
+  test("authenticated disconnected provider appears once", () => {
+    const inventory = {
+      connected: ["opencode-go"],
+      all: [
+        makeProvider({
+          id: "opencode-go",
+          name: "OpenCode Go",
+          models: { flash: { id: "flash", name: "Flash" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, {
+      credentialProviderIDs: ["deepseek", "opencode-go"],
+    });
+    const deepseek = rows.find((row) => row.id === "deepseek");
+    assert.ok(deepseek);
+    assert.equal(deepseek.connectedOnServe, false);
+    assert.equal(deepseek.authenticated, true);
+    assert.equal(rows.filter((row) => row.id.toLowerCase() === "opencode-go").length, 1);
+  });
+
+  test("dedupes canonical id casing from all[]", () => {
+    const inventory = {
+      connected: ["openai"],
+      all: [makeProvider({ id: "OpenAI", name: "OpenAI", models: {} })],
+    };
+    const rows = buildProviderInventory(inventory, {
+      credentialProviderIDs: ["openai"],
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "OpenAI");
   });
 });
 

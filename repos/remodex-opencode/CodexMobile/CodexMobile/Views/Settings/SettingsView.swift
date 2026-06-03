@@ -18,6 +18,7 @@ struct SettingsView: View {
             SettingsSubscriptionCard()
             SettingsBridgeVersionCard()
             SettingsRuntimeDefaultsCard()
+            SettingsOpenCodeProvidersLink()
             SettingsAboutCard()
             SettingsUsageCard()
             SettingsConnectionCard()

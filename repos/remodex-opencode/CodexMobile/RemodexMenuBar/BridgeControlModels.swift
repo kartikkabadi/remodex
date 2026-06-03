@@ -33,6 +33,14 @@ struct BridgeOpenCodeConnectedProviderSummary: Codable, Equatable {
     let modelCount: Int?
 }
 
+struct BridgeOpenCodeProviderInventoryEntry: Codable, Equatable {
+    let id: String
+    let displayName: String
+    let connectedOnServe: Bool
+    let authenticated: Bool
+    let modelCount: Int?
+}
+
 struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
     let enabled: Bool?
     let serveUrl: String?
@@ -45,7 +53,10 @@ struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
     let handoffEnvEnabled: Bool?
     let authConfigured: Bool?
     let connectedProviders: [BridgeOpenCodeConnectedProviderSummary]?
+    let providerInventory: [BridgeOpenCodeProviderInventoryEntry]?
     let providerDiscoveryReasonCode: String?
+    let authDiscoveryReasonCode: String?
+    let providerInventoryPartial: Bool?
 }
 
 struct BridgeRuntimeStatus: Codable, Equatable {

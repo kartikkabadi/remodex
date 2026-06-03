@@ -190,9 +190,7 @@ function fakeClient() {
     createSession: async () => "ses_lifecycle_001",
     getSession: async () => ({}),
     prompt: async () => Promise.resolve(),
-    setModel: async () => {},
-    setMode: async () => {},
-    setEffort: async () => {},
+
     abort: async () => {},
     fork: async () => "ses_forked",
     getMessages: async () => [],

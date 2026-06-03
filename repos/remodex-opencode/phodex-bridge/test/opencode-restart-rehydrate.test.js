@@ -92,9 +92,7 @@ function fakeClient({ getSessionImpl, getMessagesImpl, createSessionImpl } = {})
       })),
     getMessages: getMessagesImpl || (async () => []),
     prompt: async () => {},
-    setModel: async () => {},
-    setMode: async () => {},
-    setEffort: async () => {},
+
     abort: async () => {},
     fork: async () => "ses_forked",
     replyToPermission: async () => {},

@@ -125,7 +125,8 @@ struct ComposerBottomBar: View {
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
             .capabilityGreyOut(
                 isEnabled: runtimeState.capabilities.supportsVoice,
-                reason: ComposerCapabilityCopy.capabilityReason(for: .voice)
+                reason: ComposerCapabilityCopy.capabilityReason(for: .voice),
+                showsCaption: false
             )
 
             if isThreadRunning && isSending && activeTurnID == nil {
@@ -386,7 +387,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
 
     private var metaTextFont: Font { AppFont.callout() }
     private var leadingIconFont: Font { AppFont.subheadline() }
-    private let maxInlineRuntimeLabelWidth: CGFloat = 108
+    private let maxInlineRuntimeLabelWidth: CGFloat = 152
 
     private var selectedModelProvider: String {
         orderedModelOptions.first(where: { $0.selectionKey == selectedModelID })?.modelProvider ?? "codex"
@@ -521,6 +522,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                 .font(metaTextFont)
                 .fontWeight(.regular)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .truncationMode(.tail)
         }
         .padding(.vertical, 6)

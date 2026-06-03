@@ -10,21 +10,31 @@ import SwiftUI
 struct CapabilityGreyOutModifier: ViewModifier {
     let isEnabled: Bool
     let reason: String?
+    var showsCaption: Bool = true
 
     func body(content: Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            content
-                .disabled(!isEnabled)
-                .opacity(isEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
-                .accessibilityHint(accessibilityHint)
-
-            if let reason, !isEnabled {
-                Text(reason)
-                    .font(ComposerDisabledAppearance.captionFont)
-                    .foregroundStyle(ComposerDisabledAppearance.captionColor)
-                    .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if showsCaption {
+                VStack(alignment: .leading, spacing: 4) {
+                    greyedContent
+                    if let reason, !isEnabled {
+                        Text(reason)
+                            .font(ComposerDisabledAppearance.captionFont)
+                            .foregroundStyle(ComposerDisabledAppearance.captionColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                greyedContent
             }
         }
+    }
+
+    private var greyedContent: some View {
+        content
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
+            .accessibilityHint(accessibilityHint)
     }
 
     private var accessibilityHint: String {
@@ -34,8 +44,18 @@ struct CapabilityGreyOutModifier: ViewModifier {
 }
 
 extension View {
-    func capabilityGreyOut(isEnabled: Bool, reason: String? = nil) -> some View {
-        modifier(CapabilityGreyOutModifier(isEnabled: isEnabled, reason: reason))
+    func capabilityGreyOut(
+        isEnabled: Bool,
+        reason: String? = nil,
+        showsCaption: Bool = true
+    ) -> some View {
+        modifier(
+            CapabilityGreyOutModifier(
+                isEnabled: isEnabled,
+                reason: reason,
+                showsCaption: showsCaption
+            )
+        )
     }
 }
 
