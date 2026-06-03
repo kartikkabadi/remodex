@@ -47,6 +47,10 @@ test("detailed health exposes relay pressure counters", async () => {
     assert.equal(body.relay.sessionsWithStaleMac, 0);
     assert.equal(body.relay.sessionsWithClients, 0);
     assert.equal(typeof body.relay.heartbeatTerminations, "number");
+    assert.equal(typeof body.relay.heartbeatTerminationsByRole, "object");
+    assert.equal(typeof body.relay.acceptedConnectionsByRole, "object");
+    assert.equal(typeof body.relay.closedConnectionsByRole, "object");
+    assert.equal(body.relay.acceptedConnectionsByRole.mac, 1);
 
     const macClosed = onceClosed(mac);
     mac.close();

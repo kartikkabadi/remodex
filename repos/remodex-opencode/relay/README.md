@@ -117,6 +117,15 @@ Push is disabled by default. Enable it only when you are ready to wire APNs and 
 - If you expose the relay under a shared-domain prefix such as `/remodex`, have the proxy strip that prefix before forwarding so the Node server still receives `/relay/...` and `/v1/push/...`.
 - The public repo should document the protocol and code, not your real deployed hostname or deploy defaults.
 
+## Canonical entrypoint
+
+Production and local self-hosting should use:
+
+- **`server.js`** — HTTP server, health, trusted-session resolve, optional push routes; calls `setupRelay(wss)` from **`relay.js`**.
+- **`relay.js`** — WebSocket relay transport (pairing rooms, heartbeat, forwarding, `getRelayStats()`).
+
+`npm start` runs `node ./server.js`. Do not deploy the legacy `phodex-backend-relay.mjs` snapshot; it duplicated heartbeat logic without metrics and was removed to avoid drift.
+
 ## Usage
 
 ```sh
@@ -125,4 +134,4 @@ npm install
 npm start
 ```
 
-`server.js` exports `createRelayServer()`, and `relay.js` exports the lower-level `setupRelay(wss)` transport primitive if you want to embed the relay in your own server.
+`server.js` exports `createRelayServer()`. `relay.js` exports `setupRelay(wss)` and `getRelayStats()` if you embed the relay in your own server.
