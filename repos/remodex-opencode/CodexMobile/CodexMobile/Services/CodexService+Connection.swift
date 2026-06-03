@@ -1111,6 +1111,17 @@ extension CodexService {
         return "Reconnecting..."
     }
 
+    // Keeps trusted auto-reconnect attempts visually quiet instead of flashing interrupt copy.
+    func shouldSuppressInterruptedConnectionMessageDuringTrustedRecovery() -> Bool {
+        guard case .retrying = connectionRecoveryState else {
+            return false
+        }
+        guard hasTrustedReconnectContext else {
+            return false
+        }
+        return trustedReconnectFailureCount < Self.maxTrustedReconnectFailures
+    }
+
     func userFacingConnectFailureMessage(_ error: Error) -> String {
         if let retryableSessionUnavailableMessage = retryableSessionUnavailableMessage(forConnectError: error) {
             return retryableSessionUnavailableMessage
@@ -1119,6 +1130,9 @@ extension CodexService {
             return oversizedRelayPayloadMessage
         }
         if shouldTreatSendFailureAsDisconnect(error) || isBenignBackgroundDisconnect(error) {
+            if shouldSuppressInterruptedConnectionMessageDuringTrustedRecovery() {
+                return recoveryStatusMessage(for: error)
+            }
             return "Connection was interrupted. Tap Reconnect to try again."
         }
         if isRecoverableTransientConnectionError(error) {

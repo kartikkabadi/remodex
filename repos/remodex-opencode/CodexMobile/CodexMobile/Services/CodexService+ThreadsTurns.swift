@@ -2616,6 +2616,11 @@ extension CodexService {
             threads = sortThreads(threads)
         }
 
+        if resolvedTurnID != nil {
+            restartWebSocketKeepAliveLoopIfNeeded()
+            Task { await probeForegroundConnectionIfNeeded() }
+        }
+
         return resolvedTurnID
     }
 

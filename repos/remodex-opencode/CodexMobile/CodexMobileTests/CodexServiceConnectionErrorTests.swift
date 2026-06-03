@@ -443,4 +443,77 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
         XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
         XCTAssertTrue(service.bufferedSecureControlMessages.isEmpty)
     }
+
+    func testManualWebSocketDrainAnswersPingBeforeText() async throws {
+        let service = CodexService()
+        let connection = NWConnection(
+            host: NWEndpoint.Host("localhost"),
+            port: NWEndpoint.Port(rawValue: 80)!,
+            using: NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
+        )
+        var sequence: [String] = []
+        service.manualWebSocketDrainSequenceProbe = { sequence.append($0) }
+
+        let textPayload = Data("{\"jsonrpc\":\"2.0\",\"method\":\"relay/ping\"}".utf8)
+        service.manualWebSocketReadBuffer =
+            Self.unmaskedServerWebSocketFrame(opcode: 0x9, payload: Data())
+            + Self.unmaskedServerWebSocketFrame(opcode: 0x1, payload: textPayload)
+
+        let didHandleClose = try await service.drainManualWebSocketFrames(on: connection)
+
+        XCTAssertFalse(didHandleClose)
+        XCTAssertEqual(sequence, ["pong", "text"])
+    }
+
+    func testWebSocketKeepAliveIntervalShortensWhileTurnIsActive() {
+        let service = CodexService()
+        XCTAssertEqual(service.webSocketKeepAliveIntervalNanoseconds(), 25_000_000_000)
+
+        service.activeTurnIdByThread["thread-active"] = "turn-active"
+        XCTAssertEqual(service.webSocketKeepAliveIntervalNanoseconds(), 10_000_000_000)
+    }
+
+    func testInterruptedConnectionCopyIsSoftenedDuringTrustedReconnectRetry() {
+        let service = CodexService()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        service.relaySessionId = "session-\(UUID().uuidString)"
+        service.relayUrl = "ws://relay.local/relay"
+        service.relayMacDeviceId = macDeviceID
+        service.setCurrentTrustedMacDeviceId(macDeviceID)
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 1, count: 32).base64EncodedString(),
+            lastPairedAt: Date()
+        )
+        service.shouldForceQRBootstrapOnNextHandshake = false
+        service.connectionRecoveryState = .retrying(attempt: 1, message: "Reconnecting...")
+        service.trustedReconnectFailureCount = 0
+
+        XCTAssertTrue(service.hasTrustedReconnectContext)
+        XCTAssertTrue(service.shouldSuppressInterruptedConnectionMessageDuringTrustedRecovery())
+        XCTAssertEqual(
+            service.userFacingConnectFailureMessage(NWError.posix(.EPIPE)),
+            "Reconnecting..."
+        )
+    }
+
+    private static func unmaskedServerWebSocketFrame(opcode: UInt8, payload: Data) -> Data {
+        var frame = Data([0x80 | opcode])
+        let length = payload.count
+        if length < 126 {
+            frame.append(UInt8(length))
+        } else if length <= 0xFFFF {
+            frame.append(126)
+            frame.append(UInt8((length >> 8) & 0xFF))
+            frame.append(UInt8(length & 0xFF))
+        } else {
+            frame.append(127)
+            let encodedLength = UInt64(length)
+            for shift in stride(from: 56, through: 0, by: -8) {
+                frame.append(UInt8((encodedLength >> UInt64(shift)) & 0xFF))
+            }
+        }
+        frame.append(payload)
+        return frame
+    }
 }

@@ -16,6 +16,7 @@ let codexWebSocketMaximumMessageSizeBytes = 16 * 1024 * 1024
 
 private enum CodexWebSocketKeepAlivePolicy {
     static let intervalNanoseconds: UInt64 = 25_000_000_000
+    static let activeTurnIntervalNanoseconds: UInt64 = 10_000_000_000
     static let foregroundProbeTimeoutNanoseconds: UInt64 = 1_500_000_000
 }
 
@@ -370,7 +371,7 @@ extension CodexService {
         webSocketKeepAliveTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
                 let interval = self.webSocketKeepAliveIntervalOverrideNanoseconds
-                    ?? CodexWebSocketKeepAlivePolicy.intervalNanoseconds
+                    ?? self.webSocketKeepAliveIntervalNanoseconds()
                 try? await Task.sleep(nanoseconds: interval)
                 guard !Task.isCancelled else {
                     return
@@ -444,6 +445,20 @@ extension CodexService {
     func stopWebSocketKeepAliveLoop() {
         webSocketKeepAliveTask?.cancel()
         webSocketKeepAliveTask = nil
+    }
+
+    func restartWebSocketKeepAliveLoopIfNeeded() {
+        guard isConnected, isInitialized, isAppInForeground else {
+            return
+        }
+        stopWebSocketKeepAliveLoop()
+        startWebSocketKeepAliveLoop()
+    }
+
+    func webSocketKeepAliveIntervalNanoseconds() -> UInt64 {
+        hasAnyRunningTurn
+            ? CodexWebSocketKeepAlivePolicy.activeTurnIntervalNanoseconds
+            : CodexWebSocketKeepAlivePolicy.intervalNanoseconds
     }
 
     func sendWebSocketKeepAlivePing() async throws {
@@ -718,7 +733,7 @@ extension CodexService {
         let parameters = NWParameters(tls: tlsOptions, tcp: NWProtocolTCP.Options())
         parameters.defaultProtocolStack.applicationProtocols.insert(webSocketOptions, at: 0)
 
-        codexLogPairingTransport("opening NWConnection websocket")
+        codexLogPairingTransport("opening NWConnection websocket (autoReplyPing=true)")
         let connection = NWConnection(to: .url(url), using: parameters)
         let waitConfiguration = CodexConnectionReadyWaitConfiguration(
             logLabel: "NWConnection websocket",
@@ -1018,10 +1033,22 @@ extension CodexService {
     // Preserves relay close semantics on the raw TCP websocket path so `.local` reconnects
     // reuse the same retry / re-pair policy as the higher-level websocket transports.
     func drainManualWebSocketFrames(on connection: NWConnection) async throws -> Bool {
-        while let frame = parseManualWebSocketFrame(from: &manualWebSocketReadBuffer) {
+        let frames = collectParseableManualWebSocketFrames(from: &manualWebSocketReadBuffer)
+        guard !frames.isEmpty else {
+            return false
+        }
+
+        // Answer relay pings before decoding JSON-RPC backlog so heartbeat liveness is not delayed.
+        for frame in frames where frame.opcode == 0x9 {
+            manualWebSocketDrainSequenceProbe?("pong")
+            try await sendManualWebSocketFrame(opcode: 0xA, payload: frame.payload, on: connection)
+        }
+
+        for frame in frames where frame.opcode != 0x9 {
             switch frame.opcode {
             case 0x1:
                 if let text = String(data: frame.payload, encoding: .utf8) {
+                    manualWebSocketDrainSequenceProbe?("text")
                     lastRawMessage = text
                     processIncomingWireText(text)
                 }
@@ -1031,8 +1058,6 @@ extension CodexService {
                     relayCloseCode: relayCloseCode(fromManualWebSocketClosePayload: frame.payload)
                 )
                 return true
-            case 0x9:
-                try await sendManualWebSocketFrame(opcode: 0xA, payload: frame.payload, on: connection)
             case 0xA:
                 break
             default:
@@ -1041,6 +1066,16 @@ extension CodexService {
         }
 
         return false
+    }
+
+    func collectParseableManualWebSocketFrames(
+        from buffer: inout Data
+    ) -> [(opcode: UInt8, payload: Data)] {
+        var frames: [(opcode: UInt8, payload: Data)] = []
+        while let frame = parseManualWebSocketFrame(from: &buffer) {
+            frames.append(frame)
+        }
+        return frames
     }
 
     func parseManualWebSocketFrame(from buffer: inout Data) -> (opcode: UInt8, payload: Data)? {
