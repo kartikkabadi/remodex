@@ -66,7 +66,7 @@ main() {
   tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
   log "Starting relay+bridge in tmux session '${SESSION_NAME}' (hostname ${HOSTNAME})"
   tmux new-session -d -s "${SESSION_NAME}" \
-    "cd '${ROOT_DIR}' && exec ./run-local-remodex.sh --hostname '${HOSTNAME}' 2>&1 | tee -a '${LOG}'"
+    "cd '${ROOT_DIR}' && REMODEX_RELAY_MESSAGE_LIVENESS=1 exec ./run-local-remodex.sh --hostname '${HOSTNAME}' 2>&1 | tee -a '${LOG}'"
 
   wait_for_relay_health
   wait_for_pairing_file
