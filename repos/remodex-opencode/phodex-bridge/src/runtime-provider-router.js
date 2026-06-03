@@ -387,13 +387,8 @@ async function listProviderThreads(providers, params) {
 function logBridgeTurnStartAudit(request, ownershipStore) {
   const params = request.params || {};
   const threadId = readThreadId(params);
-  const requestedProvider = readModelProvider(params);
+  const normalizedRequested = normalizeExplicitRequestedProvider(params);
   const storedProvider = threadId ? ownershipStore.getOwnership(threadId) : null;
-  const normalizedRequested = requestedProvider
-    ? isOpenCodeProvider(requestedProvider)
-      ? OPENCODE_PROVIDER_ID
-      : CODEX_PROVIDER_ID
-    : null;
 
   console.log(
     JSON.stringify({
@@ -412,13 +407,8 @@ function logBridgeTurnStartAudit(request, ownershipStore) {
 function logBridgeOwnershipMismatch(request, ownershipStore, error) {
   const params = request.params || {};
   const threadId = readThreadId(params);
-  const requestedProvider = readModelProvider(params);
+  const normalizedRequested = normalizeExplicitRequestedProvider(params);
   const storedProvider = threadId ? ownershipStore.getOwnership(threadId) : null;
-  const normalizedRequested = requestedProvider
-    ? isOpenCodeProvider(requestedProvider)
-      ? OPENCODE_PROVIDER_ID
-      : CODEX_PROVIDER_ID
-    : null;
 
   console.log(
     JSON.stringify({
@@ -445,7 +435,7 @@ function resolveThreadOwnershipMismatch(request, ownershipStore) {
   }
 
   const requestedProvider = readModelProvider(params);
-  if (!requestedProvider) {
+  if (!hasExplicitProviderField(params)) {
     return null;
   }
 
@@ -462,6 +452,13 @@ function resolveThreadOwnershipMismatch(request, ownershipStore) {
   error.errorCode = "thread_provider_mismatch";
   error.userMessage = `This chat is tied to ${storedProvider}. Start a new chat to switch providers.`;
   return error;
+}
+
+function normalizeExplicitRequestedProvider(params = {}) {
+  if (!hasExplicitProviderField(params)) {
+    return null;
+  }
+  return isOpenCodeProvider(readModelProvider(params)) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID;
 }
 
 function providerForRequest(request, providers) {

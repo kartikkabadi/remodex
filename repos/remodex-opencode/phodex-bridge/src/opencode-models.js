@@ -311,10 +311,10 @@ function extractOpenCodeMessageText(message) {
           return "";
         }
         const partType = readString(part.type);
-        if (partType !== "text" && partType !== "reasoning") {
+        if (partType !== "text") {
           return "";
         }
-        if (partType === "text" && (part.synthetic === true || part.ignored === true)) {
+        if (part.synthetic === true || part.ignored === true) {
           return "";
         }
         return readString(part.text);

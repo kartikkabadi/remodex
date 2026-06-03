@@ -910,6 +910,66 @@ test("rejects explicit provider switches on owned threads", async () => {
   }
 });
 
+test("routes providerless owned thread RPCs by durable ownership", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-providerless-"));
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned", "opencode");
+
+    const handledRequests = [];
+    const responses = [];
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ items: [] }),
+      sendApplicationResponse: (message) => {
+        responses.push(JSON.parse(message));
+      },
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [
+        {
+          id: "opencode",
+          ownsThread(threadId) {
+            return threadId === "thread-owned";
+          },
+          async handleRequest(request) {
+            handledRequests.push(request);
+            return { thread: { id: request.params.threadId, modelProvider: "opencode" } };
+          },
+        },
+      ],
+    });
+
+    const handled = router.handleApplicationMessage(
+      JSON.stringify({
+        id: "providerless-owned-read",
+        method: "thread/read",
+        params: {
+          threadId: "thread-owned",
+          includeTurns: true,
+        },
+      }),
+    );
+
+    assert.equal(handled, true);
+    await waitOneTick();
+    assert.equal(handledRequests.length, 1);
+    assert.equal(handledRequests[0].method, "thread/read");
+    const response = responses.find((entry) => entry.id === "providerless-owned-read");
+    assert.equal(response?.error, undefined);
+    assert.equal(response?.result?.thread?.modelProvider, "opencode");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("turn/start logs bridge_turn_start_audit and bridge_ownership_mismatch", async () => {
   const fs = require("fs");
   const os = require("os");

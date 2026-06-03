@@ -921,6 +921,53 @@ test("poll hydration completes via getMessages info/parts snapshots", async () =
   assert.equal(completed, true);
 });
 
+test("poll hydration keeps reasoning parts out of assistant text", async () => {
+  let assistantDelta = "";
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        assistantDelta += payload.params.delta || "";
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => ({
+        data: [
+          {
+            info: {
+              id: "msg-assistant",
+              role: "assistant",
+              time: { created: Date.now(), completed: Date.now() },
+            },
+            parts: [
+              { id: "part-reasoning", type: "reasoning", text: "The user said hello." },
+              { id: "part-text", type: "text", text: "Hey. What's up?" },
+            ],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.equal(assistantDelta, "Hey. What's up?");
+});
+
 test("threadArchive stub-only removes ownership and session", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();
