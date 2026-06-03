@@ -97,7 +97,7 @@ xcodebuild \
   -derivedDataPath "${DERIVED_DATA}" \
   build
 
-APP_PATH="$(/bin/ls -dt "${DERIVED_DATA}/Build/Products/${CONFIGURATION}-iphoneos"/CodexMobile.app 2>/dev/null | head -1)"
+APP_PATH="$(find "${DERIVED_DATA}/Build/Products/${CONFIGURATION}-iphoneos" -maxdepth 1 -name 'CodexMobile.app' -type d 2>/dev/null | head -1)"
 [[ -n "${APP_PATH}" && -d "${APP_PATH}" ]] || die "Build succeeded but CodexMobile.app was not found under ${DERIVED_DATA}"
 
 log "Installing ${APP_PATH}…"
