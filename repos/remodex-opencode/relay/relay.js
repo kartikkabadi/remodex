@@ -63,12 +63,17 @@ const liveSessionsByPairingCode = new Map();
 const usedResolveNonces = new Map();
 
 // Attaches relay behavior to a ws WebSocketServer instance.
+function isRelayMessageLivenessEnabled() {
+  return process.env.REMODEX_RELAY_MESSAGE_LIVENESS === "1";
+}
+
 function setupRelay(
   wss,
   {
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
     macAbsenceGraceMs = MAC_ABSENCE_GRACE_MS,
+    heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
   } = {}
 ) {
   const heartbeat = setInterval(() => {
@@ -86,7 +91,7 @@ function setupRelay(
       ws._relayAlive = false;
       ws.ping();
     }
-  }, HEARTBEAT_INTERVAL_MS);
+  }, heartbeatIntervalMs);
   heartbeat.unref?.();
 
   wss.on("close", () => clearInterval(heartbeat));
@@ -182,7 +187,7 @@ function setupRelay(
     ws.on("message", (data) => {
       const msg = typeof data === "string" ? data : data.toString("utf-8");
       if (isRelayMobileRole(role)) {
-        touchRelayLastMobileInbound(ws);
+        markRelayMobileInboundLiveness(ws);
       }
       if (role === "mac" && applyMacRegistrationMessage(session, sessionId, msg)) {
         return;
@@ -193,7 +198,7 @@ function setupRelay(
           if (client.readyState === WebSocket.OPEN) {
             relayMetrics.macMessagesRelayed += 1;
             client.send(msg);
-            touchRelayLastMobileOutbound(client);
+            markRelayMobileOutboundLiveness(client);
           }
         }
       } else if (session.mac?.readyState === WebSocket.OPEN) {
@@ -355,6 +360,20 @@ function touchRelayLastMobileInbound(ws) {
 
 function touchRelayLastMobileOutbound(ws) {
   ws._relayLastMobileOutboundAt = Date.now();
+}
+
+function markRelayMobileInboundLiveness(ws) {
+  touchRelayLastMobileInbound(ws);
+  if (isRelayMessageLivenessEnabled()) {
+    ws._relayAlive = true;
+  }
+}
+
+function markRelayMobileOutboundLiveness(ws) {
+  touchRelayLastMobileOutbound(ws);
+  if (isRelayMessageLivenessEnabled()) {
+    ws._relayAlive = true;
+  }
 }
 
 function msSinceRelayActivity(timestamp) {
