@@ -11,6 +11,7 @@ const {
   dispatchEvent,
   flattenProviderModels,
   resolveAgentsList,
+  resolveSessionIdFromCreateResponse,
 } = require("../src/opencode-client");
 
 const TEST_BASE_URL = "http://127.0.0.1:4291";
@@ -176,10 +177,110 @@ test("listAgents returns agent array", async () => {
   assert.equal(agents[0].id, "build");
 });
 
+test("resolveSessionIdFromCreateResponse reads nested and top-level envelopes", () => {
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ data: { id: "ses_test" } }),
+    "ses_test",
+  );
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ data: { sessionID: "ses_nested" } }),
+    "ses_nested",
+  );
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ data: { sessionId: "ses_data_sessionId" } }),
+    "ses_data_sessionId",
+  );
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ sessionID: "ses_top" }),
+    "ses_top",
+  );
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ sessionId: "ses_top_sessionId" }),
+    "ses_top_sessionId",
+  );
+  assert.equal(
+    resolveSessionIdFromCreateResponse({ id: "ses_top_id" }),
+    "ses_top_id",
+  );
+  assert.equal(resolveSessionIdFromCreateResponse(null), "");
+  assert.equal(resolveSessionIdFromCreateResponse(undefined), "");
+  assert.equal(resolveSessionIdFromCreateResponse({}), "");
+  assert.equal(resolveSessionIdFromCreateResponse({ data: {} }), "");
+  assert.equal(resolveSessionIdFromCreateResponse({ data: { id: "" } }), "");
+});
+
 test("createSession requires cwd", async () => {
   const client = await createTestClient();
   const sessionId = await client.createSession({ cwd: "/tmp/project" });
   assert.equal(sessionId, "ses_test");
+});
+
+test("createSession fails fast when response has no session id", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      provider: {
+        list: async () => ({ all: [], connected: [], default: {} }),
+      },
+      app: { agents: async () => ({ data: [] }), skills: async () => [] },
+      session: {
+        create: async () => ({ data: {} }),
+        get: async () => ({}),
+        prompt: async () => ({}),
+        abort: async () => ({}),
+        messages: async () => ({ messages: [] }),
+        fork: async () => ({ data: {} }),
+      },
+      permission: { reply: async () => ({}) },
+      command: { list: async () => [] },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* empty() {})(),
+          close: () => {},
+        }),
+      },
+      tui: { selectSession: async () => ({}) },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.createSession({ cwd: "/tmp/project" }),
+    /returned no session id/,
+  );
+  await assert.rejects(() => client.fork("ses_parent"), /returned no session id/);
+});
+
+test("createSession resolves session id from SDK data.id envelope", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      provider: {
+        list: async () => ({ all: [], connected: [], default: {} }),
+      },
+      app: { agents: async () => ({ data: [] }), skills: async () => [] },
+      session: {
+        create: async () => ({ data: { id: "ses_data_envelope" } }),
+        get: async () => ({}),
+        prompt: async () => ({}),
+        abort: async () => ({}),
+        messages: async () => ({ messages: [] }),
+        fork: async () => ({ data: { id: "ses_fork_data" } }),
+      },
+      permission: { reply: async () => ({}) },
+      command: { list: async () => [] },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* empty() {})(),
+          close: () => {},
+        }),
+      },
+      tui: { selectSession: async () => ({}) },
+    }),
+  });
+  const sessionId = await client.createSession({ cwd: "/tmp/project" });
+  assert.equal(sessionId, "ses_data_envelope");
+  const forkId = await client.fork("ses_data_envelope");
+  assert.equal(forkId, "ses_fork_data");
 });
 
 test("subscribeToEvents returns unsubscribe and exits cleanly", async () => {

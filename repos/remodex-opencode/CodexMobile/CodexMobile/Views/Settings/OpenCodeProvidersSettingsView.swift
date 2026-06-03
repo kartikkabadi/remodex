@@ -24,7 +24,7 @@ struct OpenCodeProvidersSettingsView: View {
             } else {
                 ForEach(entries, id: \.id) { entry in
                     HStack(spacing: 12) {
-                        RuntimeProviderLogoView(provider: entry.id, size: 22)
+                        RuntimeProviderLogoView(provider: entry.logoProviderId ?? entry.id, size: 22)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.displayName)
                                 .font(AppFont.body())

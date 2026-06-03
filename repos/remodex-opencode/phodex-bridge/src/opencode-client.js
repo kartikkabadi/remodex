@@ -27,6 +27,22 @@ async function getSdkClient() {
 
 const REQUEST_TIMEOUT_MS = 90_000;
 
+function resolveSessionIdFromCreateResponse(response) {
+  if (!response || typeof response !== "object") {
+    return "";
+  }
+
+  const data = response.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const fromData = readString(data.id || data.sessionID || data.sessionId);
+    if (fromData) {
+      return fromData;
+    }
+  }
+
+  return readString(response.sessionID || response.sessionId || response.id);
+}
+
 async function createOpenCodeClient({
   baseUrl,
   logPrefix = "[remodex]",
@@ -143,7 +159,13 @@ async function createOpenCodeClient({
       client.session.create({ directory: readString(cwd) || process.cwd() }),
       REQUEST_TIMEOUT_MS,
     );
-    return readString(response?.sessionID || response?.sessionId);
+    const sessionId = resolveSessionIdFromCreateResponse(response);
+    if (!readString(sessionId)) {
+      throw new Error(
+        "OpenCode session.create returned no session id (empty or missing id/sessionID in response).",
+      );
+    }
+    return sessionId;
   }
 
   async function getSession(sessionId) {
@@ -284,7 +306,13 @@ async function createOpenCodeClient({
       client.session.fork({ sessionID: sessionId }),
       REQUEST_TIMEOUT_MS,
     );
-    return readString(response?.sessionID || response?.sessionId);
+    const forkedSessionId = resolveSessionIdFromCreateResponse(response);
+    if (!readString(forkedSessionId)) {
+      throw new Error(
+        "OpenCode session.fork returned no session id (empty or missing id/sessionID in response).",
+      );
+    }
+    return forkedSessionId;
   }
 
   async function listCommands(directory) {
@@ -958,4 +986,5 @@ module.exports = {
   normalizeOpenCodeEventType,
   resolveProviderListPayload,
   resolveProviderAuthPayload,
+  resolveSessionIdFromCreateResponse,
 };

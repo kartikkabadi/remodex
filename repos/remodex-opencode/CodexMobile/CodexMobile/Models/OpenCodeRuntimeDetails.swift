@@ -18,6 +18,7 @@ struct OpenCodeProviderInventoryEntry: Codable, Hashable, Sendable {
     let connectedOnServe: Bool
     let authenticated: Bool
     let modelCount: Int?
+    let logoProviderId: String?
 }
 
 struct OpenCodeModelListMeta: Codable, Hashable, Sendable {

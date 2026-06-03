@@ -189,6 +189,25 @@ function formatProviderDisplayNameFromId(id) {
     .join(" ");
 }
 
+function resolveLogoProviderId(id, displayName) {
+  if (canonicalProviderId(id) !== "opencode") {
+    return undefined;
+  }
+  const normalized = readString(displayName).trim().toLowerCase();
+  if (normalized !== "opencode zen") {
+    return undefined;
+  }
+  return "opencode-zen";
+}
+
+function withLogoProviderId(entry) {
+  const logoProviderId = resolveLogoProviderId(entry.id, entry.displayName);
+  if (!logoProviderId) {
+    return entry;
+  }
+  return { ...entry, logoProviderId };
+}
+
 function buildProviderInventory(inventory, options = {}) {
   const credentialProviderIDs = Array.isArray(options.credentialProviderIDs)
     ? options.credentialProviderIDs
@@ -210,13 +229,16 @@ function buildProviderInventory(inventory, options = {}) {
       continue;
     }
     const canonical = canonicalProviderId(id);
-    byCanonical.set(canonical, {
-      id,
-      displayName: readString(provider.name) || formatProviderDisplayNameFromId(id),
-      connectedOnServe: connectedSet.has(canonical),
-      authenticated: authenticatedSet.has(canonical),
-      modelCount: modelsForProvider(provider).length,
-    });
+    byCanonical.set(
+      canonical,
+      withLogoProviderId({
+        id,
+        displayName: readString(provider.name) || formatProviderDisplayNameFromId(id),
+        connectedOnServe: connectedSet.has(canonical),
+        authenticated: authenticatedSet.has(canonical),
+        modelCount: modelsForProvider(provider).length,
+      }),
+    );
   }
 
   for (const authId of credentialProviderIDs) {
@@ -230,13 +252,16 @@ function buildProviderInventory(inventory, options = {}) {
       entry.authenticated = true;
       continue;
     }
-    byCanonical.set(canonical, {
-      id,
-      displayName: formatProviderDisplayNameFromId(id),
-      connectedOnServe: connectedSet.has(canonical),
-      authenticated: true,
-      modelCount: null,
-    });
+    byCanonical.set(
+      canonical,
+      withLogoProviderId({
+        id,
+        displayName: formatProviderDisplayNameFromId(id),
+        connectedOnServe: connectedSet.has(canonical),
+        authenticated: true,
+        modelCount: null,
+      }),
+    );
   }
 
   const entries = [...byCanonical.values()];
@@ -395,4 +420,5 @@ module.exports = {
   resolveInventoryReasonCode,
   isOpenCodeManagedProvider,
   resolveProviderListPayload,
+  resolveLogoProviderId,
 };

@@ -712,11 +712,28 @@ function createOpenCodeProvider({
 
       if (!active.thread.sessionId) {
         const sessionId = await client.createSession({ cwd });
+        if (!readString(sessionId)) {
+          const error = new Error(
+            "OpenCode createSession returned no session id; cannot persist session or send prompt.",
+          );
+          error.errorCode = ERROR_CODES.OPENCODE_TURN_FAILED.errorCode;
+          error.action = ERROR_CODES.OPENCODE_TURN_FAILED.action;
+          throw error;
+        }
         active.sessionId = sessionId;
         active.thread.sessionId = sessionId;
         persistSessionRecord(active.thread);
       } else {
         active.sessionId = active.thread.sessionId;
+      }
+
+      if (!readString(active.sessionId)) {
+        const error = new Error(
+          "OpenCode turn requires a session id before prompt; session id is missing.",
+        );
+        error.errorCode = ERROR_CODES.OPENCODE_TURN_FAILED.errorCode;
+        error.action = ERROR_CODES.OPENCODE_TURN_FAILED.action;
+        throw error;
       }
 
       const unsubscribe = client.subscribeToEvents((method, params) => {
@@ -937,6 +954,13 @@ function createOpenCodeProvider({
       throw error;
     }
     const newSessionId = await client.fork(thread.sessionId);
+    if (!readString(newSessionId)) {
+      const error = new Error(
+        "OpenCode session.fork returned no session id; cannot start forked thread.",
+      );
+      error.errorCode = "opencode_fork_empty_session";
+      throw error;
+    }
     return threadStart({
       params: {
         sessionId: newSessionId,

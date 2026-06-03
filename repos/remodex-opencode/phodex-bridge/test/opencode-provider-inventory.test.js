@@ -10,6 +10,7 @@ const {
   discoveryReasonCodeFromInventory,
   buildInventoryMeta,
   buildProviderInventory,
+  resolveLogoProviderId,
 } = require("../src/opencode-provider-inventory");
 
 function makeProvider({ id, name, source = "api", models = {} }) {
@@ -180,6 +181,61 @@ describe("buildProviderInventory", () => {
     assert.equal(deepseek.connectedOnServe, false);
     assert.equal(deepseek.authenticated, true);
     assert.equal(rows.filter((row) => row.id.toLowerCase() === "opencode-go").length, 1);
+  });
+
+  test("OpenCode Zen inventory row gets logoProviderId opencode-zen", () => {
+    const inventory = {
+      connected: ["opencode"],
+      all: [
+        makeProvider({
+          id: "opencode",
+          name: "OpenCode Zen",
+          models: { free: { id: "free", name: "Free" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const zen = rows.find((row) => row.id === "opencode");
+    assert.ok(zen);
+    assert.equal(zen.displayName, "OpenCode Zen");
+    assert.equal(zen.logoProviderId, "opencode-zen");
+    assert.equal(resolveLogoProviderId("opencode", "OpenCode Zen"), "opencode-zen");
+  });
+
+  test("OpenCode Zenith does not get logoProviderId", () => {
+    assert.equal(resolveLogoProviderId("opencode", "OpenCode Zenith"), undefined);
+    const inventory = {
+      connected: ["opencode"],
+      all: [
+        makeProvider({
+          id: "opencode",
+          name: "OpenCode Zenith",
+          models: { free: { id: "free", name: "Free" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const row = rows.find((entry) => entry.id === "opencode");
+    assert.ok(row);
+    assert.equal(row.displayName, "OpenCode Zenith");
+    assert.equal(row.logoProviderId, undefined);
+  });
+
+  test("generic opencode provider has no logoProviderId", () => {
+    const inventory = {
+      connected: ["opencode"],
+      all: [
+        makeProvider({
+          id: "opencode",
+          name: "OpenCode",
+          models: { free: { id: "free", name: "Free" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const row = rows.find((entry) => entry.id === "opencode");
+    assert.ok(row);
+    assert.equal(row.logoProviderId, undefined);
   });
 
   test("dedupes canonical id casing from all[]", () => {
