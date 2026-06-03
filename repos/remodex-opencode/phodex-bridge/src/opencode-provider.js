@@ -91,6 +91,7 @@ function createOpenCodeProvider({
 
   const threads = new Map();
   const activeTurns = new Map();
+  const inFlightThreadIds = new Set();
   const eventUnsubscribers = new Map();
   const completedTurnIds = new Set();
 
@@ -553,6 +554,9 @@ function createOpenCodeProvider({
       unsubscribe();
     }
     eventUnsubscribers.clear();
+    activeTurns.clear();
+    inFlightThreadIds.clear();
+    completedTurnIds.clear();
     await server.stop();
     client = null;
     healthy = false;
@@ -638,6 +642,9 @@ function createOpenCodeProvider({
     for (const [, active] of activeTurns) {
       if (active.thread.id === threadId) throw activeTurnError(threadId);
     }
+    if (inFlightThreadIds.has(threadId)) {
+      throw activeTurnError(threadId);
+    }
 
     const model = normalizeOpenCodeModel(params.model || thread.model);
     const { inputText, prompt, parts } = buildPromptFromTurnInput(params.input);
@@ -707,6 +714,8 @@ function createOpenCodeProvider({
   }
 
   async function executeTurn(active, model, agent, effort, prompt, parts, cwd) {
+    const threadId = active.thread.id;
+    inFlightThreadIds.add(threadId);
     try {
       await ensureStarted();
 
@@ -789,6 +798,10 @@ function createOpenCodeProvider({
         );
       }
 
+      if (active.completed) {
+        return;
+      }
+
       await client.prompt({
         sessionID: active.sessionId,
         prompt,
@@ -800,15 +813,22 @@ function createOpenCodeProvider({
         threadId: active.thread.id,
         turnId: active.turn.id,
       });
+      if (active.completed) {
+        return;
+      }
       active.started = true;
     } catch (error) {
-      completeTurn({
-        errorMessage: error?.message || "OpenCode SDK turn failed.",
-        errorCode: error?.errorCode || ERROR_CODES.OPENCODE_TURN_FAILED.errorCode,
-        action: error?.action || ERROR_CODES.OPENCODE_TURN_FAILED.action,
-        status: "failed",
-        active,
-      });
+      if (!active.completed) {
+        completeTurn({
+          errorMessage: error?.message || "OpenCode SDK turn failed.",
+          errorCode: error?.errorCode || ERROR_CODES.OPENCODE_TURN_FAILED.errorCode,
+          action: error?.action || ERROR_CODES.OPENCODE_TURN_FAILED.action,
+          status: "failed",
+          active,
+        });
+      }
+    } finally {
+      inFlightThreadIds.delete(threadId);
     }
   }
 
@@ -890,7 +910,10 @@ function createOpenCodeProvider({
     if (!active) return { success: true, interrupted: false };
 
     try {
-      if (active.sessionId && active.started) await client.abort(active.sessionId);
+      if (readString(active.sessionId)) {
+        await ensureStarted();
+        await client.abort(active.sessionId);
+      }
     } catch {
       // Best effort
     }
@@ -1001,7 +1024,6 @@ function createOpenCodeProvider({
   }
 
   async function restoreSessions() {
-    activeTurns.clear();
     completedTurnIds.clear();
     for (const [threadId, entry] of sessions.entries()) {
       const sessionId =

@@ -183,6 +183,24 @@ describe("buildProviderInventory", () => {
     assert.equal(rows.filter((row) => row.id.toLowerCase() === "opencode-go").length, 1);
   });
 
+  test("OpenCode Go inventory row gets logoProviderId opencode-go", () => {
+    const inventory = {
+      connected: ["opencode-go"],
+      all: [
+        makeProvider({
+          id: "opencode-go",
+          name: "OpenCode Go",
+          models: { free: { id: "free", name: "Free" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const go = rows.find((row) => row.id === "opencode-go");
+    assert.ok(go);
+    assert.equal(go.logoProviderId, "opencode-go");
+    assert.equal(resolveLogoProviderId("opencode-go", "OpenCode Go"), "opencode-go");
+  });
+
   test("OpenCode Zen inventory row gets logoProviderId opencode-zen", () => {
     const inventory = {
       connected: ["opencode"],

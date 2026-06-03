@@ -576,3 +576,12 @@ test("buildModelFromAny omits logoProviderId for generic OpenCode upstream", () 
   );
   assert.equal(model.logoProviderId, undefined);
 });
+
+test("buildModelFromAny sets logoProviderId for OpenCode Go upstream", () => {
+  const goModel = buildModelFromAny(
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+    { id: "opencode-go", name: "OpenCode Go" },
+  );
+  assert.equal(goModel.logoProviderId, "opencode-go");
+  assert.equal(goModel.upstreamProviderId, "opencode-go");
+});

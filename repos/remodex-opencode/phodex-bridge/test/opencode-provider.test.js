@@ -218,6 +218,131 @@ test("turnStart on already-running thread throws", async () => {
   );
 });
 
+test("turnInterrupt aborts session while prompt is in flight", async () => {
+  let abortSessionId = null;
+  let promptEntered = false;
+  let resolvePrompt;
+  const promptGate = new Promise((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const provider = makeProvider({
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      prompt: () => {
+        promptEntered = true;
+        return promptGate;
+      },
+      abort: async (sessionId) => {
+        abortSessionId = sessionId;
+      },
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const turn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "test" },
+  });
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline && !promptEntered) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(promptEntered, true);
+  const result = await provider.handleRequest({
+    id: 3,
+    method: "turn/interrupt",
+    params: { threadId: start.thread.id, turnId: turn.turnId },
+  });
+  assert.equal(result.interrupted, true);
+  assert.equal(abortSessionId, "ses_fake123");
+  resolvePrompt();
+  await provider.shutdown();
+});
+
+test("turnStart rejects while prior turn prompt is still in flight after interrupt", async () => {
+  let promptEntered = false;
+  let resolvePrompt;
+  const promptGate = new Promise((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const provider = makeProvider({
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      prompt: () => {
+        promptEntered = true;
+        return promptGate;
+      },
+      abort: async () => {},
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "first" },
+  });
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline && !promptEntered) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(promptEntered, true);
+  await provider.handleRequest({
+    id: 3,
+    method: "turn/interrupt",
+    params: { threadId: start.thread.id },
+  });
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 4,
+        method: "turn/start",
+        params: { threadId: start.thread.id, input: "second" },
+      }),
+    { errorCode: "thread_turn_active" },
+  );
+  resolvePrompt();
+  await provider.shutdown();
+});
+
+test("restoreSessions during ensureStarted does not drop active turn tracking", async () => {
+  let promptEntered = false;
+  let resolvePrompt;
+  const promptGate = new Promise((resolve) => {
+    resolvePrompt = resolve;
+  });
+  const provider = makeProvider({
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      prompt: () => {
+        promptEntered = true;
+        return promptGate;
+      },
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const turn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hold" },
+  });
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline && !promptEntered) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(promptEntered, true);
+  const result = await provider.handleRequest({
+    id: 3,
+    method: "turn/interrupt",
+    params: { threadId: start.thread.id, turnId: turn.turnId },
+  });
+  assert.equal(result.interrupted, true);
+  resolvePrompt();
+  await provider.shutdown();
+});
+
 test("turnInterrupt completes running turn", async () => {
   let completed = false;
   const provider = makeProvider({

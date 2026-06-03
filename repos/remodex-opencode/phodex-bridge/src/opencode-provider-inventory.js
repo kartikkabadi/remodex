@@ -190,7 +190,11 @@ function formatProviderDisplayNameFromId(id) {
 }
 
 function resolveLogoProviderId(id, displayName) {
-  if (canonicalProviderId(id) !== "opencode") {
+  const canonical = canonicalProviderId(id);
+  if (canonical === "opencode-go") {
+    return "opencode-go";
+  }
+  if (canonical !== "opencode") {
     return undefined;
   }
   const normalized = readString(displayName).trim().toLowerCase();
