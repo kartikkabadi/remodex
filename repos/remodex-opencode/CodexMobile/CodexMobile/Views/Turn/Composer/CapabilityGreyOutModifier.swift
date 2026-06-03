@@ -16,7 +16,7 @@ struct CapabilityGreyOutModifier: ViewModifier {
         Group {
             if showsCaption {
                 VStack(alignment: .leading, spacing: 4) {
-                    greyedContent
+                    styledContent(content)
                     if let reason, !isEnabled {
                         Text(reason)
                             .font(ComposerDisabledAppearance.captionFont)
@@ -25,12 +25,12 @@ struct CapabilityGreyOutModifier: ViewModifier {
                     }
                 }
             } else {
-                greyedContent
+                styledContent(content)
             }
         }
     }
 
-    private var greyedContent: some View {
+    private func styledContent(_ content: Content) -> some View {
         content
             .disabled(!isEnabled)
             .opacity(isEnabled ? 1.0 : ComposerDisabledAppearance.controlOpacity)
