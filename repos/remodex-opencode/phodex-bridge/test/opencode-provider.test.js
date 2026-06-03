@@ -8,6 +8,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createOpenCodeClient, dispatchEvent } = require("../src/opencode-client");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
+const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
+const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
 const activeProviders = [];
 
@@ -865,6 +867,170 @@ test("prompt resolves without turn/completed still completes via getMessages", a
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(completed, true);
 });
+
+test("threadArchive stub-only removes ownership and session", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-stub", "ses_stub", { title: "Stub chat" });
+  ownershipStore.setOwnership("opencode-thread-stub", "opencode");
+  const provider = makeProvider({ ownershipStore, sessionStore });
+  await provider.handleRequest({
+    id: 1,
+    method: "thread/archive",
+    params: { threadId: "opencode-thread-stub" },
+  });
+  assert.equal(ownershipStore.ownsThread("opencode-thread-stub", "opencode"), false);
+  assert.equal(sessionStore.get("opencode-thread-stub"), null);
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-thread-stub"),
+    undefined,
+  );
+});
+
+test("threadArchive in-memory excludes from default list", async () => {
+  const provider = makeProvider();
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { title: "Archived in memory" },
+  });
+  await provider.handleRequest({
+    id: 2,
+    method: "thread/archive",
+    params: { threadId: start.thread.id },
+  });
+  const listDefault = await provider.listThreads();
+  assert.equal(
+    listDefault.data.find((thread) => thread.id === start.thread.id),
+    undefined,
+  );
+  const listArchived = await provider.listThreads({ includeArchived: true });
+  assert.ok(listArchived.data.find((thread) => thread.id === start.thread.id));
+});
+
+test("thread/start then list before turn lists in-memory thread without session record", async () => {
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({ sessionStore });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const list = await provider.listThreads();
+  assert.ok(list.data.some((thread) => thread.id === start.thread.id));
+  assert.equal(sessionStore.get(start.thread.id), null);
+});
+
+test("startup prune removes session_without_ownership when env flag set", async () => {
+  const fs = fakeSessionStoreFs();
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-prune-ownership.json",
+    fsImpl: fs,
+  });
+  const sessionStore = createOpenCodeSessionStore({
+    storagePath: "/tmp/opencode-prune-sessions.json",
+    fsImpl: fs,
+  });
+  sessionStore.set("opencode-thread-session-only", "ses_lonely", { cwd: "/tmp" });
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_PRUNE_OPENCODE_OWNERSHIP: "1",
+    },
+  });
+  await provider.warmup();
+  assert.equal(sessionStore.get("opencode-thread-session-only"), null);
+});
+
+test("startup prune removes invalid session and ownership when env flag set", async () => {
+  const fs = fakeSessionStoreFs();
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-prune-invalid-ownership.json",
+    fsImpl: fs,
+  });
+  const sessionStore = createOpenCodeSessionStore({
+    storagePath: "/tmp/opencode-prune-invalid-sessions.json",
+    fsImpl: fs,
+  });
+  sessionStore.set("opencode-thread-stale-startup", "ses_gone", { cwd: "/tmp" });
+  ownershipStore.setOwnership("opencode-thread-stale-startup", "opencode");
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_PRUNE_OPENCODE_OWNERSHIP: "1",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        const error = new Error("session not found");
+        error.status = 404;
+        throw error;
+      },
+    }),
+  });
+  await provider.warmup();
+  assert.equal(sessionStore.get("opencode-thread-stale-startup"), null);
+  assert.equal(ownershipStore.ownsThread("opencode-thread-stale-startup", "opencode"), false);
+});
+
+test("watchdog completes hung prompt with opencode_turn_watchdog_timeout", async () => {
+  let completedPayload = null;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "50",
+    },
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "turn/completed") {
+        completedPayload = payload;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => [],
+      prompt: () => new Promise(() => {}),
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hang" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.ok(completedPayload);
+  assert.equal(completedPayload.params.status, "failed");
+  assert.match(
+    completedPayload.params.turn?.error?.message || "",
+    /timed out/i,
+  );
+});
+
+function fakeSessionStoreFs() {
+  const files = new Map();
+  return {
+    readFileSync(path) {
+      if (files.has(path)) {
+        return files.get(path);
+      }
+      throw new Error("ENOENT");
+    },
+    writeFileSync(path, data) {
+      files.set(path, data);
+    },
+    renameSync(oldPath, newPath) {
+      if (files.has(oldPath)) {
+        files.set(newPath, files.get(oldPath));
+        files.delete(oldPath);
+      }
+    },
+    mkdirSync() {},
+  };
+}
 
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
   const provider = makeProvider();

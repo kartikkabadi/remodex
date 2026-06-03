@@ -49,7 +49,15 @@ const HEALTH_MAX_RESTARTS = 3;
 const HEALTH_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
 const LIST_THREADS_SESSION_VALIDATE_CAP = 5;
 const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
-const OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
+const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
+
+function resolveOpenCodeTurnWatchdogMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_TURN_WATCHDOG_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
+}
 
 function assertOwnershipPersisted(ok, threadId) {
   if (ok) {
@@ -968,7 +976,7 @@ function createOpenCodeProvider({
               source: "watchdog",
             });
           }
-        }, OPENCODE_TURN_WATCHDOG_MS);
+        }, resolveOpenCodeTurnWatchdogMs(env));
         if (readString(process.env.REMODEX_TEST) === "1" && typeof active.watchdogTimer?.unref === "function") {
           active.watchdogTimer.unref();
         }

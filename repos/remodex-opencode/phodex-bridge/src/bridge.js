@@ -648,9 +648,39 @@ function startBridge({
     }
     pushNotificationTracker.handleOutbound(rawMessage);
     rememberThreadFromMessage(provider, rawMessage);
+    logBridgeNotifyForward(provider, rawMessage);
     secureTransport.queueOutboundApplicationMessage(
       sanitizeRelayBoundCodexMessage(rawMessage),
       sendRelayWireMessage,
+    );
+  }
+
+  function logBridgeNotifyForward(provider, rawMessage) {
+    const NOTIFY_FORWARD_METHODS = new Set([
+      "turn/started",
+      "item/agentMessage/delta",
+      "turn/completed",
+    ]);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(rawMessage);
+    } catch {
+      return;
+    }
+    const method = readStringOrNull(parsed?.method);
+    if (!NOTIFY_FORWARD_METHODS.has(method)) {
+      return;
+    }
+    const params = parsed?.params && typeof parsed.params === "object" ? parsed.params : {};
+    console.log(
+      JSON.stringify({
+        event: "bridge_notify_forward",
+        method,
+        provider: readStringOrNull(provider) || "unknown",
+        threadId: extractThreadId(method, params),
+        turnId: extractTurnId(method, params),
+        hasMobile: socket?.readyState === WebSocket.OPEN,
+      }),
     );
   }
 
