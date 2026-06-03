@@ -7,7 +7,7 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **556/556** green. If a run shows **555/556**, re-run once before blocking (known flake on `session.idle` dedupe under load; fixed in tree). |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **562/562** green. If a run shows **561/562**, re-run once before blocking (known flake on `session.idle` dedupe under load; fixed in tree). |
 | Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
