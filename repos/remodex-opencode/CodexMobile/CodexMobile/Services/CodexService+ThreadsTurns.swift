@@ -1526,6 +1526,7 @@ extension CodexService {
                     collaborationMode: effectiveCollaborationMode,
                     includeServiceTier: includesServiceTier
                 )
+                traceTurnStartRequest(threadId: threadId, rpcId: nil, params: requestParams)
                 // The pre-turn snapshot must settle before the runtime can mutate files.
                 if let messageStartCheckpointTask {
                     await messageStartCheckpointTask.value
@@ -1534,6 +1535,7 @@ extension CodexService {
                     method: "turn/start",
                     baseParams: requestParams
                 )
+                traceTurnStartResult(threadId: threadId, rpcId: response.id, error: nil)
                 let resolvedTurnID = handleSuccessfulTurnStartResponse(
                     response,
                     pendingMessageId: pendingMessageId,
@@ -2272,7 +2274,8 @@ extension CodexService {
         ]
         // Keep the legacy top-level fields populated so plan-mode turns still honor
         // the user's selected model on runtimes that do not read collaboration settings.
-        let modelProvider = runtimeModelProviderForTurn(threadId: threadId)
+        let modelProvider = enforcedThreadOwnershipModelProvider(for: threadId)
+            ?? runtimeModelProviderForTurn(threadId: threadId)
         if let modelIdentifier = runtimeModelIdentifierForTurn(threadId: threadId) {
             params["model"] = .string(modelIdentifier)
         }
@@ -2565,8 +2568,10 @@ extension CodexService {
         pendingMessageId: String,
         threadId: String
     ) throws {
+        mirroredRunningSuppressedAfterTurnStartFailureThreadIDs.insert(threadId)
         markMessageDeliveryState(threadId: threadId, messageId: pendingMessageId, state: .failed)
         clearRunningState(for: threadId)
+        traceTurnStartResult(threadId: threadId, rpcId: nil, error: error)
         if shouldTreatAsThreadNotFound(error) {
             throw error
         }
@@ -2608,6 +2613,7 @@ extension CodexService {
             beginAssistantMessage(threadId: threadId, turnId: turnID)
         }
 
+        mirroredRunningSuppressedAfterTurnStartFailureThreadIDs.remove(threadId)
         lastErrorMessage = nil
 
         if let index = threadIndex(for: threadId) {

@@ -176,6 +176,9 @@ extension CodexService {
     // Handles stream notifications to keep UI state in sync.
     func handleNotification(method: String, params: JSONValue?) {
         let paramsObject = params?.objectValue
+        if let threadId = resolveThreadID(from: paramsObject, turnIdHint: extractTurnID(from: paramsObject)) {
+            lastIncomingNotificationMethodByThread[threadId] = method
+        }
         noteDesktopMirroredActivityIfNeeded(method: method, paramsObject: paramsObject)
 
         switch method {
