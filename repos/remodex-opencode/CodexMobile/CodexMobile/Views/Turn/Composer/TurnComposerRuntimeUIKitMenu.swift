@@ -174,7 +174,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 return UIMenu(
                     title: providerTitle,
                     image: RuntimeProviderLogo.menuUIImage(
-                        provider: composerMenuLogoProvider(for: models, fallback: provider)
+                        provider: normalizedProvider == "opencode" ? "opencode" : composerMenuLogoProvider(for: models, fallback: provider)
                     ),
                     options: [],
                     children: [disabledInfoAction(title: unavailable.title)]
@@ -268,9 +268,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         if upstreamGroups.isEmpty {
             return UIMenu(
                 title: providerTitle,
-                image: RuntimeProviderLogo.menuUIImage(
-                    provider: composerMenuLogoProvider(for: models, fallback: "opencode")
-                ),
+                image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
                 options: [.singleSelection],
                 children: models.map { modelAction(model: $0, input: input) }
             )
@@ -299,9 +297,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         return UIMenu(
             title: providerTitle,
-            image: RuntimeProviderLogo.menuUIImage(
-                provider: composerMenuLogoProvider(for: models, fallback: "opencode")
-            ),
+            image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
             options: [],
             children: children
         )

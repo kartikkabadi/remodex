@@ -234,6 +234,7 @@ test("expired SDK session removes store entry and returns opencode_session_expir
     (error) => error.errorCode === "opencode_session_expired",
   );
   assert.equal(sessionStore.get("opencode-thread-stale"), null);
+  assert.equal(ownershipStore.ownsThread("opencode-thread-stale", "opencode"), false);
   await provider.shutdown();
 });
 

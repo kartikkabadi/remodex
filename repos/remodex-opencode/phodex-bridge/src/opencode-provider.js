@@ -47,6 +47,9 @@ const ERROR_CODES = {
 const HEALTH_RESTART_WINDOW_MS = 5 * 60 * 1000;
 const HEALTH_MAX_RESTARTS = 3;
 const HEALTH_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
+const LIST_THREADS_SESSION_VALIDATE_CAP = 5;
+const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
+const OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
 
 function assertOwnershipPersisted(ok, threadId) {
   if (ok) {
@@ -94,6 +97,106 @@ function createOpenCodeProvider({
   const inFlightThreadIds = new Set();
   const eventUnsubscribers = new Map();
   const completedTurnIds = new Set();
+  const invalidSessionThreadIds = new Set();
+
+  function removeOrphanOpenCodeThread(threadId, reason = "opencode_ownership_orphan_removed") {
+    const removedOwnership = ownership.removeOwnership(threadId);
+    const removedSession = sessions.remove(threadId);
+    invalidSessionThreadIds.delete(threadId);
+    if (removedOwnership || removedSession) {
+      console.log(
+        JSON.stringify({
+          event: reason,
+          threadId,
+          removedOwnership: Boolean(removedOwnership),
+          removedSession: Boolean(removedSession),
+        }),
+      );
+    }
+    return { removedOwnership: Boolean(removedOwnership), removedSession: Boolean(removedSession) };
+  }
+
+  function ownershipStubFromStore(threadId, storeEntry) {
+    const updatedAt = readString(storeEntry?.updatedAt) || new Date().toISOString();
+    return {
+      id: threadId,
+      title: readString(storeEntry?.title) || "OpenCode chat",
+      name: readString(storeEntry?.title) || "OpenCode chat",
+      model: normalizeOpenCodeModel(storeEntry?.model) || DEFAULT_OPENCODE_MODEL,
+      modelProvider: OPENCODE_PROVIDER_ID,
+      provider: OPENCODE_PROVIDER_ID,
+      createdAt: updatedAt,
+      updatedAt,
+      archived: false,
+    };
+  }
+
+  async function validateOwnedThreadSession(sessionId) {
+    try {
+      await client.getSession(sessionId);
+      return true;
+    } catch (error) {
+      if (isInvalidOpenCodeSessionError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async function pruneOpenCodeStorageMismatch({
+    maxSessionValidations = STARTUP_PRUNE_SESSION_VALIDATE_CAP,
+  } = {}) {
+    let ownershipWithoutSession = 0;
+    let sessionWithoutOwnership = 0;
+    let sdkValidations = 0;
+
+    for (const { threadId } of ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID)) {
+      if (threads.has(threadId)) {
+        continue;
+      }
+      if (!sessions.get(threadId)) {
+        ownershipWithoutSession += 1;
+        removeOrphanOpenCodeThread(threadId);
+      }
+    }
+
+    for (const [threadId] of sessions.entries()) {
+      if (threads.has(threadId)) {
+        continue;
+      }
+      if (!ownership.ownsThread(threadId, OPENCODE_PROVIDER_ID)) {
+        sessionWithoutOwnership += 1;
+        sessions.remove(threadId);
+        continue;
+      }
+      if (invalidSessionThreadIds.has(threadId)) {
+        removeOrphanOpenCodeThread(threadId);
+        continue;
+      }
+      if (sdkValidations >= maxSessionValidations) {
+        continue;
+      }
+      const sessionId = sessions.get(threadId);
+      if (!sessionId) {
+        continue;
+      }
+      sdkValidations += 1;
+      const valid = await validateOwnedThreadSession(sessionId);
+      if (!valid) {
+        invalidSessionThreadIds.add(threadId);
+        removeOrphanOpenCodeThread(threadId);
+      }
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "opencode_storage_mismatch",
+        ownership_without_session: ownershipWithoutSession,
+        session_without_ownership: sessionWithoutOwnership,
+        sdk_validations: sdkValidations,
+      }),
+    );
+  }
 
   async function ensureStarted() {
     if (healthy && client) return;
@@ -105,6 +208,9 @@ function createOpenCodeProvider({
       healthy = true;
       await refreshAuthConfigured({ forceInventory: true });
       await restoreSessions();
+      if (readString(env.REMODEX_PRUNE_OPENCODE_OWNERSHIP) === "1") {
+        await pruneOpenCodeStorageMismatch();
+      }
       return;
     }
 
@@ -172,6 +278,9 @@ function createOpenCodeProvider({
     healthy = true;
     await refreshAuthConfigured({ forceInventory: true });
     await restoreSessions();
+    if (readString(env.REMODEX_PRUNE_OPENCODE_OWNERSHIP) === "1") {
+      await pruneOpenCodeStorageMismatch();
+    }
 
     resetIdleTimer();
   }
@@ -265,6 +374,8 @@ function createOpenCodeProvider({
         throw error;
       }
       sessions.remove(normalizedThreadId);
+      ownership.removeOwnership(normalizedThreadId);
+      invalidSessionThreadIds.add(normalizedThreadId);
       throw createOpenCodeSessionExpiredError(normalizedThreadId);
     }
 
@@ -480,30 +591,123 @@ function createOpenCodeProvider({
   async function listThreads(params = {}) {
     const limit = boundedPositiveInteger(params.limit, 50);
     const includeArchived = params.includeArchived === true || params.include_archived === true;
+    const includeFullRehydrate =
+      params.includeFullRehydrate === true || params.include_full_rehydrate === true;
+
+    let removedOrphanOwnership = 0;
+    let removedOrphanSession = 0;
+    let sdkValidations = 0;
+    const sdkCap = LIST_THREADS_SESSION_VALIDATE_CAP;
 
     const localThreads = Array.from(threads.values())
       .filter((thread) => includeArchived || !thread.archived)
       .map((thread) => publicThread(thread));
 
-    let sessionThreads = [];
+    const ownedStubs = [];
+    const canValidateSessions = healthy && client;
+
     try {
       const ownedThreads = ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID);
-      sessionThreads = ownedThreads.map((entry) => ({
-        id: entry.threadId,
-        title: "OpenCode chat",
-        name: "OpenCode chat",
-        model: DEFAULT_OPENCODE_MODEL,
-        modelProvider: OPENCODE_PROVIDER_ID,
-        provider: OPENCODE_PROVIDER_ID,
-        createdAt: entry.assignedAt,
-        updatedAt: entry.assignedAt,
-      }));
+      for (const entry of ownedThreads) {
+        const threadId = entry.threadId;
+        const live = threads.get(threadId);
+        if (live) {
+          if (!includeArchived && live.archived) {
+            continue;
+          }
+          continue;
+        }
+
+        const storeEntry = sessions.getEntry(threadId);
+        const sessionId = readString(storeEntry?.sessionId) || sessions.get(threadId);
+        if (!sessionId) {
+          const removed = removeOrphanOpenCodeThread(threadId);
+          if (removed.removedOwnership) {
+            removedOrphanOwnership += 1;
+          }
+          if (removed.removedSession) {
+            removedOrphanSession += 1;
+          }
+          continue;
+        }
+
+        if (invalidSessionThreadIds.has(threadId)) {
+          const removed = removeOrphanOpenCodeThread(threadId);
+          if (removed.removedOwnership) {
+            removedOrphanOwnership += 1;
+          }
+          if (removed.removedSession) {
+            removedOrphanSession += 1;
+          }
+          continue;
+        }
+
+        let includeStub = false;
+        if (canValidateSessions && sdkValidations < sdkCap) {
+          sdkValidations += 1;
+          try {
+            const valid = await validateOwnedThreadSession(sessionId);
+            if (!valid) {
+              invalidSessionThreadIds.add(threadId);
+              const removed = removeOrphanOpenCodeThread(threadId);
+              if (removed.removedOwnership) {
+                removedOrphanOwnership += 1;
+              }
+              if (removed.removedSession) {
+                removedOrphanSession += 1;
+              }
+              continue;
+            }
+            includeStub = true;
+          } catch (error) {
+            console.log(
+              JSON.stringify({
+                event: "opencode_list_threads_validation_error",
+                threadId,
+                message: readString(error?.message) || "OpenCode session validation failed",
+              }),
+            );
+            continue;
+          }
+        } else if (includeFullRehydrate && canValidateSessions) {
+          try {
+            const thread = await rehydrateThreadIfNeeded(threadId);
+            ownedStubs.push(publicThread(thread));
+          } catch {
+            // Skip rows that cannot be rehydrated.
+          }
+          continue;
+        } else {
+          for (const active of activeTurns.values()) {
+            if (active.thread.id === threadId) {
+              includeStub = true;
+              break;
+            }
+          }
+        }
+
+        if (includeStub) {
+          ownedStubs.push(ownershipStubFromStore(threadId, storeEntry));
+        }
+      }
     } catch {
-      sessionThreads = [];
+      // Return in-memory threads when ownership or OpenCode is unavailable.
     }
 
+    console.log(
+      JSON.stringify({
+        event: "opencode_list_threads_filtered",
+        ownership: ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length,
+        listed: localThreads.length + ownedStubs.length,
+        removed_orphan_ownership: removedOrphanOwnership,
+        removed_orphan_session: removedOrphanSession,
+        sdk_validations: sdkValidations,
+        sdk_validations_cap: sdkCap,
+      }),
+    );
+
     const seen = new Set();
-    const data = [...localThreads, ...sessionThreads]
+    const data = [...localThreads, ...ownedStubs]
       .filter((thread) => {
         if (!thread?.id || seen.has(thread.id)) return false;
         seen.add(thread.id);
@@ -745,6 +949,31 @@ function createOpenCodeProvider({
         throw error;
       }
 
+      const clearWatchdog = () => {
+        if (active.watchdogTimer) {
+          clearTimeout(active.watchdogTimer);
+          active.watchdogTimer = null;
+        }
+      };
+
+      const scheduleWatchdog = () => {
+        clearWatchdog();
+        active.watchdogTimer = setTimeout(() => {
+          if (!active.completed) {
+            completeTurn({
+              status: "failed",
+              errorMessage: "OpenCode turn timed out waiting for completion.",
+              errorCode: "opencode_turn_watchdog_timeout",
+              active,
+              source: "watchdog",
+            });
+          }
+        }, OPENCODE_TURN_WATCHDOG_MS);
+        if (readString(process.env.REMODEX_TEST) === "1" && typeof active.watchdogTimer?.unref === "function") {
+          active.watchdogTimer.unref();
+        }
+      };
+
       const unsubscribe = client.subscribeToEvents((method, params) => {
         if (active.completed) return;
 
@@ -752,6 +981,16 @@ function createOpenCodeProvider({
         if (method === "turn/completed" && completedTurnIds.has(active.turn.id)) {
           return;
         }
+
+        console.log(
+          JSON.stringify({
+            event: "opencode_turn_event",
+            sseType: method,
+            threadId: active.thread.id,
+            turnId: active.turn.id,
+            hasTurnId: Boolean(eventTurnId),
+          }),
+        );
 
         const enriched = {
           ...params,
@@ -766,11 +1005,30 @@ function createOpenCodeProvider({
           }
         }
 
+        if (method === "turn/failed") {
+          if (eventTurnId && eventTurnId !== active.turn.id) {
+            return;
+          }
+          completeTurn({
+            status: "failed",
+            errorMessage: readString(params.message) || "OpenCode session error",
+            active,
+            source: "turn_failed",
+          });
+          clearWatchdog();
+          return;
+        }
+
         if (method === "turn/completed") {
           if (eventTurnId && eventTurnId !== active.turn.id) {
             return;
           }
-          completeTurn({ status: readString(params.status) || "completed", active });
+          completeTurn({
+            status: readString(params.status) || "completed",
+            active,
+            source: "turn_completed",
+          });
+          clearWatchdog();
           return;
         }
 
@@ -802,6 +1060,8 @@ function createOpenCodeProvider({
         return;
       }
 
+      scheduleWatchdog();
+
       await client.prompt({
         sessionID: active.sessionId,
         prompt,
@@ -817,6 +1077,21 @@ function createOpenCodeProvider({
         return;
       }
       active.started = true;
+      try {
+        const messages = await client.getMessages(active.sessionId);
+        const hasAssistantText =
+          Array.isArray(messages) &&
+          messages.some((message) => {
+            const role = readString(message?.role).toLowerCase();
+            const text = readString(message?.text || message?.content);
+            return text.length > 0 && (role === "assistant" || role === "");
+          });
+        if (hasAssistantText) {
+          completeTurn({ status: "completed", active, source: "prompt_return_messages" });
+        }
+      } catch {
+        // Watchdog armed before prompt() covers hung prompt and getMessages failures.
+      }
     } catch (error) {
       if (!active.completed) {
         completeTurn({
@@ -832,11 +1107,23 @@ function createOpenCodeProvider({
     }
   }
 
-  function completeTurn({ errorMessage = "", errorCode = "", action = "", status, active }) {
+  function completeTurn({
+    errorMessage = "",
+    errorCode = "",
+    action = "",
+    status,
+    active,
+    source = "",
+  }) {
     const turnId = active.turn.id;
     if (active.completed || completedTurnIds.has(turnId)) return false;
     active.completed = true;
     completedTurnIds.add(turnId);
+
+    if (active.watchdogTimer) {
+      clearTimeout(active.watchdogTimer);
+      active.watchdogTimer = null;
+    }
 
     const unsubscribe = eventUnsubscribers.get(turnId);
     if (unsubscribe) {
@@ -878,6 +1165,21 @@ function createOpenCodeProvider({
       status,
       turn: { id: turnId, status, error: errorMessage ? { message: errorMessage } : undefined },
     });
+
+    const completionEvent = status === "failed" ? "opencode_turn_failed" : "opencode_turn_completed";
+    console.log(
+      JSON.stringify({
+        event: completionEvent,
+        threadId: active.thread.id,
+        turnId,
+        status,
+        source: readString(source) || null,
+        assistantLen: readString(assistantItem?.text).length,
+        ...(errorMessage
+          ? { message: errorMessage, errorCode: errorCode || null }
+          : {}),
+      }),
+    );
 
     resetIdleTimer();
     return true;
@@ -951,10 +1253,33 @@ function createOpenCodeProvider({
   }
 
   async function threadArchive(request, archived) {
-    const thread = await requireThread(readThreadId(request.params));
-    thread.archived = archived;
-    thread.updatedAt = new Date().toISOString();
-    return { thread: publicThread(thread) };
+    const threadId = readThreadId(request.params);
+    const inMemory = threads.get(threadId);
+    if (inMemory) {
+      inMemory.archived = archived;
+      inMemory.updatedAt = new Date().toISOString();
+      persistSessionRecord(inMemory);
+      return { thread: publicThread(inMemory) };
+    }
+
+    if (!ownership.ownsThread(threadId, OPENCODE_PROVIDER_ID)) {
+      throw threadNotFoundError(threadId);
+    }
+
+    if (archived) {
+      removeOrphanOpenCodeThread(threadId, "opencode_thread_archived_stub_removed");
+      return {
+        thread: {
+          id: threadId,
+          title: "OpenCode chat",
+          archived: true,
+          provider: OPENCODE_PROVIDER_ID,
+          modelProvider: OPENCODE_PROVIDER_ID,
+        },
+      };
+    }
+
+    throw threadNotFoundError(threadId);
   }
 
   async function threadFork(request) {
@@ -1024,7 +1349,6 @@ function createOpenCodeProvider({
   }
 
   async function restoreSessions() {
-    completedTurnIds.clear();
     for (const [threadId, entry] of sessions.entries()) {
       const sessionId =
         typeof entry === "string" ? entry : readString(entry?.sessionId);

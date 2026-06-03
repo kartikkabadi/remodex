@@ -60,6 +60,33 @@ function fakeOwnershipStore() {
   };
 }
 
+function fakeSessionStore() {
+  const store = new Map();
+  return {
+    set(threadId, sessionId, metadata = {}) {
+      store.set(threadId, {
+        sessionId,
+        ...metadata,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    },
+    get(threadId) {
+      return store.get(threadId)?.sessionId || null;
+    },
+    getEntry(threadId) {
+      const entry = store.get(threadId);
+      return entry ? { ...entry } : null;
+    },
+    remove(threadId) {
+      return store.delete(threadId);
+    },
+    entries() {
+      return Array.from(store.entries());
+    },
+  };
+}
+
 function fakeClient() {
   return {
     listModels: async () => [],
@@ -93,6 +120,7 @@ function makeProvider(opts = {}) {
     serverFactory: opts.serverFactory || (() => fakeServer()),
     clientFactory: opts.clientFactory || (() => fakeClient()),
     ownershipStore: opts.ownershipStore || fakeOwnershipStore(),
+    sessionStore: opts.sessionStore || fakeSessionStore(),
   });
   activeProviders.push(provider);
   return provider;
@@ -708,6 +736,134 @@ test("getRuntimeStatus exposes authConfigured after connected provider probe", a
 
   const status = provider.getRuntimeStatus();
   assert.equal(status.authConfigured, true);
+});
+
+test("listThreads drops ownership without session", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  ownershipStore.setOwnership("opencode-thread-orphan", "opencode");
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore: fakeSessionStore(),
+  });
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-thread-orphan"),
+    undefined,
+  );
+  assert.equal(ownershipStore.ownsThread("opencode-thread-orphan", "opencode"), false);
+});
+
+test("listThreads removes invalid session and ownership", async () => {
+  let getSessionCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-bad", "ses_gone", { title: "Bad" });
+  ownershipStore.setOwnership("opencode-thread-bad", "opencode");
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        const error = new Error("session not found");
+        error.status = 404;
+        throw error;
+      },
+    }),
+  });
+  await provider.warmup();
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-thread-bad"),
+    undefined,
+  );
+  assert.equal(ownershipStore.ownsThread("opencode-thread-bad", "opencode"), false);
+  assert.equal(sessionStore.get("opencode-thread-bad"), null);
+  assert.ok(getSessionCalls >= 1);
+});
+
+test("listThreads respects SDK validation cap per call", async () => {
+  let getSessionCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+    }),
+  });
+  await provider.warmup();
+  for (let index = 0; index < 10; index += 1) {
+    const threadId = `opencode-thread-cap-${index}`;
+    sessionStore.set(threadId, `ses_${index}`);
+    ownershipStore.setOwnership(threadId, "opencode");
+  }
+  getSessionCalls = 0;
+  const list = await provider.listThreads();
+  assert.equal(getSessionCalls, 5);
+  assert.equal(list.data.length, 5);
+});
+
+test("turn/failed from subscribe completes turn and clears activeTurns", async () => {
+  let completed = false;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "turn/completed" && payload.params.status === "failed") {
+        completed = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler) => {
+        setImmediate(() => {
+          handler("turn/failed", { message: "boom" });
+        });
+        return () => {};
+      },
+      prompt: () => new Promise(() => {}),
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "x" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(completed, true);
+});
+
+test("prompt resolves without turn/completed still completes via getMessages", async () => {
+  let completed = false;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "turn/completed" && payload.params.status === "completed") {
+        completed = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => [{ role: "assistant", text: "Hello" }],
+      prompt: async () => {},
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(completed, true);
 });
 
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {

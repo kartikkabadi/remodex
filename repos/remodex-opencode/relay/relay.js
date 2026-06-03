@@ -64,7 +64,10 @@ const usedResolveNonces = new Map();
 
 // Attaches relay behavior to a ws WebSocketServer instance.
 function isRelayMessageLivenessEnabled() {
-  return process.env.REMODEX_RELAY_MESSAGE_LIVENESS === "1";
+  if (process.env.REMODEX_RELAY_MESSAGE_LIVENESS === "0") {
+    return false;
+  }
+  return true;
 }
 
 function setupRelay(
