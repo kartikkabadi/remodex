@@ -1,10 +1,25 @@
 // FILE: OpenCodeRuntimeDetails.swift
 // Purpose: Nested OpenCode status from runtime/catalog and bridge-status.json opencode blocks.
 // Layer: Model
-// Exports: OpenCodeRuntimeDetails
+// Exports: OpenCodeRuntimeDetails, OpenCodeConnectedProviderSummary, OpenCodeModelListMeta
 // Depends on: Foundation
 
 import Foundation
+
+struct OpenCodeConnectedProviderSummary: Codable, Hashable, Sendable {
+    let id: String
+    let displayName: String
+    let modelCount: Int?
+}
+
+struct OpenCodeModelListMeta: Codable, Hashable, Sendable {
+    let reasonCode: String?
+    let connectedProviderIds: [String]?
+    let fetchedAt: String?
+    let stale: Bool?
+    let modelCountBeforeCap: Int?
+    let modelCountAfterCap: Int?
+}
 
 struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let enabled: Bool?
@@ -17,4 +32,6 @@ struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let command: String?
     let handoffEnvEnabled: Bool?
     let authConfigured: Bool?
+    let connectedProviders: [OpenCodeConnectedProviderSummary]?
+    let providerDiscoveryReasonCode: String?
 }

@@ -21,6 +21,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let isLoadingOpenCodeProvider: Bool
         let isRuntimeSelectionLoading: Bool
         let modelsErrorMessage: String?
+        let openCodeProviderDiscoveryReasonCode: String?
     }
 
     static func makeMenu(_ input: Input) -> UIMenu {
@@ -54,6 +55,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         }
 
         let modelChildren: [UIMenuElement] = {
+            if input.openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+                return [
+                    disabledInfoAction(title: "No providers connected on your Mac"),
+                    disabledInfoAction(title: "Connect providers in OpenCode on your Mac, then tap Retry"),
+                    UIAction(title: "Retry loading models") { _ in
+                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                        input.runtimeActions.refreshModels()
+                    },
+                ]
+            }
+            if input.isLoadingOpenCodeProvider,
+               input.openCodeProviderDiscoveryReasonCode == nil {
+                return [
+                    disabledInfoAction(title: "OpenCode models are still loading"),
+                ]
+            }
             if input.isLoadingModels {
                 return [
                     disabledInfoAction(title: "Loading models..."),
@@ -193,8 +210,17 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         }
 
         let statusTitle: String = {
-            if normalizedProvider == "opencode", input.isLoadingOpenCodeProvider {
-                return "Loading models..."
+            if normalizedProvider == "opencode",
+               input.openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+                return "No providers connected on your Mac"
+            }
+            if normalizedProvider == "opencode",
+               input.openCodeProviderDiscoveryReasonCode == "provider_list_failed" {
+                return input.modelsErrorMessage ?? "OpenCode provider list failed"
+            }
+            if normalizedProvider == "opencode", input.isLoadingOpenCodeProvider,
+               input.openCodeProviderDiscoveryReasonCode == nil {
+                return "OpenCode models are still loading"
             }
             if normalizedProvider == "opencode",
                let errorMessage = input.modelsErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),

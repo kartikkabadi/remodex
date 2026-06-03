@@ -98,6 +98,24 @@ test("mergeModelListResult annotates Codex models and appends provider models", 
   assert.equal(result.items[0].provider, "codex");
 });
 
+test("mergeModelListResult attaches opencode meta when provided", () => {
+  const result = mergeModelListResult(
+    { items: [] },
+    [],
+    {
+      opencode: {
+        reasonCode: "no_connected_providers",
+        connectedProviderIds: [],
+        fetchedAt: "2026-06-03T12:00:00.000Z",
+        stale: false,
+        modelCountBeforeCap: 0,
+        modelCountAfterCap: 0,
+      },
+    },
+  );
+  assert.equal(result.opencode.reasonCode, "no_connected_providers");
+});
+
 test("mergeThreadListResult deduplicates provider-owned thread copies", () => {
   const result = mergeThreadListResult(
     {

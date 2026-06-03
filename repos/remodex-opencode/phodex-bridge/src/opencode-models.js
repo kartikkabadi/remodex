@@ -355,7 +355,7 @@ function slimModelForMobileList(model) {
 }
 
 // Keeps model/list payloads small enough for relay + iOS decode on device.
-function capOpenCodeModelsForMobileList(models, env = process.env) {
+function capOpenCodeModelsForMobileList(models, env = process.env, connectedProviderIds = null) {
   if (!Array.isArray(models) || models.length === 0) {
     return [];
   }
@@ -368,6 +368,10 @@ function capOpenCodeModelsForMobileList(models, env = process.env) {
     env.REMODEX_MODEL_LIST_OPENCODE_PER_UPSTREAM,
     DEFAULT_OPENCODE_MODEL_LIST_PER_UPSTREAM,
   );
+  const effectivePerUpstream =
+    Array.isArray(connectedProviderIds) && connectedProviderIds.length <= 2
+      ? Math.max(perUpstream, 48)
+      : perUpstream;
 
   const defaults = [];
   const byUpstream = new Map();
@@ -389,7 +393,7 @@ function capOpenCodeModelsForMobileList(models, env = process.env) {
 
   const capped = [...defaults];
   for (const upstream of [...byUpstream.keys()].sort()) {
-    capped.push(...(byUpstream.get(upstream) || []).slice(0, perUpstream));
+    capped.push(...(byUpstream.get(upstream) || []).slice(0, effectivePerUpstream));
     if (capped.length >= maxTotal) {
       break;
     }

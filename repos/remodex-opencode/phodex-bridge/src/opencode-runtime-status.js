@@ -6,7 +6,8 @@
 
 const { readString } = require("./normalize");
 
-const OPENCODE_MIN_CLI_VERSION = "2.0.0";
+// OpenCode CLI semver from /global/health (e.g. 1.15.13). SDK v2 + `opencode serve` ship in 1.15.x.
+const OPENCODE_MIN_CLI_VERSION = "1.15.12";
 
 function parseVersionParts(version) {
   const match = readString(version).match(/(\d+)\.(\d+)\.(\d+)/);
@@ -42,6 +43,8 @@ function buildOpenCodeRuntimeStatus({
   command = "",
   handoffEnvEnabled = false,
   authConfigured = null,
+  connectedProviders = null,
+  providerDiscoveryReasonCode = null,
 } = {}) {
   const normalizedVersion = readString(version);
   const versionBelowMinimum =
@@ -59,6 +62,8 @@ function buildOpenCodeRuntimeStatus({
     handoffEnvEnabled: Boolean(handoffEnvEnabled),
     authConfigured:
       authConfigured === true || authConfigured === false ? authConfigured : null,
+    connectedProviders: Array.isArray(connectedProviders) ? connectedProviders : null,
+    providerDiscoveryReasonCode: readString(providerDiscoveryReasonCode) || null,
   };
 }
 

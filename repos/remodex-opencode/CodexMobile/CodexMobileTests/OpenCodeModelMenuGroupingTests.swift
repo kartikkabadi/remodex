@@ -31,6 +31,11 @@ final class OpenCodeModelMenuGroupingTests: XCTestCase {
         XCTAssertEqual(groups[1].title, "OpenAI")
     }
 
+    func testEmptyConnectedDiscoveryReasonSkipsUpstreamGroups() {
+        let models: [CodexModelOption] = []
+        XCTAssertTrue(TurnComposerMetaMapper.openCodeModelsGroupedByUpstream(models).isEmpty)
+    }
+
     func testReturnsEmptyWhenNoUpstreamMetadata() {
         let models = [
             CodexModelOption(

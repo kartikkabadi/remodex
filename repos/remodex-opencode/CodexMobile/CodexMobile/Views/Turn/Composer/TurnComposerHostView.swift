@@ -187,6 +187,7 @@ struct TurnComposerHostView: View {
             isLoadingOpenCodeProvider: codex.isLoadingOpenCodeProvider,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             modelsErrorMessage: codex.modelsErrorMessage,
+            openCodeProviderDiscoveryReasonCode: codex.openCodeProviderDiscoveryReasonCode,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,
             voiceButtonPresentation: voiceButtonPresentation,

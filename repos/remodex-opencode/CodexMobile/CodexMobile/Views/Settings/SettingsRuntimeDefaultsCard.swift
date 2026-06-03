@@ -95,20 +95,43 @@ struct SettingsRuntimeDefaultsCard: View {
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
         }
+        .task {
+            guard codex.isConnected, codex.isInitialized else { return }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await codex.fetchRuntimeCatalog() }
+                group.addTask { try? await codex.listModels(refreshProviders: true) }
+            }
+        }
     }
 
     private func openCodeRuntimeFootnote(_ runtime: RuntimeInfo) -> String {
         let details = runtime.opencode
+        let discoveryReason = codex.openCodeProviderDiscoveryReasonCode
+            ?? details?.providerDiscoveryReasonCode
+
+        if discoveryReason == "no_connected_providers" {
+            return "Connect providers in OpenCode on your Mac."
+        }
+
+        if discoveryReason == "provider_list_failed" || discoveryReason == "unknown" {
+            return runtime.unavailableReason ?? "OpenCode provider list is unavailable on this Mac."
+        }
+
         if runtime.enabled {
             var summary = ComposerCapabilityCopy.openCodeStatusSummary(
                 version: details?.version,
                 minVersion: details?.minVersion,
                 handoffEnvEnabled: details?.handoffEnvEnabled ?? false
             )
-            if let auth = details?.authConfigured {
-                summary += auth ? " · Auth configured" : " · Auth not configured on Mac"
+            if discoveryReason == "ok",
+               let connected = details?.connectedProviders,
+               !connected.isEmpty {
+                let names = connected.map(\.displayName).joined(separator: ", ")
+                summary += " · Connected on Mac: \(names)"
+            } else if let auth = details?.authConfigured {
+                summary += auth ? " · Providers connected on Mac" : " · No providers connected on Mac"
             } else {
-                summary += " · Auth status unknown"
+                summary += " · Provider status unknown"
             }
             if details?.versionBelowMinimum == true {
                 summary += " · Upgrade OpenCode on your Mac"

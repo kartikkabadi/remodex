@@ -18,6 +18,7 @@ struct ComposerBottomBar: View {
     let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
     let modelsErrorMessage: String?
+    let openCodeProviderDiscoveryReasonCode: String?
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
     let remainingAttachmentSlots: Int
@@ -244,6 +245,7 @@ struct ComposerBottomBar: View {
             isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             modelsErrorMessage: modelsErrorMessage,
+            openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions
         )
@@ -372,6 +374,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
     let modelsErrorMessage: String?
+    let openCodeProviderDiscoveryReasonCode: String?
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
 
@@ -397,6 +400,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             && lhs.isLoadingOpenCodeProvider == rhs.isLoadingOpenCodeProvider
             && lhs.isRuntimeSelectionLoading == rhs.isRuntimeSelectionLoading
             && lhs.modelsErrorMessage == rhs.modelsErrorMessage
+            && lhs.openCodeProviderDiscoveryReasonCode == rhs.openCodeProviderDiscoveryReasonCode
             && lhs.runtimeState == rhs.runtimeState
     }
 
@@ -421,7 +425,8 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     isLoadingModels: isLoadingModels,
                     isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
                     isRuntimeSelectionLoading: isRuntimeSelectionLoading,
-                    modelsErrorMessage: modelsErrorMessage
+                    modelsErrorMessage: modelsErrorMessage,
+                    openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode
                 )
             )
         }

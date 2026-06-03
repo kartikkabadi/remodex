@@ -27,6 +27,12 @@ struct BridgeDaemonConfig: Codable, Equatable {
     let refreshEnabled: Bool?
 }
 
+struct BridgeOpenCodeConnectedProviderSummary: Codable, Equatable {
+    let id: String
+    let displayName: String
+    let modelCount: Int?
+}
+
 struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
     let enabled: Bool?
     let serveUrl: String?
@@ -38,6 +44,8 @@ struct BridgeOpenCodeRuntimeStatus: Codable, Equatable {
     let command: String?
     let handoffEnvEnabled: Bool?
     let authConfigured: Bool?
+    let connectedProviders: [BridgeOpenCodeConnectedProviderSummary]?
+    let providerDiscoveryReasonCode: String?
 }
 
 struct BridgeRuntimeStatus: Codable, Equatable {

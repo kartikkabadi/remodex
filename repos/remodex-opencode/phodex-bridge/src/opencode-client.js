@@ -14,6 +14,7 @@ const {
 } = require("./opencode-models");
 const { resolveModelCapabilities } = require("./provider-capabilities");
 
+
 let _createOpencodeClient = null;
 
 async function getSdkClient() {
@@ -37,13 +38,65 @@ async function createOpenCodeClient({
   const createOpencodeClient = createOpencodeClientImpl || (await getSdkClient());
   const client = createOpencodeClient({ baseUrl });
 
-  async function listModels() {
+  let inventoryCache = null;
+  let inventoryRefreshPromise = null;
+
+  async function listProviderInventory({ force = false } = {}) {
+    const cacheTtlMs = boundedProviderCacheTtlMs(process.env);
+    if (inventoryRefreshPromise && !force) {
+      return inventoryRefreshPromise;
+    }
+    const { refreshProviderInventory } = require("./opencode-provider-inventory");
+    const run = refreshProviderInventory(client, {
+      force,
+      cached: inventoryCache,
+      cacheTtlMs,
+    }).then((result) => {
+      inventoryCache = {
+        inventory: result.inventory,
+        models: result.models,
+        meta: result.meta,
+        connectedProviders: result.connectedProviders,
+        fetchedAt: Date.parse(result.meta?.fetchedAt) || Date.now(),
+      };
+      return result;
+    });
+    if (!force) {
+      inventoryRefreshPromise = run.finally(() => {
+        inventoryRefreshPromise = null;
+      });
+      return inventoryRefreshPromise;
+    }
+    return run;
+  }
+
+  async function listModels({ force = false } = {}) {
     try {
-      const response = await withTimeout(client.provider.list(), REQUEST_TIMEOUT_MS);
-      return flattenProviderModels(response);
+      const result = await listProviderInventory({ force });
+      return {
+        models: result.models || [],
+        meta: result.meta || {
+          reasonCode: "unknown",
+          connectedProviderIds: [],
+          fetchedAt: new Date().toISOString(),
+          stale: false,
+          modelCountBeforeCap: 0,
+          modelCountAfterCap: 0,
+        },
+      };
     } catch (error) {
-      console.warn(`${logPrefix} OpenCode provider.list() failed: ${error.message}`);
-      return [];
+      console.warn(`${logPrefix} OpenCode provider inventory failed: ${error.message}`);
+      return {
+        models: [],
+        meta: {
+          reasonCode: "provider_list_failed",
+          connectedProviderIds: [],
+          fetchedAt: new Date().toISOString(),
+          stale: false,
+          modelCountBeforeCap: 0,
+          modelCountAfterCap: 0,
+        },
+      };
     }
   }
 
@@ -292,6 +345,7 @@ async function createOpenCodeClient({
 
   return {
     listModels,
+    listProviderInventory,
     listAgents,
     createSession,
     getSession,
@@ -769,9 +823,24 @@ function flattenProviderModels(response) {
   return [];
 }
 
-function buildModelFromAny(model, upstreamProviderId) {
+function buildModelFromAny(model, upstreamProviderIdOrProvider) {
   const modelId = readString(model.id || model.model || model.name);
-  const reference = `${readString(upstreamProviderId)}/${modelId}`;
+  let upstreamProviderId = "";
+  let upstreamProviderDisplayName = "";
+  if (upstreamProviderIdOrProvider && typeof upstreamProviderIdOrProvider === "object") {
+    upstreamProviderId = readString(
+      upstreamProviderIdOrProvider.id ||
+        upstreamProviderIdOrProvider.providerId ||
+        upstreamProviderIdOrProvider.providerID,
+    );
+    upstreamProviderDisplayName =
+      readString(upstreamProviderIdOrProvider.name) ||
+      formatProviderDisplayName(upstreamProviderId);
+  } else {
+    upstreamProviderId = readString(upstreamProviderIdOrProvider);
+    upstreamProviderDisplayName = formatProviderDisplayName(upstreamProviderId);
+  }
+  const reference = `${upstreamProviderId}/${modelId}`;
   const capabilities = resolveModelCapabilities(OPENCODE_PROVIDER_ID, model);
 
   return {
@@ -779,8 +848,8 @@ function buildModelFromAny(model, upstreamProviderId) {
     model: reference,
     modelProvider: OPENCODE_PROVIDER_ID,
     provider: OPENCODE_PROVIDER_ID,
-    upstreamProviderId: readString(upstreamProviderId),
-    upstreamProviderDisplayName: formatProviderDisplayName(upstreamProviderId),
+    upstreamProviderId,
+    upstreamProviderDisplayName,
     displayName:
       readString(model.name || model.displayName) || displayNameForOpenCodeModel(reference),
     description: readString(model.description) || "",
@@ -811,6 +880,15 @@ function formatProviderDisplayName(providerId) {
   return known[normalized] || normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function boundedProviderCacheTtlMs(env = process.env) {
+  const raw = readString(env?.REMODEX_OPENCODE_PROVIDER_CACHE_MS);
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return 60_000;
+}
+
 function withTimeout(promise, ms) {
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
@@ -826,6 +904,17 @@ function withTimeout(promise, ms) {
   });
 }
 
+function resolveProviderAuthPayload(response) {
+  if (!response || typeof response !== "object") return response;
+
+  const nested = response.data;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested;
+  }
+
+  return response;
+}
+
 module.exports = {
   createOpenCodeClient,
   dispatchEvent,
@@ -833,4 +922,6 @@ module.exports = {
   buildModelFromAny,
   resolveAgentsList,
   normalizeOpenCodeEventType,
+  resolveProviderListPayload,
+  resolveProviderAuthPayload,
 };

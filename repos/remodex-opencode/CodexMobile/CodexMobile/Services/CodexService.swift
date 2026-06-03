@@ -480,6 +480,7 @@ final class CodexService {
     @ObservationIgnored var runtimeOptionRefreshTask: Task<Void, Never>?
     @ObservationIgnored var runtimeOptionRefreshToken: UUID?
     var modelsErrorMessage: String?
+    var lastModelListOpenCodeMeta: OpenCodeModelListMeta?
     @ObservationIgnored var openCodeModelRetryCount = 0
     @ObservationIgnored var openCodeModelsRetryTask: Task<Void, Never>?
     var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined

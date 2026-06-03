@@ -13,9 +13,10 @@ const {
 } = require("../src/opencode-runtime-status");
 
 test("isVersionBelowMinimum detects older OpenCode CLI", () => {
-  assert.equal(isVersionBelowMinimum("1.15.12", OPENCODE_MIN_CLI_VERSION), true);
+  assert.equal(isVersionBelowMinimum("1.15.11", OPENCODE_MIN_CLI_VERSION), true);
+  assert.equal(isVersionBelowMinimum("1.15.12", OPENCODE_MIN_CLI_VERSION), false);
+  assert.equal(isVersionBelowMinimum("1.15.13", OPENCODE_MIN_CLI_VERSION), false);
   assert.equal(isVersionBelowMinimum("2.0.0", OPENCODE_MIN_CLI_VERSION), false);
-  assert.equal(isVersionBelowMinimum("2.1.0", OPENCODE_MIN_CLI_VERSION), false);
 });
 
 test("buildOpenCodeRuntimeStatus marks versionBelowMinimum", () => {
@@ -30,6 +31,15 @@ test("buildOpenCodeRuntimeStatus marks versionBelowMinimum", () => {
   assert.equal(status.minVersion, OPENCODE_MIN_CLI_VERSION);
   assert.equal(status.sessionCount, 2);
   assert.equal(status.handoffEnvEnabled, true);
+});
+
+test("buildOpenCodeRuntimeStatus includes connected provider discovery fields", () => {
+  const status = buildOpenCodeRuntimeStatus({
+    connectedProviders: [{ id: "anthropic", displayName: "Anthropic", modelCount: 3 }],
+    providerDiscoveryReasonCode: "ok",
+  });
+  assert.equal(status.connectedProviders.length, 1);
+  assert.equal(status.providerDiscoveryReasonCode, "ok");
 });
 
 test("buildOpenCodeRuntimeStatus preserves authConfigured tri-state", () => {

@@ -92,13 +92,32 @@ extension CodexService {
         guard shouldAttemptOpenCodeModelLoad else {
             return false
         }
+        if openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+            return false
+        }
         if openCodeModelsRetryTask != nil {
+            return true
+        }
+        if isLoadingModels, openCodeProviderDiscoveryReasonCode == nil, lastModelListOpenCodeMeta == nil {
             return true
         }
         if isLoadingModels {
             return true
         }
         return false
+    }
+
+    var openCodeProviderDiscoveryReasonCode: String? {
+        let fromList = lastModelListOpenCodeMeta?.reasonCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fromList, !fromList.isEmpty {
+            return fromList
+        }
+        let fromCatalog = openCodeRuntimeDetails?.providerDiscoveryReasonCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fromCatalog, !fromCatalog.isEmpty {
+            return fromCatalog
+        }
+        return nil
     }
 
     /// Provider IDs for the model menu — from `runtime/catalog`, or default-on until catalog arrives.
@@ -140,24 +159,34 @@ extension CodexService {
         openCodeRuntimeCatalogEntry?.opencode
     }
 
-    func listModels() async throws {
+    func listModels(refreshProviders: Bool = false) async throws {
         isLoadingModels = true
         defer { isLoadingModels = false }
 
         do {
+            var params: [String: JSONValue] = [
+                "cursor": .null,
+                "limit": .integer(50),
+                "includeHidden": .bool(false),
+            ]
+            if refreshProviders {
+                params["refreshProviders"] = .bool(true)
+            }
             let response = try await sendRequest(
                 method: "model/list",
-                params: .object([
-                    "cursor": .null,
-                    "limit": .integer(50),
-                    "includeHidden": .bool(false),
-                ]),
+                params: .object(params),
                 timeoutNanoseconds: RuntimeConfigLoadingPolicy.modelListTimeoutNanoseconds,
                 timeoutMessage: "model/list timed out while syncing runtime options."
             )
 
             guard let resultObject = response.result?.objectValue else {
                 throw CodexServiceError.invalidResponse("model/list response missing payload")
+            }
+
+            if let opencodeObject = resultObject["opencode"]?.objectValue,
+               let opencodeData = try? JSONEncoder().encode(opencodeObject),
+               let meta = try? JSONDecoder().decode(OpenCodeModelListMeta.self, from: opencodeData) {
+                lastModelListOpenCodeMeta = meta
             }
 
             let items =
@@ -199,6 +228,12 @@ extension CodexService {
     func reconcileOpenCodeModelsAfterList() {
         guard shouldAttemptOpenCodeModelLoad else {
             resetOpenCodeModelsRetry()
+            return
+        }
+
+        if openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+            resetOpenCodeModelsRetry()
+            modelsErrorMessage = nil
             return
         }
 

@@ -49,6 +49,7 @@ struct TurnComposerView: View {
     let isLoadingOpenCodeProvider: Bool
     let isRuntimeSelectionLoading: Bool
     let modelsErrorMessage: String?
+    let openCodeProviderDiscoveryReasonCode: String?
 
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
@@ -234,6 +235,7 @@ struct TurnComposerView: View {
                         isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
                         isRuntimeSelectionLoading: isRuntimeSelectionLoading,
                         modelsErrorMessage: modelsErrorMessage,
+                        openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode,
                         runtimeState: runtimeState,
                         runtimeActions: runtimeActions,
                         remainingAttachmentSlots: remainingAttachmentSlots,
@@ -714,6 +716,7 @@ private struct ComposerPreviewContent: View {
             isLoadingOpenCodeProvider: false,
             isRuntimeSelectionLoading: false,
             modelsErrorMessage: nil,
+            openCodeProviderDiscoveryReasonCode: nil,
             runtimeState: TurnComposerRuntimeState(
                 reasoningDisplayOptions: reasoningOptions,
                 effectiveReasoningEffort: "high",

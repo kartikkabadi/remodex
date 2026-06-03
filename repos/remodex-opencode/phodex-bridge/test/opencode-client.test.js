@@ -20,12 +20,16 @@ function createMockOpencodeClientImpl() {
     return {
       provider: {
         list: async () => ({
-          providers: [
+          all: [
             {
               id: "anthropic",
-              models: [{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }],
+              name: "Anthropic",
+              source: "api",
+              models: { "claude-sonnet-4": { id: "claude-sonnet-4", name: "Claude Sonnet 4" } },
             },
           ],
+          connected: ["anthropic"],
+          default: {},
         }),
       },
       app: {
@@ -99,11 +103,14 @@ test("creates client when baseUrl is provided", async () => {
   assert.equal(typeof client.listSkills, "function");
 });
 
-test("listModels returns flattened provider model array", async () => {
+test("listModels returns connected-only models with meta", async () => {
   const client = await createTestClient();
-  const models = await client.listModels();
-  assert.equal(models.length, 1);
-  assert.equal(models[0].upstreamProviderId, "anthropic");
+  const result = await client.listModels();
+  assert.equal(result.models.length, 1);
+  assert.equal(result.models[0].upstreamProviderId, "anthropic");
+  assert.equal(result.models[0].upstreamProviderDisplayName, "Anthropic");
+  assert.equal(result.meta.reasonCode, "ok");
+  assert.deepEqual(result.meta.connectedProviderIds, ["anthropic"]);
 });
 
 test("flattenProviderModels preserves upstream provider metadata", () => {

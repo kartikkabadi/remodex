@@ -79,6 +79,8 @@ function createOpenCodeProvider({
   let idleTimer = null;
   let catalogUnavailable = null;
   let cachedAuthConfigured = null;
+  let lastModelListMeta = null;
+  let lastConnectedProviders = [];
 
   const threads = new Map();
   const activeTurns = new Map();
@@ -93,7 +95,7 @@ function createOpenCodeProvider({
         ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
         : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
       healthy = true;
-      await refreshAuthConfigured();
+      await refreshAuthConfigured({ forceInventory: true });
       await restoreSessions();
       return;
     }
@@ -160,16 +162,43 @@ function createOpenCodeProvider({
       ? await clientFactory({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` })
       : await createOpenCodeClient({ baseUrl: server.baseUrl, logPrefix: `${logPrefix}:sdk` });
     healthy = true;
-    await refreshAuthConfigured();
+    await refreshAuthConfigured({ forceInventory: true });
     await restoreSessions();
 
     resetIdleTimer();
   }
 
-  async function refreshAuthConfigured() {
+  async function refreshAuthConfigured({ forceInventory = false } = {}) {
     if (!client) {
       cachedAuthConfigured = null;
+      lastModelListMeta = null;
+      lastConnectedProviders = [];
       return;
+    }
+    if (typeof client.listProviderInventory === "function") {
+      try {
+        const result = await client.listProviderInventory({ force: forceInventory });
+        const connectedIds = result?.meta?.connectedProviderIds || [];
+        lastModelListMeta = result?.meta || null;
+        lastConnectedProviders = result?.connectedProviders || [];
+        if (Array.isArray(connectedIds) && connectedIds.length > 0) {
+          cachedAuthConfigured = true;
+          return;
+        }
+        if (result?.meta?.reasonCode === "no_connected_providers") {
+          cachedAuthConfigured = false;
+          return;
+        }
+        if (result?.meta?.reasonCode === "provider_list_failed") {
+          cachedAuthConfigured = null;
+          return;
+        }
+        cachedAuthConfigured = false;
+        return;
+      } catch {
+        cachedAuthConfigured = null;
+        return;
+      }
     }
     if (typeof client.probeConnectedProviders === "function") {
       const connected = await client.probeConnectedProviders();
@@ -179,12 +208,6 @@ function createOpenCodeProvider({
       }
       if (connected === false) {
         cachedAuthConfigured = false;
-      }
-    }
-    if (typeof client.probeProviderAuthState === "function") {
-      const fromAuth = await client.probeProviderAuthState();
-      if (fromAuth !== null) {
-        cachedAuthConfigured = fromAuth;
       }
     }
   }
@@ -282,13 +305,49 @@ function createOpenCodeProvider({
     return ownership.ownsThread(normalized, OPENCODE_PROVIDER_ID) || threads.has(normalized);
   }
 
-  async function listModels() {
+  async function listModels(options = {}) {
     try {
       await ensureStarted();
     } catch {
-      return [];
+      return {
+        models: [],
+        meta: {
+          reasonCode: "provider_list_failed",
+          connectedProviderIds: [],
+          fetchedAt: new Date().toISOString(),
+          stale: false,
+          modelCountBeforeCap: 0,
+          modelCountAfterCap: 0,
+        },
+      };
     }
-    return client.listModels();
+    const force = options.force === true || options.refreshProviders === true;
+    const result = await client.listModels({ force });
+    if (result && typeof result === "object" && Array.isArray(result.models)) {
+      lastModelListMeta = result.meta || lastModelListMeta;
+      if (typeof client.listProviderInventory === "function") {
+        try {
+          const inventory = await client.listProviderInventory({ force: false });
+          lastConnectedProviders = inventory?.connectedProviders || lastConnectedProviders;
+        } catch {
+          // keep prior summaries
+        }
+      }
+      await refreshAuthConfigured();
+      return result;
+    }
+    const models = Array.isArray(result) ? result : [];
+    return {
+      models,
+      meta: lastModelListMeta || {
+        reasonCode: models.length > 0 ? "ok" : "unknown",
+        connectedProviderIds: [],
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+        modelCountBeforeCap: models.length,
+        modelCountAfterCap: models.length,
+      },
+    };
   }
 
   // Starts opencode serve in the background so the first model/list is not capped out.
@@ -876,7 +935,13 @@ function createOpenCodeProvider({
       command: readString(env.REMODEX_OPENCODE_COMMAND) || "opencode",
       handoffEnvEnabled: isOpenCodeHandoffEnabled(env),
       authConfigured: cachedAuthConfigured,
+      connectedProviders: lastConnectedProviders,
+      providerDiscoveryReasonCode: readString(lastModelListMeta?.reasonCode) || null,
     });
+  }
+
+  function getLastModelListMeta() {
+    return lastModelListMeta ? { ...lastModelListMeta } : null;
   }
 
   async function getHandoffContext(threadId, { sessionId = "", directory = "" } = {}) {
@@ -943,6 +1008,7 @@ function createOpenCodeProvider({
     shutdown,
     getCatalogAvailability,
     getRuntimeStatus,
+    getLastModelListMeta,
     getHandoffContext,
     selectTuiSession,
   };

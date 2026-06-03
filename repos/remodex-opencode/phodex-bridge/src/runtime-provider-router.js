@@ -102,8 +102,9 @@ function createRuntimeProviderRouter({
     if (method === "model/list") {
       respondAsync(parsed, async () => {
         const params = parsed.params || {};
+        const forceProviders = params.refreshProviders === true;
         const catalogOpenCode = catalogOpenCodeSnapshotForModelList(runtimeProviders, process.env);
-        const [codexResult, providerModels] = await Promise.all([
+        const [codexResult, providerListResult] = await Promise.all([
           withModelListBudget(
             sendCodexRequest("model/list", params).catch((error) => {
               console.warn(
@@ -114,12 +115,25 @@ function createRuntimeProviderRouter({
             CODEX_MODEL_LIST_BUDGET_MS,
             { items: [] },
           ),
-          listProviderModelsForModelList(runtimeProviders, logPrefix),
+          listProviderModelsForModelList(runtimeProviders, logPrefix, {
+            force: forceProviders,
+          }),
         ]);
-        return mergeModelListResult(
-          codexResult,
-          providerModelsForModelList(providerModels, catalogOpenCode),
+        const { models: providerModels, opencodeMeta } = providerListResult;
+        const capped = providerModelsForModelList(
+          providerModels,
+          catalogOpenCode,
+          opencodeMeta,
         );
+        if (opencodeMeta) {
+          opencodeMeta.modelCountBeforeCap = providerModels.filter(
+            (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
+          ).length;
+          opencodeMeta.modelCountAfterCap = capped.filter(
+            (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
+          ).length;
+        }
+        return mergeModelListResult(codexResult, capped, { opencode: opencodeMeta });
       });
       return true;
     }
@@ -268,26 +282,87 @@ function withModelListBudget(promise, budgetMs, fallback) {
 }
 
 // OpenCode model discovery can take several seconds; never block Codex on it.
-async function listProviderModelsForModelList(providers, logPrefix = "[remodex]", env = process.env) {
+async function listProviderModelsForModelList(
+  providers,
+  logPrefix = "[remodex]",
+  options = {},
+) {
+  const env = options.env || process.env;
+  const force = options.force === true;
+  let opencodeMeta = null;
   const settled = await Promise.allSettled(
     providers.map((provider) => {
       const budgetMs =
         provider.id === OPENCODE_PROVIDER_ID
           ? opencodeModelListBudgetMs(env)
           : MODEL_LIST_PROVIDER_BUDGET_MS;
+      const listPromise =
+        provider.id === OPENCODE_PROVIDER_ID && force
+          ? provider.listModels({ force: true, refreshProviders: true })
+          : provider.listModels();
       return withModelListBudget(
-        provider.listModels().catch((error) => {
+        listPromise.catch((error) => {
           console.warn(
             `${logPrefix} ${provider.id} model/list failed: ${error?.message || error}`,
           );
-          return [];
+          return provider.id === OPENCODE_PROVIDER_ID
+            ? {
+                models: [],
+                meta: {
+                  reasonCode: "provider_list_failed",
+                  connectedProviderIds: [],
+                  fetchedAt: new Date().toISOString(),
+                  stale: false,
+                  modelCountBeforeCap: 0,
+                  modelCountAfterCap: 0,
+                },
+              }
+            : [];
         }),
         budgetMs,
-        [],
+        provider.id === OPENCODE_PROVIDER_ID
+          ? {
+              models: [],
+              meta: {
+                reasonCode: "provider_list_failed",
+                connectedProviderIds: [],
+                fetchedAt: new Date().toISOString(),
+                stale: false,
+                modelCountBeforeCap: 0,
+                modelCountAfterCap: 0,
+              },
+            }
+          : [],
       );
     }),
   );
-  return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+
+  const models = [];
+  for (const result of settled) {
+    if (result.status !== "fulfilled") {
+      continue;
+    }
+    const value = result.value;
+    if (value && typeof value === "object" && Array.isArray(value.models)) {
+      if (value.meta) {
+        opencodeMeta = value.meta;
+      }
+      models.push(...value.models);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      models.push(...value);
+    }
+  }
+
+  if (!opencodeMeta) {
+    const opencodeProvider = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
+    if (opencodeProvider && typeof opencodeProvider.getLastModelListMeta === "function") {
+      opencodeMeta = opencodeProvider.getLastModelListMeta();
+    }
+  }
+
+  return { models, opencodeMeta };
 }
 
 async function listProviderThreads(providers, params) {
@@ -354,7 +429,7 @@ function providerForRequest(request, providers) {
   return providers.find((provider) => provider.ownsThread(threadId)) || null;
 }
 
-function mergeModelListResult(codexResult, providerModels) {
+function mergeModelListResult(codexResult, providerModels, extras = {}) {
   const result = codexResult && typeof codexResult === "object" ? codexResult : {};
   const key = firstArrayKey(result, ["items", "data", "models"]) || "items";
   const codexModels = Array.isArray(result[key]) ? result[key] : [];
@@ -377,10 +452,14 @@ function mergeModelListResult(codexResult, providerModels) {
     };
   });
 
-  return {
+  const merged = {
     ...result,
     [key]: [...normalizedCodexModels, ...normalizedProviderModels],
   };
+  if (extras.opencode && typeof extras.opencode === "object") {
+    merged.opencode = extras.opencode;
+  }
+  return merged;
 }
 
 function mergeThreadListResult(codexResult, providerThreads) {
@@ -590,11 +669,16 @@ function buildCatalogOpenCodePlaceholderModels() {
   ];
 }
 
-function providerModelsForModelList(providerModels, catalogOpenCode) {
+function providerModelsForModelList(providerModels, catalogOpenCode, opencodeMeta = null) {
   const opencodeModels = providerModels.filter(
     (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
   );
-  const cappedOpenCode = capOpenCodeModelsForMobileList(opencodeModels, process.env);
+  const connectedProviderIds = opencodeMeta?.connectedProviderIds || null;
+  const cappedOpenCode = capOpenCodeModelsForMobileList(
+    opencodeModels,
+    process.env,
+    connectedProviderIds,
+  );
   const placeholderModels =
     catalogOpenCode && !catalogOpenCode.enabled && cappedOpenCode.length === 0
       ? buildCatalogOpenCodePlaceholderModels()
@@ -706,6 +790,8 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       ...runtimeStatus,
       enabled: enabled && runtimeStatus.enabled !== false,
       lastError: enabled ? null : runtimeStatus.lastError || unavailableReason,
+      connectedProviders: runtimeStatus.connectedProviders || null,
+      providerDiscoveryReasonCode: runtimeStatus.providerDiscoveryReasonCode || null,
     },
   };
 }

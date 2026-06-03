@@ -54,7 +54,7 @@ struct TurnComposerRuntimeActions {
                     codex.modelsErrorMessage = nil
                     await withTaskGroup(of: Void.self) { group in
                         group.addTask { try? await codex.fetchRuntimeCatalog() }
-                        group.addTask { try? await codex.listModels() }
+                        group.addTask { try? await codex.listModels(refreshProviders: true) }
                     }
                 }
             }
