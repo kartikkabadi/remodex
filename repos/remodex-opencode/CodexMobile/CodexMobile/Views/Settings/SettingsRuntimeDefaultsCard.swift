@@ -113,7 +113,11 @@ struct SettingsRuntimeDefaultsCard: View {
             return "Connect providers in OpenCode on your Mac."
         }
 
-        if discoveryReason == "provider_list_failed" || discoveryReason == "unknown" {
+        if discoveryReason == "unknown" {
+            return "OpenCode provider status is unknown. Tap Retry in Settings or the model menu."
+        }
+
+        if discoveryReason == "provider_list_failed" {
             return runtime.unavailableReason ?? "OpenCode provider list is unavailable on this Mac."
         }
 

@@ -83,6 +83,7 @@ async function createOpenCodeClient({
           modelCountBeforeCap: 0,
           modelCountAfterCap: 0,
         },
+        connectedProviders: result.connectedProviders || [],
       };
     } catch (error) {
       console.warn(`${logPrefix} OpenCode provider inventory failed: ${error.message}`);

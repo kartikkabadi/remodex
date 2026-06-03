@@ -193,6 +193,10 @@ function createOpenCodeProvider({
           cachedAuthConfigured = null;
           return;
         }
+        if (result?.meta?.reasonCode === "unknown") {
+          cachedAuthConfigured = null;
+          return;
+        }
         cachedAuthConfigured = false;
         return;
       } catch {
@@ -305,6 +309,41 @@ function createOpenCodeProvider({
     return ownership.ownsThread(normalized, OPENCODE_PROVIDER_ID) || threads.has(normalized);
   }
 
+  function syncAuthAndMetaFromListResult(result) {
+    if (!result || typeof result !== "object") {
+      return;
+    }
+    if (result.meta && typeof result.meta === "object") {
+      lastModelListMeta = result.meta;
+    }
+    if (Array.isArray(result.connectedProviders)) {
+      lastConnectedProviders = result.connectedProviders;
+    }
+
+    const meta = result.meta || {};
+    const reasonCode = readString(meta.reasonCode);
+    const connectedIds = Array.isArray(meta.connectedProviderIds) ? meta.connectedProviderIds : [];
+    const modelCount = Array.isArray(result.models) ? result.models.length : 0;
+
+    if (reasonCode === "provider_list_failed" || reasonCode === "unknown") {
+      cachedAuthConfigured = null;
+      return;
+    }
+    if (reasonCode === "no_connected_providers") {
+      cachedAuthConfigured = false;
+      return;
+    }
+    if (reasonCode === "ok" && modelCount > 0) {
+      cachedAuthConfigured = true;
+      return;
+    }
+    if (connectedIds.length > 0 && modelCount === 0) {
+      cachedAuthConfigured = null;
+      return;
+    }
+    cachedAuthConfigured = false;
+  }
+
   async function listModels(options = {}) {
     try {
       await ensureStarted();
@@ -324,16 +363,15 @@ function createOpenCodeProvider({
     const force = options.force === true || options.refreshProviders === true;
     const result = await client.listModels({ force });
     if (result && typeof result === "object" && Array.isArray(result.models)) {
-      lastModelListMeta = result.meta || lastModelListMeta;
-      if (typeof client.listProviderInventory === "function") {
+      if (force && typeof client.listProviderInventory === "function") {
         try {
-          const inventory = await client.listProviderInventory({ force: false });
-          lastConnectedProviders = inventory?.connectedProviders || lastConnectedProviders;
+          const inventory = await client.listProviderInventory({ force: true });
+          result.connectedProviders = inventory?.connectedProviders || [];
         } catch {
           // keep prior summaries
         }
       }
-      await refreshAuthConfigured();
+      syncAuthAndMetaFromListResult(result);
       return result;
     }
     const models = Array.isArray(result) ? result : [];

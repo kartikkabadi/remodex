@@ -435,6 +435,142 @@ function createProbeMockClient({ connected = [], auth = {} } = {}) {
     });
 }
 
+test("listModels with unknown meta sets authConfigured null", async () => {
+  const client = {
+    ...fakeClient(),
+    listModels: async () => ({
+      models: [],
+      meta: {
+        reasonCode: "unknown",
+        connectedProviderIds: ["orphan-id"],
+        fetchedAt: "2026-06-03T12:00:00.000Z",
+        stale: false,
+        modelCountBeforeCap: 0,
+        modelCountAfterCap: 0,
+      },
+      connectedProviders: [],
+    }),
+    listProviderInventory: async () => ({
+      inventory: { all: [], connected: ["orphan-id"], default: {} },
+      models: [],
+      meta: {
+        reasonCode: "unknown",
+        connectedProviderIds: ["orphan-id"],
+        fetchedAt: "2026-06-03T12:00:00.000Z",
+        stale: false,
+        modelCountBeforeCap: 0,
+        modelCountAfterCap: 0,
+      },
+      connectedProviders: [],
+    }),
+  };
+  const provider = makeProvider({ clientFactory: async () => client });
+  const result = await provider.listModels();
+  assert.equal(result.meta.reasonCode, "unknown");
+  assert.equal(provider.getRuntimeStatus().authConfigured, null);
+});
+
+test("forced listModels keeps live meta as source of truth", async () => {
+  const liveMeta = {
+    reasonCode: "ok",
+    connectedProviderIds: ["anthropic"],
+    fetchedAt: "2026-06-03T12:00:00.000Z",
+    stale: false,
+    modelCountBeforeCap: 1,
+    modelCountAfterCap: 1,
+  };
+  const client = {
+    ...fakeClient(),
+    listModels: async ({ force }) => ({
+      models: force
+        ? [
+            {
+              id: "anthropic/claude",
+              model: "anthropic/claude",
+              modelProvider: "opencode",
+              provider: "opencode",
+            },
+          ]
+        : [],
+      meta: liveMeta,
+      connectedProviders: [{ id: "anthropic", displayName: "Anthropic", modelCount: 1 }],
+    }),
+    listProviderInventory: async ({ force }) => ({
+      inventory: {
+        all: [
+          {
+            id: "anthropic",
+            name: "Anthropic",
+            source: "api",
+            models: { claude: { id: "claude", name: "Claude" } },
+          },
+        ],
+        connected: ["anthropic"],
+        default: {},
+      },
+      models: force
+        ? [
+            {
+              id: "anthropic/claude",
+              model: "anthropic/claude",
+              modelProvider: "opencode",
+            },
+          ]
+        : [],
+      meta: liveMeta,
+      connectedProviders: [{ id: "anthropic", displayName: "Anthropic", modelCount: 1 }],
+    }),
+  };
+  const provider = makeProvider({ clientFactory: async () => client });
+  await provider.listModels({ force: true, refreshProviders: true });
+  assert.equal(provider.getLastModelListMeta()?.reasonCode, "ok");
+  assert.equal(provider.getRuntimeStatus().authConfigured, true);
+});
+
+test("forced listModels does not adopt stale inventory meta over live listModels meta", async () => {
+  const liveMeta = {
+    reasonCode: "unknown",
+    connectedProviderIds: ["orphan-id"],
+    fetchedAt: "2026-06-03T12:00:00.000Z",
+    stale: false,
+    modelCountBeforeCap: 0,
+    modelCountAfterCap: 0,
+  };
+  const staleInventoryMeta = {
+    reasonCode: "ok",
+    connectedProviderIds: ["anthropic"],
+    fetchedAt: "2026-06-02T00:00:00.000Z",
+    stale: true,
+    modelCountBeforeCap: 5,
+    modelCountAfterCap: 5,
+  };
+  const client = {
+    ...fakeClient(),
+    listModels: async () => ({
+      models: [],
+      meta: liveMeta,
+      connectedProviders: [],
+    }),
+    listProviderInventory: async () => ({
+      inventory: { all: [], connected: ["orphan-id"], default: {} },
+      models: [
+        {
+          id: "anthropic/claude",
+          model: "anthropic/claude",
+          modelProvider: "opencode",
+        },
+      ],
+      meta: staleInventoryMeta,
+      connectedProviders: [{ id: "anthropic", displayName: "Anthropic", modelCount: 1 }],
+    }),
+  };
+  const provider = makeProvider({ clientFactory: async () => client });
+  await provider.listModels({ force: true, refreshProviders: true });
+  assert.equal(provider.getLastModelListMeta()?.reasonCode, "unknown");
+  assert.equal(provider.getLastModelListMeta()?.stale, false);
+  assert.equal(provider.getRuntimeStatus().authConfigured, null);
+});
+
 test("getRuntimeStatus exposes authConfigured after connected provider probe", async () => {
   const probeClient = {
     ...fakeClient(),

@@ -134,11 +134,22 @@ function discoveryReasonCodeFromInventory(inventory) {
   return "ok";
 }
 
+function resolveInventoryReasonCode(inventory, models) {
+  const base = discoveryReasonCodeFromInventory(inventory);
+  if (base !== "ok") {
+    return base;
+  }
+  if (!Array.isArray(models) || models.length === 0) {
+    return "unknown";
+  }
+  return "ok";
+}
+
 function buildInventoryMeta({ inventory, models, fetchedAt, stale = false }) {
   const connectedProviderIds = Array.isArray(inventory?.connected)
     ? inventory.connected.map((id) => readString(id)).filter(Boolean)
     : [];
-  const reasonCode = discoveryReasonCodeFromInventory(inventory);
+  const reasonCode = resolveInventoryReasonCode(inventory, models);
   const modelCountBeforeCap = Array.isArray(models) ? models.length : 0;
 
   return {
@@ -195,7 +206,12 @@ async function refreshProviderInventory(client, options = {}) {
 
   try {
     const inventory = await loadProviderListInventory(client);
-    const reasonCode = discoveryReasonCodeFromInventory(inventory);
+    const preferred = resolvePreferredProviders(inventory, {
+      credentialProviderIDs,
+      consoleManagedProviders,
+    });
+    const models = flattenConnectedProviderModels(preferred);
+    const reasonCode = resolveInventoryReasonCode(inventory, models);
 
     if (reasonCode === "no_connected_providers" || reasonCode === "unknown") {
       const meta = buildInventoryMeta({ inventory, models: [], fetchedAt: new Date().toISOString() });
@@ -210,16 +226,12 @@ async function refreshProviderInventory(client, options = {}) {
       };
     }
 
-    const preferred = resolvePreferredProviders(inventory, {
-      credentialProviderIDs,
-      consoleManagedProviders,
-    });
-    const models = flattenConnectedProviderModels(preferred);
     const meta = buildInventoryMeta({
       inventory,
       models,
       fetchedAt: new Date().toISOString(),
     });
+    meta.reasonCode = reasonCode;
     return {
       inventory,
       models,
@@ -266,6 +278,7 @@ module.exports = {
   buildInventoryMeta,
   buildConnectedProviderSummaries,
   discoveryReasonCodeFromInventory,
+  resolveInventoryReasonCode,
   isOpenCodeManagedProvider,
   resolveProviderListPayload,
 };

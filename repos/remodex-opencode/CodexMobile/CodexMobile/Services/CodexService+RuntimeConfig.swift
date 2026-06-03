@@ -159,6 +159,29 @@ extension CodexService {
         openCodeRuntimeCatalogEntry?.opencode
     }
 
+    func isOpenCodeModelListRetryTerminal() -> Bool {
+        guard shouldAttemptOpenCodeModelLoad else {
+            return true
+        }
+        guard let reason = openCodeProviderDiscoveryReasonCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !reason.isEmpty
+        else {
+            return false
+        }
+
+        switch reason {
+        case "no_connected_providers", "unknown", "provider_list_failed":
+            return true
+        case "ok":
+            return !availableModels.contains {
+                CodexModelOption.normalizedProvider($0.modelProvider) == "opencode"
+            }
+        default:
+            return false
+        }
+    }
+
     func listModels(refreshProviders: Bool = false) async throws {
         isLoadingModels = true
         defer { isLoadingModels = false }
@@ -231,9 +254,11 @@ extension CodexService {
             return
         }
 
-        if openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+        if isOpenCodeModelListRetryTerminal() {
             resetOpenCodeModelsRetry()
-            modelsErrorMessage = nil
+            if openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
+                modelsErrorMessage = nil
+            }
             return
         }
 

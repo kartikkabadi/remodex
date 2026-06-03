@@ -124,6 +124,41 @@ describe("resolvePreferredProviders — MVP credentialProviderIDs: []", () => {
   });
 });
 
+describe("resolveInventoryReasonCode", () => {
+  test("orphaned connected IDs without models yield unknown not ok", () => {
+    const { resolveInventoryReasonCode } = require("../src/opencode-provider-inventory");
+    const inventory = {
+      connected: ["missing-provider"],
+      all: [
+        makeProvider({
+          id: "anthropic",
+          name: "Anthropic",
+          models: { x: { id: "x", name: "X" } },
+        }),
+      ],
+    };
+    assert.equal(resolveInventoryReasonCode(inventory, []), "unknown");
+  });
+
+  test("connected with models stays ok", () => {
+    const { resolveInventoryReasonCode, flattenConnectedProviderModels, resolvePreferredProviders } =
+      require("../src/opencode-provider-inventory");
+    const inventory = {
+      connected: ["anthropic"],
+      all: [
+        makeProvider({
+          id: "anthropic",
+          name: "Anthropic",
+          models: { x: { id: "x", name: "X" } },
+        }),
+      ],
+    };
+    const preferred = resolvePreferredProviders(inventory, { credentialProviderIDs: [] });
+    const models = flattenConnectedProviderModels(preferred);
+    assert.equal(resolveInventoryReasonCode(inventory, models), "ok");
+  });
+});
+
 describe("discoveryReasonCodeFromInventory", () => {
   test("unknown when connected key missing", () => {
     assert.equal(discoveryReasonCodeFromInventory({ all: [] }), "unknown");
