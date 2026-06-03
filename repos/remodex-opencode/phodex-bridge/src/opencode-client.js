@@ -172,7 +172,7 @@ async function createOpenCodeClient({
     return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant }) {
+  async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant, threadId, turnId }) {
     const resolvedParts =
       Array.isArray(parts) && parts.length > 0
         ? parts
@@ -223,7 +223,9 @@ async function createOpenCodeClient({
         modelID: parsedModel?.modelID || null,
         agent: normalizedAgent || null,
         variant: normalizedVariant || null,
-
+        threadId: readString(threadId) || null,
+        turnId: readString(turnId) || null,
+        sessionId: readString(sessionID) || null,
       }),
     );
 

@@ -507,13 +507,35 @@ test("prompt passes parsed model agent and variant to session.prompt", async () 
     }),
   });
 
-  await client.prompt({
-    sessionID: "ses_prompt",
-    prompt: "hi",
-    model: "opencode-go/deepseek-v4-flash",
-    agent: "build",
-    variant: "max",
-  });
+  const promptLogs = [];
+  const originalLog = console.log;
+  console.log = (value) => {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed?.event === "opencode_turn_prompt") {
+          promptLogs.push(parsed);
+        }
+      } catch {
+        // Ignore non-JSON console output.
+      }
+    }
+    originalLog(value);
+  };
+
+  try {
+    await client.prompt({
+      sessionID: "ses_prompt",
+      prompt: "hi",
+      model: "opencode-go/deepseek-v4-flash",
+      agent: "build",
+      variant: "max",
+      threadId: "thread-42",
+      turnId: "turn-42",
+    });
+  } finally {
+    console.log = originalLog;
+  }
 
   assert.equal(captured.length, 1);
   assert.deepEqual(captured[0].model, {
@@ -522,6 +544,10 @@ test("prompt passes parsed model agent and variant to session.prompt", async () 
   });
   assert.equal(captured[0].agent, "build");
   assert.equal(captured[0].variant, "max");
+  assert.equal(promptLogs.length, 1);
+  assert.equal(promptLogs[0].threadId, "thread-42");
+  assert.equal(promptLogs[0].turnId, "turn-42");
+  assert.equal(promptLogs[0].sessionId, "ses_prompt");
 });
 
 test("probeProviderAuthState returns false when auth payload has no methods", async () => {

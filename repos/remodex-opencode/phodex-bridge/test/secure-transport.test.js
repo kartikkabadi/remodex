@@ -20,6 +20,7 @@ const {
 const {
   HANDSHAKE_MODE_QR_BOOTSTRAP,
   HANDSHAKE_MODE_TRUSTED_RECONNECT,
+  MAX_BRIDGE_OUTBOUND_MESSAGES,
   createBridgeSecureTransport,
   nonceForDirection,
 } = require("../src/secure-transport");
@@ -614,6 +615,198 @@ test("resume replay keeps current handshake output when the phone cursor is stal
   assert.equal(outboundPayload.bridgeOutboundSeq, 1);
   assert.equal(outboundPayload.payloadText, JSON.stringify({ id: "initialize", result: { ok: true } }));
 });
+
+test("queueOutboundApplicationMessage logs bridge_outbound_buffered before resumeState", () => {
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-buffer-log",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-buffer-log",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-buffer-log": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    finishHandshake({
+      secureTransport,
+      sessionId: "session-buffer-log",
+      macDeviceId: "mac-buffer-log",
+      phoneDeviceId: "phone-buffer-log",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "turn/started", params: { threadId: "thread-1" } }),
+      () => {
+        throw new Error("expected outbound turn/started to buffer before resumeState");
+      }
+    );
+
+    const bufferedLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_buffered");
+    assert.equal(bufferedLogs.length, 1);
+    assert.equal(bufferedLogs[0].bridgeOutboundSeq, 1);
+    assert.ok(bufferedLogs[0].payloadBytes > 0);
+  } finally {
+    structuredLogs.restore();
+  }
+});
+
+test("trimOutboundBuffer retains turn/completed under buffer caps", () => {
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-trim-keep",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-trim-keep",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-trim-keep": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  const replayWireMessages = [];
+  try {
+    const { serverHello } = finishHandshake({
+      secureTransport,
+      sessionId: "session-trim-keep",
+      macDeviceId: "mac-trim-keep",
+      phoneDeviceId: "phone-trim-keep",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    const turnCompletedPayload = JSON.stringify({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", status: "completed" },
+    });
+    secureTransport.queueOutboundApplicationMessage(turnCompletedPayload, () => false);
+
+    assert.equal(structuredLogs.filter((entry) => entry.event === "bridge_outbound_trim_dropped").length, 0);
+
+    secureTransport.bindLiveSendWireMessage((message) => {
+      replayWireMessages.push(message);
+      return true;
+    });
+    secureTransport.handleIncomingWireMessage(
+      JSON.stringify({
+        kind: "resumeState",
+        sessionId: "session-trim-keep",
+        keyEpoch: serverHello.keyEpoch,
+        lastAppliedBridgeOutboundSeq: 999,
+      }),
+      {
+        sendControlMessage() {},
+        onApplicationMessage() {},
+      }
+    );
+
+    assert.equal(replayWireMessages.length, 1);
+    assert.equal(
+      structuredLogs.filter((entry) => entry.event === "bridge_outbound_trim_dropped").length,
+      0
+    );
+  } finally {
+    structuredLogs.restore();
+  }
+});
+
+test("trimOutboundBuffer emits bridge_outbound_trim_dropped when caps are exceeded", () => {
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-trim-drop",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-trim-drop",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-trim-drop": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    finishHandshake({
+      secureTransport,
+      sessionId: "session-trim-drop",
+      macDeviceId: "mac-trim-drop",
+      phoneDeviceId: "phone-trim-drop",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    const fillerPayload = JSON.stringify({ method: "thread/status", params: { status: "running" } });
+    for (let index = 0; index < MAX_BRIDGE_OUTBOUND_MESSAGES; index += 1) {
+      secureTransport.queueOutboundApplicationMessage(fillerPayload, () => false);
+    }
+
+    const turnCompletedPayload = JSON.stringify({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", status: "completed" },
+    });
+    secureTransport.queueOutboundApplicationMessage(turnCompletedPayload, () => false);
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_trim_dropped");
+    assert.equal(trimLogs.length, 1);
+    assert.equal(trimLogs[0].droppedCount, 1);
+    assert.ok(trimLogs[0].droppedBytes > 0);
+    assert.equal(trimLogs[0].firstSeq, 1);
+    assert.equal(trimLogs[0].lastSeq, 1);
+  } finally {
+    structuredLogs.restore();
+  }
+});
+
+function captureStructuredLogs() {
+  const entries = [];
+  const originalLog = console.log;
+  console.log = (value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && typeof parsed.event === "string") {
+        entries.push(parsed);
+      }
+    } catch {
+      // Ignore non-JSON console output from secure transport debug logs.
+    }
+  };
+  entries.restore = () => {
+    console.log = originalLog;
+  };
+  return entries;
+}
 
 function finishHandshake({
   secureTransport,

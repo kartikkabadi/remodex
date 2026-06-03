@@ -120,6 +120,16 @@ function createBridgeSecureTransport({
     outboundBufferBytes += bufferEntry.sizeBytes;
     trimOutboundBuffer();
 
+    if (!activeSession?.isResumed) {
+      console.log(
+        JSON.stringify({
+          event: "bridge_outbound_buffered",
+          bridgeOutboundSeq: bufferEntry.bridgeOutboundSeq,
+          payloadBytes: bufferEntry.sizeBytes,
+        })
+      );
+    }
+
     const liveSessionSender = activeSession?.sendWireMessage;
     const effectiveSendWireMessage = typeof liveSessionSender === "function"
       ? liveSessionSender
@@ -496,6 +506,17 @@ function createBridgeSecureTransport({
       removeCount += 1;
     }
     if (removeCount > 0) {
+      const firstSeq = outboundBuffer[0]?.bridgeOutboundSeq ?? null;
+      const lastSeq = outboundBuffer[removeCount - 1]?.bridgeOutboundSeq ?? null;
+      console.log(
+        JSON.stringify({
+          event: "bridge_outbound_trim_dropped",
+          droppedCount: removeCount,
+          droppedBytes: removedBytes,
+          firstSeq,
+          lastSeq,
+        })
+      );
       outboundBuffer.splice(0, removeCount);
       outboundBufferBytes = Math.max(0, outboundBufferBytes - removedBytes);
     }
@@ -769,6 +790,8 @@ function base64ToBase64Url(value) {
 module.exports = {
   HANDSHAKE_MODE_QR_BOOTSTRAP,
   HANDSHAKE_MODE_TRUSTED_RECONNECT,
+  MAX_BRIDGE_OUTBOUND_BYTES,
+  MAX_BRIDGE_OUTBOUND_MESSAGES,
   PAIRING_QR_VERSION,
   SECURE_PROTOCOL_VERSION,
   createBridgeSecureTransport,

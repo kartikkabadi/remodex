@@ -797,6 +797,8 @@ function createOpenCodeProvider({
         model: parsedModel || model,
         agent,
         variant,
+        threadId: active.thread.id,
+        turnId: active.turn.id,
       });
       active.started = true;
     } catch (error) {
