@@ -25,6 +25,39 @@ final class CodexModelOptionCapabilitiesTests: XCTestCase {
         XCTAssertFalse(option.capabilities.supportsStructuredSkillInput)
     }
 
+    func testDecodeLogoProviderIdUsesComposerLogoProviderIdFallback() throws {
+        let json = """
+        {
+          "id": "opencode/free",
+          "model": "opencode/free",
+          "modelProvider": "opencode",
+          "logoProviderId": "opencode-zen",
+          "displayName": "Free"
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let option = try JSONDecoder().decode(CodexModelOption.self, from: data)
+
+        XCTAssertEqual(option.logoProviderId, "opencode-zen")
+        XCTAssertEqual(option.composerLogoProviderId, "opencode-zen")
+    }
+
+    func testComposerLogoProviderIdFallsBackToModelProvider() throws {
+        let json = """
+        {
+          "id": "openai/gpt-5.5",
+          "model": "openai/gpt-5.5",
+          "modelProvider": "opencode",
+          "displayName": "GPT-5.5"
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let option = try JSONDecoder().decode(CodexModelOption.self, from: data)
+
+        XCTAssertNil(option.logoProviderId)
+        XCTAssertEqual(option.composerLogoProviderId, "opencode")
+    }
+
     func testDecodeWithoutCapabilitiesUsesCodexDefaultsForCodexProvider() throws {
         let json = """
         {

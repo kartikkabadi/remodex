@@ -108,6 +108,13 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         )
     }
 
+    private static func composerMenuLogoProvider(
+        for models: [CodexModelOption],
+        fallback: String
+    ) -> String {
+        models.first?.composerLogoProviderId ?? fallback
+    }
+
     private static func modelAction(model: CodexModelOption, input: Input) -> UIAction {
         let title = TurnComposerMetaMapper.modelTitle(for: model)
         let image: UIImage? = model.supportsServiceTier(.fast)
@@ -166,7 +173,9 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason, reasonCode: reasonCode)
                 return UIMenu(
                     title: providerTitle,
-                    image: RuntimeProviderLogo.menuUIImage(provider: provider),
+                    image: RuntimeProviderLogo.menuUIImage(
+                        provider: composerMenuLogoProvider(for: models, fallback: provider)
+                    ),
                     options: [],
                     children: [disabledInfoAction(title: unavailable.title)]
                 )
@@ -259,7 +268,9 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         if upstreamGroups.isEmpty {
             return UIMenu(
                 title: providerTitle,
-                image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
+                image: RuntimeProviderLogo.menuUIImage(
+                    provider: composerMenuLogoProvider(for: models, fallback: "opencode")
+                ),
                 options: [.singleSelection],
                 children: models.map { modelAction(model: $0, input: input) }
             )
@@ -274,7 +285,9 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         var children: [UIMenuElement] = upstreamGroups.map { group in
             UIMenu(
                 title: group.title,
-                image: RuntimeProviderLogo.menuUIImage(provider: group.upstreamId),
+                image: RuntimeProviderLogo.menuUIImage(
+                    provider: composerMenuLogoProvider(for: group.models, fallback: group.upstreamId)
+                ),
                 options: [.singleSelection],
                 children: group.models.map { modelAction(model: $0, input: input) }
             )
@@ -286,7 +299,9 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         return UIMenu(
             title: providerTitle,
-            image: RuntimeProviderLogo.menuUIImage(provider: "opencode"),
+            image: RuntimeProviderLogo.menuUIImage(
+                provider: composerMenuLogoProvider(for: models, fallback: "opencode")
+            ),
             options: [],
             children: children
         )

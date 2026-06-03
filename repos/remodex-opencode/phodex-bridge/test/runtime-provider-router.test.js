@@ -85,6 +85,25 @@ test("capOpenCodeModelsForMobileList limits total and per-upstream models", () =
   assert.ok(capped.every((model) => model.contextWindow === undefined));
 });
 
+test("capOpenCodeModelsForMobileList preserves logoProviderId", () => {
+  const models = [
+    {
+      id: "opencode/free",
+      model: "opencode/free",
+      modelProvider: "opencode",
+      upstreamProviderId: "opencode",
+      upstreamProviderDisplayName: "OpenCode Zen",
+      logoProviderId: "opencode-zen",
+      contextWindow: { input: 128000 },
+    },
+  ];
+
+  const capped = capOpenCodeModelsForMobileList(models);
+  assert.equal(capped.length, 1);
+  assert.equal(capped[0].logoProviderId, "opencode-zen");
+  assert.equal(capped[0].contextWindow, undefined);
+});
+
 test("mergeModelListResult annotates Codex models and appends provider models", () => {
   const result = mergeModelListResult(
     { items: [{ id: "gpt-5.5", model: "gpt-5.5", provider: "openai" }] },

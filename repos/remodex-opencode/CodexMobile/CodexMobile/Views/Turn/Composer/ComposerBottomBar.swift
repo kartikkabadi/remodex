@@ -389,8 +389,8 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     private var leadingIconFont: Font { AppFont.subheadline() }
     private let maxInlineRuntimeLabelWidth: CGFloat = 152
 
-    private var selectedModelProvider: String {
-        orderedModelOptions.first(where: { $0.selectionKey == selectedModelID })?.modelProvider ?? "codex"
+    private var selectedComposerLogoProvider: String {
+        orderedModelOptions.first(where: { $0.selectionKey == selectedModelID })?.composerLogoProviderId ?? "codex"
     }
 
     static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
@@ -503,7 +503,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         leadingImageName: String?
     ) -> some View {
         HStack(spacing: 6) {
-            RuntimeProviderLogoView(provider: selectedModelProvider, size: 14)
+            RuntimeProviderLogoView(provider: selectedComposerLogoProvider, size: 14)
 
             if runtimeState.showsBetaLabel {
                 OpenCodeBetaCapsule()

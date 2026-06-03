@@ -351,6 +351,10 @@ function slimModelForMobileList(model) {
     return model;
   }
   const { contextWindow, context_window, ...rest } = model;
+  const logoProviderId = readString(model.logoProviderId);
+  if (logoProviderId) {
+    rest.logoProviderId = logoProviderId;
+  }
   return rest;
 }
 

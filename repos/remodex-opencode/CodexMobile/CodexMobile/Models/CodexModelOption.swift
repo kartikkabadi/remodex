@@ -19,8 +19,13 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
     let capabilities: ProviderCapabilities
     let upstreamProviderId: String?
     let upstreamProviderDisplayName: String?
+    let logoProviderId: String?
     let contextWindow: [String: JSONValue]?
     let modelStatus: String?
+
+    var composerLogoProviderId: String {
+        logoProviderId ?? modelProvider
+    }
 
     init(
         id: String,
@@ -35,6 +40,7 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         capabilities: ProviderCapabilities? = nil,
         upstreamProviderId: String? = nil,
         upstreamProviderDisplayName: String? = nil,
+        logoProviderId: String? = nil,
         contextWindow: [String: JSONValue]? = nil,
         modelStatus: String? = nil
     ) {
@@ -53,6 +59,7 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
                 : .defaultCodex)
         self.upstreamProviderId = upstreamProviderId
         self.upstreamProviderDisplayName = upstreamProviderDisplayName
+        self.logoProviderId = logoProviderId
         self.contextWindow = contextWindow
         self.modelStatus = modelStatus
     }
@@ -90,6 +97,7 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         case upstreamProviderIdSnake = "upstream_provider_id"
         case upstreamProviderDisplayName
         case upstreamProviderDisplayNameSnake = "upstream_provider_display_name"
+        case logoProviderId
         case contextWindow
         case contextWindowSnake = "context_window"
         case modelStatus = "status"
@@ -168,6 +176,8 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         let upstreamNameSnake = try container.decodeIfPresent(String.self, forKey: .upstreamProviderDisplayNameSnake)
         upstreamProviderDisplayName = upstreamName ?? upstreamNameSnake
 
+        logoProviderId = try container.decodeIfPresent(String.self, forKey: .logoProviderId)
+
         contextWindow = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .contextWindow))
             ?? (try? container.decodeIfPresent([String: JSONValue].self, forKey: .contextWindowSnake))
         modelStatus = try container.decodeIfPresent(String.self, forKey: .modelStatus)
@@ -242,6 +252,7 @@ struct CodexModelOption: Identifiable, Codable, Hashable, Sendable {
         try container.encode(capabilities, forKey: .capabilities)
         try container.encodeIfPresent(upstreamProviderId, forKey: .upstreamProviderId)
         try container.encodeIfPresent(upstreamProviderDisplayName, forKey: .upstreamProviderDisplayName)
+        try container.encodeIfPresent(logoProviderId, forKey: .logoProviderId)
         try container.encodeIfPresent(modelStatus, forKey: .modelStatus)
     }
 

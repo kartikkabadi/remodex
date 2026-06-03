@@ -7,6 +7,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  buildModelFromAny,
   createOpenCodeClient,
   dispatchEvent,
   flattenProviderModels,
@@ -556,4 +557,22 @@ test("probeProviderAuthState returns false when auth payload has no methods", as
     createOpencodeClientImpl: createProbeMockClient({ auth: { anthropic: [] } }),
   });
   assert.equal(await client.probeProviderAuthState(), false);
+});
+
+test("buildModelFromAny sets logoProviderId for OpenCode Zen upstream", () => {
+  const zenModel = buildModelFromAny(
+    { id: "free", name: "Free" },
+    { id: "opencode", name: "OpenCode Zen" },
+  );
+  assert.equal(zenModel.logoProviderId, "opencode-zen");
+  assert.equal(zenModel.upstreamProviderId, "opencode");
+  assert.equal(zenModel.upstreamProviderDisplayName, "OpenCode Zen");
+});
+
+test("buildModelFromAny omits logoProviderId for generic OpenCode upstream", () => {
+  const model = buildModelFromAny(
+    { id: "free", name: "Free" },
+    { id: "opencode", name: "OpenCode" },
+  );
+  assert.equal(model.logoProviderId, undefined);
 });

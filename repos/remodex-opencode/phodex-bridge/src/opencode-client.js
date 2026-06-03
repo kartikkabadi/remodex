@@ -14,6 +14,7 @@ const {
 } = require("./opencode-models");
 const { resolveModelCapabilities } = require("./provider-capabilities");
 const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
+const { resolveLogoProviderId } = require("./opencode-provider-inventory");
 
 
 let _createOpencodeClient = null;
@@ -902,6 +903,7 @@ function buildModelFromAny(model, upstreamProviderIdOrProvider) {
   }
   const reference = `${upstreamProviderId}/${modelId}`;
   const capabilities = resolveModelCapabilities(OPENCODE_PROVIDER_ID, model);
+  const logoProviderId = resolveLogoProviderId(upstreamProviderId, upstreamProviderDisplayName);
 
   return {
     id: reference,
@@ -921,6 +923,7 @@ function buildModelFromAny(model, upstreamProviderIdOrProvider) {
       model.variants && typeof model.variants === "object" && !Array.isArray(model.variants)
         ? model.variants
         : null,
+    ...(logoProviderId ? { logoProviderId } : {}),
   };
 }
 
