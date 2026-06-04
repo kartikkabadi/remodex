@@ -380,7 +380,7 @@ final class TurnViewModel {
 
     let maxComposerImages = 4
     let maxFileAutocompleteItems = 6
-    let maxSkillAutocompleteItems = 6
+    let maxSkillAutocompleteItems = 12
     let maxPluginAutocompleteItems = 6
     private let fileAutocompleteDebounceNanoseconds: UInt64 = 180_000_000
     private let skillAutocompleteDebounceNanoseconds: UInt64 = 180_000_000

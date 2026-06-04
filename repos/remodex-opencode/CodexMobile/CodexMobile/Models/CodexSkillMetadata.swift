@@ -11,6 +11,7 @@ struct CodexSkillMetadata: Decodable, Hashable, Sendable, Identifiable {
     let description: String?
     let path: String?
     let scope: String?
+    let provider: String?
     let enabled: Bool
 
     var id: String {
@@ -26,6 +27,7 @@ struct CodexSkillMetadata: Decodable, Hashable, Sendable, Identifiable {
         case description
         case path
         case scope
+        case provider
         case enabled
     }
 
@@ -34,12 +36,14 @@ struct CodexSkillMetadata: Decodable, Hashable, Sendable, Identifiable {
         description: String?,
         path: String?,
         scope: String?,
+        provider: String? = nil,
         enabled: Bool
     ) {
         self.name = name
         self.description = description
         self.path = path
         self.scope = scope
+        self.provider = provider
         self.enabled = enabled
     }
 
@@ -50,6 +54,7 @@ struct CodexSkillMetadata: Decodable, Hashable, Sendable, Identifiable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         path = try container.decodeIfPresent(String.self, forKey: .path)
         scope = try container.decodeIfPresent(String.self, forKey: .scope)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     }
 }

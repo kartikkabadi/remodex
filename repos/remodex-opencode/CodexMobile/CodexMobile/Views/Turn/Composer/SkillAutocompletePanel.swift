@@ -1,8 +1,8 @@
 // FILE: SkillAutocompletePanel.swift
-// Purpose: Autocomplete dropdown for $-skill mentions.
+// Purpose: Autocomplete dropdown for $-skill mentions (V2: sectioned by scope, provider badges, 60pt rows, count header, See all).
 // Layer: View Component
 // Exports: SkillAutocompletePanel
-// Depends on: SwiftUI, AutocompleteRowButtonStyle, SkillDisplayNameFormatter
+// Depends on: SwiftUI, AutocompleteRowButtonStyle, SkillDisplayNameFormatter, RuntimeProviderLogoView
 
 import SwiftUI
 
@@ -11,12 +11,32 @@ struct SkillAutocompletePanel: View {
     let isLoading: Bool
     let query: String
     let onSelect: (CodexSkillMetadata) -> Void
+    var onSeeAll: (() -> Void)? = nil
 
-    private static let rowHeight: CGFloat = 50
-    private static let maxVisibleRows = 6
+    private static let rowHeight: CGFloat = 60
+    private static let maxVisibleRows = 12
+    private static let sectionHeaderHeight: CGFloat = 24
 
     private static func visibleListHeight(for count: Int) -> CGFloat {
         rowHeight * CGFloat(min(count, maxVisibleRows))
+    }
+
+    private var groupedByScope: [(scopeKey: String, skills: [CodexSkillMetadata])] {
+        let grouped = Dictionary(grouping: items) { $0.scope ?? "global" }
+        let preferredOrder = ["project", "global"]
+        var result: [(String, [CodexSkillMetadata])] = []
+        for key in preferredOrder {
+            if let sks = grouped[key], !sks.isEmpty {
+                result.append((key, sks.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }))
+            }
+        }
+        let remainingKeys = grouped.keys.filter { !preferredOrder.contains($0) }.sorted()
+        for key in remainingKeys {
+            if let sks = grouped[key], !sks.isEmpty {
+                result.append((key, sks.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }))
+            }
+        }
+        return result
     }
 
     var body: some View {
@@ -38,49 +58,91 @@ struct SkillAutocompletePanel: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
             } else {
+                // Search header with count (per RP-SKILL-2)
+                if !items.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Skills")
+                            .font(AppFont.subheadline(weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("(\(items.count))")
+                            .font(AppFont.subheadline(weight: .regular))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
+
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(items) { skill in
-                            Button {
-                                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                                onSelect(skill)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack(spacing: 8) {
-                                        Text(SkillDisplayNameFormatter.displayName(for: skill.name))
-                                            .font(AppFont.subheadline(weight: .semibold))
-                                            .foregroundStyle(Color.indigo)
-                                            .lineLimit(1)
+                        ForEach(groupedByScope, id: \.scopeKey) { group in
+                            sectionHeader(scopeTitle(for: group.scopeKey))
+                            ForEach(group.skills) { skill in
+                                Button {
+                                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                                    onSelect(skill)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 8) {
+                                            RuntimeProviderLogoView(provider: skill.provider ?? "codex", size: 14)
 
-                                        Spacer(minLength: 8)
+                                            Text(SkillDisplayNameFormatter.displayName(for: skill.name))
+                                                .font(AppFont.subheadline(weight: .semibold))
+                                                .foregroundStyle(Color.indigo)
+                                                .lineLimit(1)
 
-                                        Text(skill.name)
-                                            .font(AppFont.footnote())
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
+                                            Spacer(minLength: 8)
+
+                                            Text(skill.name)
+                                                .font(AppFont.footnote())
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+
+                                        if let description = Self.descriptionLabel(from: skill.description) {
+                                            Text(description)
+                                                .font(AppFont.caption2())
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
                                     }
-
-                                    if let description = Self.descriptionLabel(from: skill.description) {
-                                        Text(description)
-                                            .font(AppFont.caption2())
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.tail)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(height: Self.rowHeight)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(height: Self.rowHeight)
-                                .contentShape(Rectangle())
+                                .buttonStyle(AutocompleteRowButtonStyle())
                             }
-                            .buttonStyle(AutocompleteRowButtonStyle())
                         }
                     }
                 }
                 .scrollIndicators(.visible)
                 .frame(height: Self.visibleListHeight(for: items.count))
+
+                // "See all" button (per RP-SKILL-2)
+                if !items.isEmpty {
+                    Button {
+                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                        onSeeAll?()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("See all")
+                                .font(AppFont.subheadline(weight: .semibold))
+                                .foregroundStyle(Color.indigo)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(AppFont.caption())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 32, alignment: .center)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(AutocompleteRowButtonStyle())
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -92,6 +154,22 @@ struct SkillAutocompletePanel: View {
 
     // MARK: - Private
 
+    private func scopeTitle(for key: String) -> String {
+        switch key {
+        case "project": return "Project"
+        case "global": return "Global"
+        default: return key.capitalized
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(AppFont.caption(weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: Self.sectionHeaderHeight, alignment: .bottomLeading)
+    }
+
     static func descriptionLabel(from rawDescription: String?) -> String? {
         guard let rawDescription else { return nil }
         let normalized = rawDescription
@@ -101,3 +179,64 @@ struct SkillAutocompletePanel: View {
         return normalized.isEmpty ? nil : normalized
     }
 }
+
+#if DEBUG
+#Preview("V2 sections + badges + count + See all (project/global, mixed providers)") {
+    VStack(spacing: 16) {
+        SkillAutocompletePanel(
+            items: [
+                CodexSkillMetadata(
+                    name: "review",
+                    description: "Review recent diffs and suggest improvements",
+                    path: "/repo/.agents/skills/review/SKILL.md",
+                    scope: "project",
+                    provider: "opencode",
+                    enabled: true
+                ),
+                CodexSkillMetadata(
+                    name: "check-code",
+                    description: "Static analysis for security and style",
+                    path: "/repo/.agents/skills/check-code/SKILL.md",
+                    scope: "project",
+                    provider: "codex",
+                    enabled: true
+                ),
+                CodexSkillMetadata(
+                    name: "lint-global",
+                    description: nil,
+                    path: "/Users/me/.codex/skills/lint/SKILL.md",
+                    scope: "global",
+                    provider: "opencode",
+                    enabled: true
+                ),
+            ],
+            isLoading: false,
+            query: "",
+            onSelect: { _ in }
+        )
+        .frame(width: 320)
+
+        SkillAutocompletePanel(
+            items: [],
+            isLoading: false,
+            query: "foo",
+            onSelect: { _ in }
+        )
+        .frame(width: 320)
+    }
+    .padding()
+    .previewLayout(.sizeThatFits)
+}
+
+#Preview("V2 loading state") {
+    SkillAutocompletePanel(
+        items: [],
+        isLoading: true,
+        query: "re",
+        onSelect: { _ in }
+    )
+    .frame(width: 320)
+    .padding()
+    .previewLayout(.sizeThatFits)
+}
+#endif

@@ -2,7 +2,7 @@
 // Purpose: Renders the turn composer input, queued-draft actions, attachments, and send/stop controls.
 // Layer: View Component (orchestrator)
 // Exports: TurnComposerView, TurnComposerInputChangeHandler
-// Depends on: SwiftUI, AdaptiveGlassModifier, ComposerAttachmentsPreview, FileAutocompletePanel, SkillAutocompletePanel, SlashCommandAutocompletePanel, ComposerBottomBar, QueuedDraftsPanel, TurnMentionChips, TurnComposerInputTextView, TurnComposerSecondaryBar
+// Depends on: SwiftUI, AdaptiveGlassModifier, ComposerAttachmentsPreview, FileAutocompletePanel, SkillAutocompletePanel (V2: sectioned+badges+60pt+See all per RP-SKILL-2), SlashCommandAutocompletePanel, ComposerBottomBar, QueuedDraftsPanel, TurnMentionChips, TurnComposerInputTextView, TurnComposerSecondaryBar
 
 import SwiftUI
 import UIKit
@@ -349,7 +349,8 @@ private struct TurnComposerAutocompletePanels: View {
                         items: state.skillAutocompleteItems,
                         isLoading: state.isSkillAutocompleteLoading,
                         query: state.skillAutocompleteQuery,
-                        onSelect: onSelectSkillAutocomplete
+                        onSelect: onSelectSkillAutocomplete,
+                        onSeeAll: {} // wired for V2 "See all" (full list expansion or future skill browser; no-op default ok upstream)
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 0) {

@@ -507,6 +507,7 @@ function mapOpenCodeSkill(skill, directory) {
     path,
     scope,
     enabled: skill?.enabled !== false,
+    provider: "opencode",
   };
 }
 
