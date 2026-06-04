@@ -888,6 +888,7 @@ final class CodexService {
         migrateLegacyMacScopedDefaultsIfNeeded()
         loadCurrentMacScopedDefaultsState()
         loadCurrentMacScopedLocalState()
+        loadPersistedSlashCommandCache()
         self.remoteNotificationDeviceToken = SecureStore.readString(for: CodexSecureKeys.pushDeviceToken)
         if let relayMacDeviceId,
            let trustedMac = trustedMacRegistry.records[relayMacDeviceId] {

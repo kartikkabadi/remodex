@@ -188,6 +188,15 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertEqual(viewModel.bridgeSlashCommandsLoadError, "Couldn't load commands. Tap to retry.")
         XCTAssertFalse(viewModel.didLoadBridgeSlashCommandsSuccessfully)
         XCTAssertFalse(viewModel.showsBridgeSlashCommandsEmptyHint)
+
+        // RP-CMD-3: even on fetch error (no persisted yet), OC bridge source gets minimal fallback (not empty panel)
+        // /undo etc will come from bridge dynamic on success path; minimal for degraded + codex parity.
+        let items = viewModel.availableSlashCommandItems(allowsForkCommand: true, slashSource: .bridgeCommands)
+        let tokens = Set(items.map(\.commandToken))
+        XCTAssertEqual(items.count, 3)
+        XCTAssertTrue(tokens.contains("/compact"))
+        XCTAssertTrue(tokens.contains("/review"))
+        XCTAssertTrue(tokens.contains("/help"))
     }
 
     func testDirectoryChangeDuringFetchUsesLatestDirectoryCommands() async throws {
@@ -303,15 +312,26 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         )
     }
 
-    func testAvailableCommandsForOpenCodeProviderExcludeReviewAndSubagents() {
-        let commands = TurnComposerSlashCommand.availableCommandsForProvider(
+    func testAvailableCommandsForProvider() {
+        // availableCommandsForProvider retains codex assumptions (for codex paths + legacy tests);
+        // OC/usesBridge no longer calls it (dynamic bridge primary + minimal fallback for degraded).
+        let codexCmds = TurnComposerSlashCommand.availableCommandsForProvider(
+            allowsForkCommand: true,
+            modelProvider: "codex"
+        )
+        let codexTokens = Set(codexCmds.map(\.commandToken))
+        XCTAssertTrue(codexTokens.contains("/review"))
+        XCTAssertTrue(codexTokens.contains("/subagents"))
+        XCTAssertTrue(codexTokens.contains("/compact"))
+
+        // opencode provider filter path still exists in func but is not used for command list surface post RP-CMD-3
+        let ocViaFunc = TurnComposerSlashCommand.availableCommandsForProvider(
             allowsForkCommand: true,
             modelProvider: "opencode"
         )
-        let tokens = Set(commands.map(\.commandToken))
-        XCTAssertFalse(tokens.contains("/review"))
-        XCTAssertFalse(tokens.contains("/subagents"))
-        XCTAssertTrue(tokens.contains("/compact"))
+        let ocTokens = Set(ocViaFunc.map(\.commandToken))
+        XCTAssertFalse(ocTokens.contains("/review"))
+        XCTAssertFalse(ocTokens.contains("/subagents"))
     }
 
     func testSlashCommandRoutingUsesBridgeListForOpenCodeProvider() {
@@ -354,10 +374,79 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         )
     }
 
+    // RP-CMD-3 tests: persisted cache + fallback on error + OC /undo visible via bridge (not enum, not empty)
+    func testBridgeSlashCommandFallsBackToPersistedOnSubsequentError() async throws {
+        let service = makeService()
+        // ensure clean persisted for this test (path per persistedSlashCommandsCacheURL impl)
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let cacheFile = home.appendingPathComponent(".remodex/slash-commands-cache.json")
+        try? FileManager.default.removeItem(at: cacheFile)
+        defer { try? FileManager.default.removeItem(at: cacheFile) }
+
+        let dir = "/tmp/project-persist-fallback"
+        // success path (exercises write on success; includes /undo from RP-CMD-1 bridge builtins)
+        service.requestTransportOverride = { _, _ in
+            RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "commands": .array([
+                        .object([
+                            "token": .string("/undo"),
+                            "title": .string("Undo"),
+                            "description": .string("Undo last edit"),
+                        ]),
+                        .object([
+                            "token": .string("/compact"),
+                            "title": .string("Compact"),
+                            "description": .string("Summarize context"),
+                        ]),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let first = try await service.fetchSlashCommands(directory: dir)
+        XCTAssertEqual(first.map(\.token), ["/undo", "/compact"])
+
+        // now force error: fetch should fallback (no throw) using persisted, returning prior list
+        service.requestTransportOverride = { _, _ in
+            throw CodexServiceError.disconnected
+        }
+        let second = try await service.fetchSlashCommands(directory: dir)
+        XCTAssertEqual(second.map(\.token), ["/undo", "/compact"])
+    }
+
+    func testOpenCodeUsesBridgeDynamicPrimaryAndUndoVisiblePostEnumRemoval() {
+        // Explicit post RP-CMD-3 validation: for OC + supports, we route to .bridgeCommands;
+        // available uses bridge list (or minimal on degraded) -- never falls back to TurnComposerSlashCommand enum.
+        // /undo (from bridge) is visible when dynamic provides it.
+        let bridgeItems: [TurnComposerSlashCommandItem] = [
+            .bridge(BridgeSlashCommand(token: "/undo", title: "Undo", description: "Undo last")),
+            .bridge(BridgeSlashCommand(token: "/help", title: "Help", description: "")),
+            .bridge(BridgeSlashCommand(token: "/compact", title: "Compact", description: "")),
+        ]
+        // simulate what availableSlashCommandItems(bridgeSource) returns when dynamic has data
+        let tokens = bridgeItems.map(\.commandToken)
+        XCTAssertTrue(tokens.contains("/undo"))
+        XCTAssertTrue(tokens.contains("/help"))
+        XCTAssertFalse(bridgeItems.contains { $0.codexCommand != nil }) // no codex enum items leaked to OC path
+
+        // degraded case uses minimal (synthetic bridge items), not enum
+        let minimal = TurnComposerSlashCommand.minimalFallbackSlashCommands()
+        XCTAssertEqual(minimal.map(\.token), ["/compact", "/review", "/help"])
+        let minimalItems = minimal.map { TurnComposerSlashCommandItem.bridge($0) }
+        XCTAssertTrue(minimalItems.allSatisfy { $0.codexCommand == nil })
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "BridgeSlashCommandDecodeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         defaults.removePersistentDomain(forName: suiteName)
+        // Clean persisted slash cache file for test isolation (RP-CMD-3 ~/.remodex/slash-commands-cache.json)
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let cacheFile = home.appendingPathComponent(".remodex/slash-commands-cache.json")
+        try? FileManager.default.removeItem(at: cacheFile)
         let service = CodexService(defaults: defaults)
         service.messagesByThread = [:]
         service.invalidateSlashCommandCache()

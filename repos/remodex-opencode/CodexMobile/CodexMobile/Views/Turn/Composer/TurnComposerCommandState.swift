@@ -247,7 +247,28 @@ enum TurnComposerSlashCommand: String, Identifiable, Codable, Equatable, Sendabl
         )
     }
 
-    static let openCodeExcludedTokens: Set<String> = ["/review", "/subagents"]
+    // openCodeExcludedTokens removed (RP-CMD-3): no longer filters bridge data for OC (dynamic primary).
+    // Codex enum assumptions updated; availableCommandsForProvider and allCommands kept for codex paths only.
+
+    // Strengthened minimal hardcoded cross-provider tokens (per Issue 3 + PR desc) for degraded/bridge-down
+    // + codex parity when dynamic bridge unavailable for OC/usesBridge. Dynamic bridge list is primary.
+    // These become .bridge(...) items (synthetic) so that selection for OC always goes to insert-token path.
+    static let minimalFallbackSlashCommandTokens: [String] = ["/compact", "/review", "/help"]
+
+    static func minimalFallbackSlashCommands() -> [BridgeSlashCommand] {
+        minimalFallbackSlashCommandTokens.map { token in
+            switch token {
+            case "/compact":
+                return BridgeSlashCommand(token: "/compact", title: "Compact", description: "Summarize older context to keep this thread lean")
+            case "/review":
+                return BridgeSlashCommand(token: "/review", title: "Code Review", description: "Run the reviewer on your local changes")
+            case "/help":
+                return BridgeSlashCommand(token: "/help", title: "Help", description: "Show available commands and usage")
+            default:
+                return BridgeSlashCommand(token: token, title: token, description: "")
+            }
+        }
+    }
 }
 
 enum TurnComposerForkDestination: String, Identifiable, Equatable {

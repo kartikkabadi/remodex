@@ -1137,9 +1137,13 @@ final class TurnViewModel {
             return TurnComposerSlashCommand.availableCommands(allowsForkCommand: allowsForkCommand)
                 .map { .codex($0) }
         case .bridgeCommands:
-            return bridgeSlashCommands
-                .filter { !TurnComposerSlashCommand.openCodeExcludedTokens.contains($0.token.lowercased()) }
-                .map { .bridge($0) }
+            if bridgeSlashCommands.isEmpty && !didLoadBridgeSlashCommandsSuccessfully {
+                // Degraded/bridge-down (no successful dynamic yet or error): use minimal cross-provider fallback.
+                // This + persisted fetch fallback ensures OC with supportsSlashCommands sees commands (e.g. /undo from prior bridge success, or minimal).
+                // Dynamic from bridge is primary; enum is never used for OC/usesBridge after RP-CMD-3.
+                return TurnComposerSlashCommand.minimalFallbackSlashCommands().map { .bridge($0) }
+            }
+            return bridgeSlashCommands.map { .bridge($0) }
         }
     }
 
