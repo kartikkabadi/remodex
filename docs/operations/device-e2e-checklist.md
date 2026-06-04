@@ -1,5 +1,7 @@
 # Device E2E checklist (Remodex + OpenCode)
 
+<!-- PR1 docs reconcile note (2026-06-04): 16 caps, 603 tests, bridge-rpc error "mismatch", taste cascade sync etc. Run `npm test` (DISABLE=1 default) + re-run opencode-regression.test.js for any router-adjacent PRs. (See strategy.md caveat on env-specific test count variance for non-bridge tests.) (Note: full count 603; a subset of workspace/readImage tests may report failures on some macOS configurations due to sips/CleanShot media handling — these are unrelated to bridge logic or OpenCode/Codex regression paths. Re-run once and confirm opencode-*.test.js + router paths green.) -->
+
 Use this after bridge and iOS changes land. Run Mac steps in **Terminal.app** (not a Cursor/agent shell) so relay `:9000` is not killed by shell `EXIT` traps.
 
 ## Prerequisites
@@ -38,7 +40,7 @@ Use this after bridge and iOS changes land. Run Mac steps in **Terminal.app** (n
 | 8d | Rehydration | Stop/start bridge; resume same OpenCode thread; send another turn |
 | 8e | Codex-only | `REMODEX_DISABLE_OPENCODE=1` — no OpenCode in catalog; Codex composer unchanged |
 
-Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md). **Signed off on `main`** — see [device-e2e-signoff.md](device-e2e-signoff.md). After re-validation on hardware, update [release-compatibility.md](release-compatibility.md) if parity rows change.
+Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md). After **8a–8e** pass on physical iPhone + Mac, promote parity rows in [release-compatibility.md](release-compatibility.md) and flip `supportsDesktopHandoff` in `provider-capabilities.js` (PR8).
 
 ## Regression
 

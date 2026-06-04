@@ -63,7 +63,7 @@ All fields optional. Omit for first page.
         "supportsFastMode": false,
         "supportsPlanMode": false,
         "supportsVoice": false,
-        "supportsDesktopHandoff": true,
+        "supportsDesktopHandoff": false,
         "supportsWorktree": false,
         "supportsFork": true,
         "supportsApprovals": true,
@@ -318,7 +318,7 @@ All fields optional. Omit for first page.
         "supportsFastMode": false,
         "supportsPlanMode": false,
         "supportsVoice": false,
-        "supportsDesktopHandoff": true,
+        "supportsDesktopHandoff": false,
         "supportsWorktree": false,
         "supportsFork": true,
         "supportsApprovals": true,
@@ -394,7 +394,7 @@ Optional project directory for slash-command discovery. `directory` is preferred
 
 **Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
 
-**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are *unioned* (complete enum, no name dedup across providers even on collision; distinct by origin/scope preserved). Inner per-source dedupe (prefer-enabled) is retained. This fixes the P0 subset bug (RP-SKILL-1). Per-cwd skills lists are (codex: deduped+name-sorted) concatenated with (opencode: deduped+name-sorted); global alpha sort across providers no longer guaranteed (source-grouped order; iOS filter/prefix and future SKILL-2 sections tolerate/use this). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
 
 **OpenCode-only notes:** When `REMODEX_ENABLE_OPENCODE` is set and the OpenCode provider is registered, `listOpenCodeSkillsBuckets` calls `opencodeProvider.listSkills(cwd)` per requested cwd (defaulting to `process.cwd()` when none are supplied). SDK failures return empty buckets with a bridge warning; Codex buckets are still returned.
 
@@ -496,6 +496,21 @@ Every error across all methods uses this shape:
 }
 ```
 
+### Example: `thread_provider_mismatch` (ownership enforcement)
+From `resolveThreadOwnershipMismatch` (router:190) + `createJsonRpcErrorResponse` (router:663 / bridge:970 dupe; see taste/bridge.md note):
+```json
+// Example: thread_provider_mismatch (from resolveThreadOwnershipMismatch + createJsonRpcErrorResponse)
+{
+  "id": "req-123",
+  "error": {
+    "code": -32000,
+    "message": "This chat is tied to codex. Start a new chat to switch providers.",
+    "data": { "errorCode": "thread_provider_mismatch" }
+  }
+}
+```
+(Note: userMessage surfaces in top-level "message"; data.errorCode for iOS routing. Cross-ref ADR-005, router:452 for construction, respondAsync:228.)
+
 ## Error Codes
 
 | errorCode | Meaning | iOS Action |
@@ -510,7 +525,7 @@ Every error across all methods uses this shape:
 | `opencode_session_expired` | Session lost on server restart | Automatically retry with new session |
 | `thread_not_found` | Thread ID doesn't exist | Show "Thread not found" |
 | `thread_turn_active` | Turn already running on this thread | Show "A turn is already running" |
-| `thread_provider_locked` | Cannot switch runtime mid-thread | Show "This thread uses a different runtime" |
+| `thread_provider_mismatch` | Cannot switch runtime mid-thread (ownership durable; explicit modelProvider or ownsThread check failed) | Show "This thread uses a different runtime" (exact code from router:452 + respondAsync; also surfaced as -32000 in createJsonRpcErrorResponse at router:663/bridge:970) |
 | `runtime_provider_failed` | Generic provider failure | Show error, log details |
 | `unsupported_opencode_method` | RPC method not implemented for OpenCode | Show "Feature not available for OpenCode" |
 | `ios_app_update_required` | iOS app version too old for bridge | Show App Store update prompt |

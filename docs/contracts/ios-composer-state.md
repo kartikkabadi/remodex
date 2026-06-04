@@ -258,3 +258,10 @@ The composer state is per-thread. Switching threads in the sidebar changes:
 **OpenCode result UX:** iOS surfaces `instructions` (fallback: `handoffMode` copy) in a success alert after handoff. Errors map bridge `errorCode` values (`opencode_handoff_disabled`, `wrong_provider`, `opencode_session_expired`, etc.) via `DesktopHandoffError`.
 
 **Composer:** `TurnComposerHostView` passes `showsComposerDesktopHandoff` only for OpenCode threads with `supportsDesktopHandoff`. Codex threads keep handoff in the thread toolbar menu only.
+
+## Cross-check note (PR1, 2026-06-04)
+- File location re-verified post-edit (2026-06-04, re-ls/wc this session): `docs/contracts/ios-composer-state.md` (meta-root only, 15073 bytes per `ls -l + wc -c`; NOT inside `repos/remodex-opencode/` per AGENTS layout + find). Byte count treated as ephemeral (grew due to note addition).
+- ls/read_file/grep performed on source: matches contract slash section (BridgeSlashCommand decode, 60s per-dir cache in CodexService+SlashCommands.swift:16/19+, generation guard in TurnViewModel:2743+ to drop stale, usesBridge vs enum in TurnComposerCommandState:243/250 with openCodeExcludedTokens).
+- No major slash staleness vs CLASS-C (ownership/mirror guards in bridge router affect routing but contract's thread affinity + provider-driven source table still accurate; Codex enum fallback remains for codex threads).
+- Skills detail is sparse here (see runtime/catalog + router mergeSkills* + mapOpenCodeSkill in client; structured flag in caps).
+- Update this contract on future slash/skill/CLASS-C changes; existence was misremembered as "missing" in some prior analysis.
