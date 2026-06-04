@@ -1,7 +1,7 @@
 // FILE: OpenCodeRuntimeDetails.swift
 // Purpose: Nested OpenCode status from runtime/catalog and bridge-status.json opencode blocks.
 // Layer: Model
-// Exports: OpenCodeRuntimeDetails, OpenCodeConnectedProviderSummary, OpenCodeModelListMeta
+// Exports: OpenCodeRuntimeDetails, OpenCodeConnectedProviderSummary, OpenCodeModelListMeta, OpenCodeProviderLogoCatalogEntry
 // Depends on: Foundation
 
 import Foundation
@@ -46,4 +46,14 @@ struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let providerDiscoveryReasonCode: String?
     let authDiscoveryReasonCode: String?
     let providerInventoryPartial: Bool?
+    let providers: [OpenCodeProviderLogoCatalogEntry]?
+}
+
+// Catalog entry for logo resolution (from runtime/catalog opencode.providers per RP-BRAND-1/2).
+// Matches on id (or caller-supplied logoProviderId key) to logoAssetId; enables catalog-driven
+// without hardcoding beyond the 4 core assets.
+struct OpenCodeProviderLogoCatalogEntry: Codable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let logoAssetId: String?
 }

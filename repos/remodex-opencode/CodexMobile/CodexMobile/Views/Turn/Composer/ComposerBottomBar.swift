@@ -2,7 +2,7 @@
 // Purpose: Bottom bar with attachment/runtime/access menus, queue controls, and send button.
 // Layer: View Component
 // Exports: ComposerBottomBar
-// Depends on: SwiftUI, TurnComposerMetaMapper, UIKitMenuButton, TurnComposerRuntimeUIKitMenuBuilder
+// Depends on: SwiftUI, TurnComposerMetaMapper, UIKitMenuButton, TurnComposerRuntimeUIKitMenuBuilder, TurnComposerRuntimeState
 
 import SwiftUI
 
@@ -427,7 +427,8 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     isLoadingOpenCodeProvider: isLoadingOpenCodeProvider,
                     isRuntimeSelectionLoading: isRuntimeSelectionLoading,
                     modelsErrorMessage: modelsErrorMessage,
-                    openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode
+                    openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode,
+                    openCodeLogoProviders: runtimeState.openCodeLogoProviders
                 )
             )
         }

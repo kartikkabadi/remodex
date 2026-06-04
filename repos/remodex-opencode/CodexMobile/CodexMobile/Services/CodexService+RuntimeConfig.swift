@@ -159,6 +159,10 @@ extension CodexService {
         openCodeRuntimeCatalogEntry?.opencode
     }
 
+    var openCodeLogoProviders: [OpenCodeProviderLogoCatalogEntry] {
+        openCodeRuntimeCatalogEntry?.opencode?.providers ?? []
+    }
+
     func isOpenCodeModelListRetryTerminal() -> Bool {
         guard shouldAttemptOpenCodeModelLoad else {
             return true

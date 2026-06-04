@@ -2,7 +2,7 @@
 // Purpose: Compact runtime provider glyph for sidebar thread rows.
 // Layer: View Component
 // Exports: SidebarProviderBadge
-// Depends on: SwiftUI, RuntimeProviderLogo, TurnComposerMetaMapper, CodexModelOption
+// Depends on: SwiftUI, RuntimeProviderLogo, TurnComposerMetaMapper, CodexModelOption, CodexService
 
 import SwiftUI
 
@@ -27,5 +27,6 @@ struct SidebarProviderBadge: View {
         OpenCodeBetaCapsule()
     }
     .padding()
+    .environment(CodexService())
 }
 #endif

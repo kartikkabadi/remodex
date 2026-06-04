@@ -2,7 +2,7 @@
 // Purpose: Bundles the composer runtime selection state shared by the bottom bar and input context menu.
 // Layer: View Helper
 // Exports: TurnComposerRuntimeState, AgentOption
-// Depends on: CodexService, TurnComposerMetaMapper, CodexServiceTier
+// Depends on: CodexService, TurnComposerMetaMapper, CodexServiceTier, OpenCodeProviderLogoCatalogEntry
 
 import Foundation
 
@@ -30,6 +30,7 @@ struct TurnComposerRuntimeState: Equatable {
     let runtimeUnavailableReasonCode: String?
     let disabledProviderIDs: Set<String>
     let catalogProviderIDs: [String]
+    let openCodeLogoProviders: [OpenCodeProviderLogoCatalogEntry]
     let unavailableReasonByProviderID: [String: String]
     let reasonCodeByProviderID: [String: String]
     let showsBetaLabel: Bool
@@ -73,6 +74,7 @@ struct TurnComposerRuntimeState: Equatable {
                 .map { CodexModelOption.normalizedProvider($0.id) }
         )
         let catalogProviderIDs = codex.menuCatalogProviderIDs
+        let openCodeLogoProviders = codex.openCodeLogoProviders
         let unavailableReasonByProviderID: [String: String] = codex.availableRuntimes
             .filter { !$0.enabled }
             .reduce(into: [:]) { dict, runtime in
@@ -103,6 +105,7 @@ struct TurnComposerRuntimeState: Equatable {
             runtimeUnavailableReasonCode: runtimeUnavailableReasonCode,
             disabledProviderIDs: disabledProviderIDs,
             catalogProviderIDs: catalogProviderIDs,
+            openCodeLogoProviders: openCodeLogoProviders,
             unavailableReasonByProviderID: unavailableReasonByProviderID,
             reasonCodeByProviderID: reasonCodeByProviderID,
             showsBetaLabel: codex.showsBetaLabel(forProvider: currentProviderId),
