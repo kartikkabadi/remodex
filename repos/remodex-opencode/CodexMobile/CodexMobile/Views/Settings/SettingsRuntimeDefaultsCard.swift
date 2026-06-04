@@ -83,6 +83,21 @@ struct SettingsRuntimeDefaultsCard: View {
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
+            // RP-MSG-2: per-provider toggle, drives reducer showThinking filter + render of collapsible grey ThinkingSystemBlock. Default OC OFF per design.
+            Toggle("Show thinking", isOn: $showThinkingCodex)
+                .tint(settingsAccentColor)
+                .onChange(of: showThinkingCodex) { newValue in codex.bumpThinkingVisibility() }
+            Text("Show collapsible reasoning/thinking sections for Codex (default on for parity).")
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
+            if showsOpenCodeThinkingToggle {
+                Toggle("Show thinking", isOn: $showThinkingOpenCode)
+                    .tint(settingsAccentColor)
+                    .onChange(of: showThinkingOpenCode) { newValue in codex.bumpThinkingVisibility() }
+                Text("Show collapsible reasoning/thinking sections for OpenCode (default off).")
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
             if let opencodeRuntime = codex.availableRuntimes.first(where: {
                 CodexModelOption.normalizedProvider($0.id) == "opencode"
             }) {

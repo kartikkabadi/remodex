@@ -223,6 +223,9 @@ enum TurnTimelineReducer {
             return true
         case .chat, .plan, .userInputPrompt, .fileChange, .subagentAction:
             return false
+        default:
+            // .thinking handled by isThinkingMessage guard above (for exhaustiveness; per Swift 6/iOS 18.6 strict enum switch requirement after PR refactor to helper).
+            return false
         }
     }
 
@@ -249,6 +252,9 @@ enum TurnTimelineReducer {
             case .fileChange:
                 // Keep edited-file cards at the end of the turn timeline.
                 return 5
+            default:
+                // .thinking handled by isThinkingMessage guard above (for exhaustiveness after PR isThinkingMessage refactor + case pruning; Swift requires covering all CodexMessageKind cases).
+                return 4
             }
         case .assistant:
             return 4
