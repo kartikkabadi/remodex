@@ -1063,12 +1063,14 @@ function normalizeSkillsBuckets(result) {
   return [];
 }
 
-function mergeSkillsBuckets(primaryBuckets, secondaryBuckets) {
+function mergeSkillsBuckets(codexBuckets, opencodeBuckets) {
   const byCwd = new Map();
-  for (const bucket of [...primaryBuckets, ...secondaryBuckets]) {
+  for (const bucket of [...codexBuckets, ...opencodeBuckets]) {
     const cwd = readString(bucket?.cwd) || "";
     const existing = byCwd.get(cwd) || { cwd, skills: [] };
-    existing.skills = dedupeSkillsByName([...(existing.skills || []), ...(bucket.skills || [])]);
+    // union across providers (no cross-provider name dedup); keep inner dedupe per source (prefers enabled)
+    const incoming = dedupeSkillsByName(bucket.skills || []);
+    existing.skills = [...(existing.skills || []), ...incoming];
     byCwd.set(cwd, existing);
   }
   return [...byCwd.values()];

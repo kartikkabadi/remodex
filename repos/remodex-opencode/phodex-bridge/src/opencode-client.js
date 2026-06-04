@@ -367,7 +367,7 @@ async function createOpenCodeClient({
       const skills = resolveSkillsList(response);
       return skills.map((skill) => mapOpenCodeSkill(skill, directory));
     } catch (error) {
-      console.warn(`${logPrefix} OpenCode app.skills() failed: ${error.message}`);
+      console.warn(`${logPrefix} OpenCode app.skills() failed: ${error?.message || error}`);
       return [];
     }
   }

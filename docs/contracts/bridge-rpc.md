@@ -394,7 +394,7 @@ Optional project directory for slash-command discovery. `directory` is preferred
 
 **Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
 
-**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are *unioned* (complete enum, no name dedup across providers even on collision; distinct by origin/scope preserved). Inner per-source dedupe (prefer-enabled) is retained. This fixes the P0 subset bug (RP-SKILL-1). Per-cwd skills lists are (codex: deduped+name-sorted) concatenated with (opencode: deduped+name-sorted); global alpha sort across providers no longer guaranteed (source-grouped order; iOS filter/prefix and future SKILL-2 sections tolerate/use this). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
 
 **OpenCode-only notes:** When `REMODEX_ENABLE_OPENCODE` is set and the OpenCode provider is registered, `listOpenCodeSkillsBuckets` calls `opencodeProvider.listSkills(cwd)` per requested cwd (defaulting to `process.cwd()` when none are supplied). SDK failures return empty buckets with a bridge warning; Codex buckets are still returned.
 

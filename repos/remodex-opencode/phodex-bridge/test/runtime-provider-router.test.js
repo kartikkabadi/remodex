@@ -642,6 +642,7 @@ test("skills/list merges Codex and OpenCode skill buckets", async () => {
               path: "/tmp/repo/.agents/skills/codex-skill/SKILL.md",
               scope: "project",
               enabled: true,
+              provider: "codex",
             },
           ],
         },
@@ -665,6 +666,7 @@ test("skills/list merges Codex and OpenCode skill buckets", async () => {
               path: `${directory}/.agents/skills/opencode-skill/SKILL.md`,
               scope: "project",
               enabled: true,
+              provider: "opencode",
             },
           ];
         },
