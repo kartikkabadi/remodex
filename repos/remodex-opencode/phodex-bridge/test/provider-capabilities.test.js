@@ -103,7 +103,7 @@ test("Codex supports structured skill input on turn/start", () => {
   assert.equal(capabilities.supportsStructuredSkillInput, true);
 });
 
-test("OpenCode does not enable structured skill input until SDK spike", () => {
+test("OpenCode does not enable structured skill input until SDK supports skills[] in prompt (RP-SKILL-3, gated pending upstream)", () => {
   const capabilities = resolveModelCapabilities("opencode", {});
   assert.equal(capabilities.supportsStructuredSkillInput, false);
   assert.equal(capabilities.supportsSkillAutocomplete, true);

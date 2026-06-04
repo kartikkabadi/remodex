@@ -160,7 +160,7 @@ The SDK requires a `parts` array (`TextPartInput`, `FilePartInput`, `AgentPartIn
 
 **Structured skills from iOS (`turn/start` input items):**
 
-**Capability gate:** iOS emits `type: "skill"` input items only when `supportsStructuredSkillInput` is `true` on `runtime/catalog` / `model/list` for that thread's provider. OpenCode catalog sets this flag to `false` until structured skill parts are validated end-to-end; the bridge still maps skill items when present (e.g. future flag flip or Codex passthrough).
+**Capability gate:** iOS emits `type: "skill"` input items only when `supportsStructuredSkillInput` is `true` on `runtime/catalog` / `model/list` for that thread's provider. OpenCode catalog sets this flag to `false` (gated pending upstream SDK support for `skills:[]` in prompt input; see RP-SKILL-3 verification below); the bridge still maps skill items when present (future flag flip or Codex passthrough) and now includes `skills[]` conditionally.
 
 | iOS / Codex input item | Bridge → OpenCode `parts` |
 |------------------------|---------------------------|
@@ -171,6 +171,10 @@ The SDK requires a `parts` array (`TextPartInput`, `FilePartInput`, `AgentPartIn
 | Image attachment items | `{ type: "file", … }` when a path/URL is present, else `[image attached]` text placeholder |
 
 Skill-only turns include a minimal leading `{ type: "text", text: " " }` part so the SDK always receives at least one text part alongside skill file attachments.
+
+**RP-SKILL-3 structured skills payload (PR14):** As of this PR, when iOS sends structured `type: "skill"` items in `turn/start` input (gated by `supportsStructuredSkillInput` cap from catalog), the bridge (in `buildPromptFromTurnInput` + `turnStart` + `client.prompt`) now *conditionally* populates a top-level `skills: [{id, name?, path?}, ...]` array in the `session.prompt()` body passed to SDK (in addition to the mapped `parts`). This is the "skills[] in turn/start payload".
+
+**SDK support verification (must precede any flag flip):** Inspected vendored `repos/opencode/packages/opencode/src/session/prompt.ts` (PromptInput schema: only parts union of Text/File/Agent/Subtask; no skills), `acp-next/service.ts` (list only), installed+vendored SDK v2 `dist/v2/gen/types.gen.d.ts` + `gen/types.gen.ts` (SessionPromptData / V2SessionPromptData body has no `skills`; `Prompt` type = `{text, files?, agents?, references?}`; app.skills is list-only at /skill; no `skill` part discriminator). Runtime test: dynamic import of @opencode-ai/sdk/v2 succeeded, no evidence of skills array acceptance in prompt shape. Thus, per master design + PR plan: **OPENCODE_CAPABILITIES.supportsStructuredSkillInput remains `false`** (iOS will not emit structured skill items for OC threads; falls back to legacy $name text in input); "gated pending upstream". Do not force. When upstream SDK adds `skills` support in prompt (or skill part), re-verify (client.app.skills + structured attempt), flip flag in provider-capabilities.js, update this note + tests, run full gates. Codex regression under DISABLE_OPENCODE=1 unaffected (no OC path).
 
 **Bridge subscribes to events BEFORE calling prompt** to avoid missing early events.
 

@@ -60,6 +60,11 @@ const OPENCODE_CAPABILITIES = {
   supportsSlashCommands: true,
   supportsMCP: false,
   supportsSkillAutocomplete: true,
+  // RP-SKILL-3: kept false pending upstream SDK support for skills:[] (or dedicated skill parts) in
+  // session.prompt / V2 prompt input. See opencode-sdk.md for shapes inspected (PromptInput uses only
+  // parts: Text|File|Agent|Subtask; V2 Prompt uses text+files/agents/references; no skills array).
+  // Bridge now wires conditional skills[] (gated); iOS sends structured items only when flag true.
+  // Do not force-enable; catalog test + DISABLE regression cover. Flip only after SDK + device E2E.
   supportsStructuredSkillInput: false,
   supportsSteer: false,
   supportsQueue: true,

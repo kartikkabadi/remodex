@@ -173,7 +173,7 @@ async function createOpenCodeClient({
     return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant, threadId, turnId }) {
+  async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant, threadId, turnId, skills }) {
     const resolvedParts =
       Array.isArray(parts) && parts.length > 0
         ? parts
@@ -215,6 +215,23 @@ async function createOpenCodeClient({
     const normalizedVariant = readString(variant);
     if (normalizedVariant) {
       promptBody.variant = normalizedVariant;
+    }
+
+    // RP-SKILL-3: conditional skills[] in the turn prompt payload to SDK (only when structured skill items
+    // were present in the iOS turn/start "input" -- which iOS does only if supportsStructuredSkillInput flag true
+    // for the runtime). This is gated; see verification in PR14: no skills:[] support in current SDK PromptInput
+    // (only parts or V2 Prompt's files/agents/references), so flag kept false for OC + doc in opencode-sdk.md.
+    if (Array.isArray(skills) && skills.length > 0) {
+      promptBody.skills = skills
+        .map((s) => {
+          const id = readString(s?.id || s?.name);
+          if (!id) return null;
+          const entry = { id, name: readString(s?.name || s?.id) || id };
+          const p = readString(s?.path);
+          if (p) entry.path = p;
+          return entry;
+        })
+        .filter(Boolean);
     }
 
     console.log(

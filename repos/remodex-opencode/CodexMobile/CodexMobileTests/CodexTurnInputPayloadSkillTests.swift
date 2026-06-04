@@ -1,5 +1,8 @@
 // FILE: CodexTurnInputPayloadSkillTests.swift
 // Purpose: Verifies turn/start input payload generation when structured skill items are enabled/disabled.
+//          Updated for RP-SKILL-3: bridge now conditionally emits skills[] to OC SDK prompt payload
+//          (when iOS includeStructuredSkillItems per cap flag); OC flag remains false (SDK verification:
+//          no skills:[] in Prompt/SessionPromptData; see opencode-sdk.md "gated pending upstream").
 // Layer: Unit Test
 // Exports: CodexTurnInputPayloadSkillTests
 // Depends on: XCTest, CodexMobile

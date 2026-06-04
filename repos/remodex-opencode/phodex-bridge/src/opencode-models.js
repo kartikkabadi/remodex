@@ -222,14 +222,16 @@ function buildPromptFromTurnInput(input) {
       inputText: text,
       prompt: text,
       parts: text ? [{ type: "text", text }] : [],
+      skills: [],
     };
   }
   if (!Array.isArray(input)) {
-    return { inputText: "", prompt: "", parts: [] };
+    return { inputText: "", prompt: "", parts: [], skills: [] };
   }
 
   const textParts = [];
   const parts = [];
+  const skills = [];
 
   for (const item of input) {
     if (typeof item === "string") {
@@ -246,6 +248,13 @@ function buildPromptFromTurnInput(input) {
         if (part.type === "text") {
           appendNonEmpty(textParts, part.text);
         }
+      }
+      const skillId = readSkillName(item);
+      if (skillId) {
+        const skillEntry = { id: skillId, name: readString(item.name || item.id) || skillId };
+        const p = resolvedParam(item, "path");
+        if (p) skillEntry.path = p;
+        skills.push(skillEntry);
       }
       continue;
     }
@@ -282,7 +291,7 @@ function buildPromptFromTurnInput(input) {
   }
 
   const prompt = userText || parts.filter((part) => part.type === "text").map((part) => part.text).join("\n\n").trim();
-  return { inputText: prompt, prompt, parts };
+  return { inputText: prompt, prompt, parts, skills };
 }
 
 function readOpenCodeMessageRole(message) {

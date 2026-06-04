@@ -1501,6 +1501,9 @@ extension CodexService {
 
         var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
+        // When includeStructuredSkillItems, the input[] will contain type:"skill" items; bridge (for OC)
+        // will conditionally include top-level "skills:[]" in the SDK prompt payload (see RP-SKILL-3,
+        // gated on flag + SDK support; currently false for OC, documented "gated pending upstream").
         var imageURLKey = "url"
         var effectiveCollaborationMode = supportsTurnCollaborationMode ? collaborationMode : nil
         var didDowngradePlanModeForRuntime = false
@@ -1796,6 +1799,9 @@ extension CodexService {
 
         var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
+        // When includeStructuredSkillItems, the input[] will contain type:"skill" items; bridge (for OC)
+        // will conditionally include top-level "skills:[]" in the SDK prompt payload (see RP-SKILL-3,
+        // gated on flag + SDK support; currently false for OC, documented "gated pending upstream").
         var imageURLKey = "url"
         var effectiveCollaborationMode = supportsTurnCollaborationMode ? effectiveRequestedCollaborationMode : nil
         var currentExpectedTurnID = initialTurnID

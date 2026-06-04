@@ -876,7 +876,7 @@ test("runtime/catalog clears reasonCode when OpenCode is enabled with agents", a
   assert.equal(opencodeRuntime.capabilities.supportsSteer, false);
   assert.equal(opencodeRuntime.capabilities.supportsQueue, true);
   assert.equal(opencodeRuntime.capabilities.supportsSkillAutocomplete, true);
-  assert.equal(opencodeRuntime.capabilities.supportsStructuredSkillInput, false);
+  assert.equal(opencodeRuntime.capabilities.supportsStructuredSkillInput, false); // RP-SKILL-3: remains false (SDK lacks skills[] in prompt; gated)
 
   if (previousDisable === undefined) {
     delete process.env.REMODEX_DISABLE_OPENCODE;

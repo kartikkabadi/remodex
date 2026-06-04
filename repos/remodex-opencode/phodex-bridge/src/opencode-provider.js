@@ -861,7 +861,7 @@ function createOpenCodeProvider({
     }
 
     const model = normalizeOpenCodeModel(params.model || thread.model);
-    const { inputText, prompt, parts } = buildPromptFromTurnInput(params.input);
+    const { inputText, prompt, parts, skills: structuredSkills = [] } = buildPromptFromTurnInput(params.input);
     if (!prompt && (!Array.isArray(parts) || parts.length === 0)) {
       const error = new Error("OpenCode turn/start requires text input.");
       error.errorCode = "opencode_input_required";
@@ -923,7 +923,7 @@ function createOpenCodeProvider({
 
     emit("turn/started", { threadId: thread.id, turnId, turn: { id: turnId, status: "running" } });
 
-    setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, parts, thread.cwd));
+    setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, parts, thread.cwd, structuredSkills));
     return { turnId, turn: { id: turnId, threadId: thread.id, status: "running" } };
   }
 
@@ -1034,7 +1034,7 @@ function createOpenCodeProvider({
     }
   }
 
-  async function executeTurn(active, model, agent, effort, prompt, parts, cwd) {
+  async function executeTurn(active, model, agent, effort, prompt, parts, cwd, skills = []) {
     const threadId = active.thread.id;
     inFlightThreadIds.add(threadId);
     try {
@@ -1228,6 +1228,7 @@ function createOpenCodeProvider({
           variant,
           threadId: active.thread.id,
           turnId: active.turn.id,
+          skills,
         });
       } finally {
         if (!active.completed) {
