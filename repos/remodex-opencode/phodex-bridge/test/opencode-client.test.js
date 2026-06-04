@@ -320,8 +320,18 @@ test("replyToPermission sends permission reply", async () => {
 test("listCommands API surface is exposed", async () => {
   const client = await createTestClient();
   const commands = await client.listCommands("/tmp/project");
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].token, "/compact");
+  // command/list includes CLI builtins (/undo etc) + agent-derived + count
+  const tokens = commands.map((c) => c.token);
+  assert.ok(commands.length === 16, `expected 15 builtins + 1 agent-derived (/build), got ${commands.length}`);
+  assert.ok(tokens.includes("/undo"), "includes CLI builtin /undo");
+  assert.ok(tokens.includes("/redo"), "includes CLI builtin /redo");
+  assert.ok(tokens.includes("/compact"), "includes CLI builtin /compact");
+  assert.ok(tokens.includes("/build"), "includes agent-derived /build");
+  assert.ok(tokens.includes("/exit"), "includes CLI builtin /exit");
+  // dedup + precede verified explicitly (overlap /compact collapsed to 1; first derived at/after index 15)
+  assert.equal(tokens.filter((t) => t === "/compact").length, 1, "dedup on overlap");
+  const firstDerivedIdx = tokens.findIndex((t) => t === "/build");
+  assert.ok(firstDerivedIdx >= 15, "builtins precede any derived");
 });
 
 test("dispatchEvent maps session.next.text.delta to agent message delta", () => {
