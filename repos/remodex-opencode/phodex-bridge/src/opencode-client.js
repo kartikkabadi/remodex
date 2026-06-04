@@ -16,6 +16,8 @@ const { resolveModelCapabilities } = require("./provider-capabilities");
 const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
 const { resolveLogoProviderId } = require("./opencode-provider-inventory");
 
+// TUI/CLI builtins not auto-returned by current SDK command.list (which focuses on Service/agent/skill-derived per vendored command + acp); keep manually in sync on vendored updates or future sync PR. Union deduped by token before return. Always test under default DISABLE=1 that codex paths unaffected.
+const BUILTINS = ['/undo','/redo','/share','/help','/init','/compact','/login','/logout','/models','/agents','/skills','/mcp','/config','/clear','/exit'];
 
 let _createOpencodeClient = null;
 
@@ -336,20 +338,39 @@ async function createOpenCodeClient({
   }
 
   async function listCommands(directory) {
+    let derived = [];
     try {
       const commands = await withTimeout(
         client.command.list({ query: { directory: readString(directory) || process.cwd() } }),
         REQUEST_TIMEOUT_MS,
       );
-      return (Array.isArray(commands) ? commands : []).map((c) => ({
+      derived = (Array.isArray(commands) ? commands : []).map((c) => ({
         token: readString(c.token || c.name || c),
         title: readString(c.title || c.displayName || c.token || c.name || c),
         description: readString(c.description) || "",
       }));
     } catch (error) {
       console.warn(`${logPrefix} OpenCode command.list() failed: ${error.message}`);
-      return [];
+      derived = [];
     }
+    const seen = new Set();
+    const out = [];
+    for (const token of BUILTINS) {
+      if (!seen.has(token)) {
+        seen.add(token);
+        const base = token.slice(1);
+        const title = token === "/mcp" ? "MCP" : base.replace(/^\w/, (c) => c.toUpperCase());
+        out.push({ token, title, description: "" });
+      }
+    }
+    for (const c of derived) {
+      const token = readString(c.token);
+      if (token && !seen.has(token)) {
+        seen.add(token);
+        out.push(c);
+      }
+    }
+    return out;
   }
 
   async function selectTuiSession(sessionId) {

@@ -330,6 +330,20 @@ test("command/list returns OpenCode slash commands when provider is registered",
   assert.equal(response.result.commands[0].token, "/build");
 });
 
+// opencode-regression.test.js for DISABLE=1 command paths parity
+test("command/list under default DISABLE=1 (via test-env) has no opencode provider (codex command paths unaffected)", async () => {
+  // no providers passed => buildProviders sees REMODEX_DISABLE_OPENCODE=1 default from test-env.js, returns []
+  const { request } = createTestRouter({});
+  const response = await request({
+    id: "cmd-disable-parity",
+    method: "command/list",
+    params: { directory: "/tmp/repo" },
+  });
+
+  assert.equal(response.id, "cmd-disable-parity");
+  assert.deepEqual(response.result.commands, []);
+});
+
 test("skills/list omits OpenCode skills when provider is absent", async () => {
   const { request } = createTestRouter({
     providers: [],

@@ -586,6 +586,7 @@ function createOpenCodeProvider({
     } catch {
       return [];
     }
+    // listCommands composes full set (SDK client.command.list + static BUILTINS union in client); dir passed through.
     return client.listCommands(directory);
   }
 

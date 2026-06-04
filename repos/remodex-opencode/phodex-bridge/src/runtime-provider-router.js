@@ -175,6 +175,7 @@ function createRuntimeProviderRouter({
         const directory = readString(parsed.params?.directory || parsed.params?.cwd);
         const opencodeProvider = runtimeProviders.find((p) => p.id === "opencode");
         if (opencodeProvider && typeof opencodeProvider.listCommands === "function") {
+          // thin wrap (shape {commands: [...] of {token,title,description}}); full builtins+derived union done in provider/client per RP-CMD-1
           return { commands: await opencodeProvider.listCommands(directory) };
         }
         return { commands: [] };

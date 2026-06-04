@@ -53,7 +53,7 @@ function createMockOpencodeClientImpl() {
         reply: async () => ({}),
       },
       command: {
-        list: async () => [{ token: "/compact", title: "Compact" }],
+        list: async () => [{ token: "/build", title: "Build" }, { token: "/compact", title: "Compact" }],
       },
       event: {
         subscribe: async () => ({
