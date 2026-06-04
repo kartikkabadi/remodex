@@ -5,7 +5,7 @@
 // Exports: TurnComposerRuntimeUIKitMenuBuilder
 // Depends on: UIKit, TurnComposerRuntimeState, TurnComposerRuntimeActions,
 //             TurnComposerMetaMapper, CodexModelOption, CodexServiceTier,
-//             HapticFeedback, ComposerCapabilityCopy, OpenCodeProviderLogoCatalogEntry, RuntimeProviderLogo
+//             HapticFeedback, ComposerCapabilityCopy, OpenCodeCatalogProvider (catalog logo resolver)
 
 import UIKit
 
@@ -22,7 +22,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let isRuntimeSelectionLoading: Bool
         let modelsErrorMessage: String?
         let openCodeProviderDiscoveryReasonCode: String?
-        let openCodeLogoProviders: [OpenCodeProviderLogoCatalogEntry]
+        let openCodeCatalogProviders: [OpenCodeCatalogProvider]
     }
 
     static func makeMenu(_ input: Input) -> UIMenu {
@@ -176,7 +176,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                     title: providerTitle,
                     image: RuntimeProviderLogo.menuUIImage(
                         provider: normalizedProvider == "opencode" ? "opencode" : composerMenuLogoProvider(for: models, fallback: provider),
-                        catalogProviders: input.openCodeLogoProviders
+                        catalogProviders: input.openCodeCatalogProviders
                     ),
                     options: [],
                     children: [disabledInfoAction(title: unavailable.title)]
@@ -193,7 +193,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
             return UIMenu(
                 title: providerTitle,
-                image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeLogoProviders),
+                image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeCatalogProviders),
                 options: [.singleSelection],
                 children: models.map { model in
                     modelAction(model: model, input: input)
@@ -214,7 +214,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             let unavailable = ComposerCapabilityCopy.runtimeUnavailableMessage(rawReason, reasonCode: reasonCode)
             return UIMenu(
                 title: providerTitle,
-                image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeLogoProviders),
+                image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeCatalogProviders),
                 options: [],
                 children: [disabledInfoAction(title: unavailable.title)]
             )
@@ -249,7 +249,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         return UIMenu(
             title: providerTitle,
-            image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeLogoProviders),
+            image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeCatalogProviders),
             options: [],
             children: [
                 disabledInfoAction(title: statusTitle),
@@ -270,7 +270,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         if upstreamGroups.isEmpty {
             return UIMenu(
                 title: providerTitle,
-                image: RuntimeProviderLogo.menuUIImage(provider: "opencode", catalogProviders: input.openCodeLogoProviders),
+                image: RuntimeProviderLogo.menuUIImage(provider: "opencode", catalogProviders: input.openCodeCatalogProviders),
                 options: [.singleSelection],
                 children: models.map { modelAction(model: $0, input: input) }
             )
@@ -287,7 +287,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
                 title: group.title,
                 image: RuntimeProviderLogo.menuUIImage(
                     provider: composerMenuLogoProvider(for: group.models, fallback: group.upstreamId),
-                    catalogProviders: input.openCodeLogoProviders
+                    catalogProviders: input.openCodeCatalogProviders
                 ),
                 options: [.singleSelection],
                 children: group.models.map { modelAction(model: $0, input: input) }
@@ -300,7 +300,7 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         return UIMenu(
             title: providerTitle,
-            image: RuntimeProviderLogo.menuUIImage(provider: "opencode", catalogProviders: input.openCodeLogoProviders),
+            image: RuntimeProviderLogo.menuUIImage(provider: "opencode", catalogProviders: input.openCodeCatalogProviders),
             options: [],
             children: children
         )

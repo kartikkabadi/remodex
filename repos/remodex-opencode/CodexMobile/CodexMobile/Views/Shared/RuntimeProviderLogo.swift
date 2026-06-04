@@ -1,14 +1,13 @@
 // FILE: RuntimeProviderLogo.swift
-// Purpose: Isolates runtime-provider logo lookup for SwiftUI views and UIKit menus. Catalog-driven via runtime/catalog .opencode.providers (id/logoProviderId -> logoAssetId); SF globe fallback; keep 4 core assets.
+// Purpose: Isolates runtime-provider logo lookup for SwiftUI views and UIKit menus. (catalog-driven + SF fallback per RP-BRAND-5)
 // Layer: View Component
-// Exports: RuntimeProviderLogo, RuntimeProviderLogoView, OpenCodeProviderLogoCatalogEntry (re-export via model)
-// Depends on: SwiftUI, UIKit, CodexModelOption, RemodexIcon, OpenCodeProviderLogoCatalogEntry, CodexService
+// Exports: RuntimeProviderLogo, RuntimeProviderLogoView
+// Depends on: SwiftUI, UIKit, CodexModelOption, RemodexIcon, CodexService (for catalog)
 
 import SwiftUI
 import UIKit
 
 enum RuntimeProviderLogo {
-    // Core 4 assets kept (per RP-BRAND plan); catalog augments for others via .opencode.providers
     private static let assetsByProvider: [String: String] = [
         "codex": "provider-codex-logo",
         "opencode": "provider-opencode-logo",
@@ -16,60 +15,77 @@ enum RuntimeProviderLogo {
         "opencode-zen": "provider-opencode-zen-logo",
     ]
 
-    static func assetName(for provider: String) -> String? {
-        assetName(for: provider, catalogProviders: nil)
-    }
-
-    // Catalog-driven: match key (id or logoProviderId from callers) against catalog entry.id
-    // (populated from runtime/catalog .opencode.providers); asset if present else nil (SF path).
-    static func assetName(for provider: String, catalogProviders: [OpenCodeProviderLogoCatalogEntry]?) -> String? {
-        let norm = CodexModelOption.normalizedProvider(provider)
-        if let hard = assetsByProvider[norm] {
-            return hard
-        }
-        guard let list = catalogProviders else {
-            return nil
-        }
-        let key = norm
-        for entry in list {
-            if CodexModelOption.normalizedProvider(entry.id) == key {
-                if let asset = entry.logoAssetId, !asset.isEmpty {
-                    return asset
+    // Catalog resolver stub (RP-BRAND-5): lookup logoAssetId from runtime/catalog.opencode.providers
+    // (populated by BRAND-1). Match by provider id (or logoProviderId value). If logoAssetId present
+    // (for the 4 kept assets or future cleared) return it to drive asset render; else nil -> SF fallback.
+    // Additive; no behavior change for codex or when catalog empty (hardcoded path remains).
+    private enum CatalogLogoResolver {
+        static func logoAssetId(for provider: String, in catalogProviders: [OpenCodeCatalogProvider]) -> String? {
+            let norm = CodexModelOption.normalizedProvider(provider)
+            for entry in catalogProviders {
+                let en = CodexModelOption.normalizedProvider(entry.id)
+                if en == norm || entry.id == provider || en == provider {
+                    return entry.logoAssetId
                 }
             }
+            return nil
         }
-        return nil
+    }
+
+    static func assetName(for provider: String, catalogProviders: [OpenCodeCatalogProvider] = []) -> String? {
+        if let fromCatalog = CatalogLogoResolver.logoAssetId(for: provider, in: catalogProviders) {
+            return fromCatalog
+        }
+        return assetsByProvider[CodexModelOption.normalizedProvider(provider)]
+    }
+
+    // Back-compat overload (used if any external direct calls; delegates to catalog-aware with empty).
+    static func assetName(for provider: String) -> String? {
+        assetName(for: provider, catalogProviders: [])
+    }
+
+    static func sfSymbolName(for provider: String) -> String {
+        let n = CodexModelOption.normalizedProvider(provider).lowercased()
+        switch n {
+        case "openai": return "cloud"
+        case "anthropic": return "cpu"
+        case "google", "gemini": return "globe"
+        case "groq": return "network"
+        default: return "globe"
+        }
     }
 
     @ViewBuilder
-    static func image(provider: String, size: CGFloat = 20) -> some View {
-        image(provider: provider, catalogProviders: nil, size: size)
-    }
-
-    @ViewBuilder
-    static func image(provider: String, catalogProviders: [OpenCodeProviderLogoCatalogEntry]?, size: CGFloat = 20) -> some View {
+    static func image(provider: String, size: CGFloat = 20, catalogProviders: [OpenCodeCatalogProvider] = []) -> some View {
         if let assetName = assetName(for: provider, catalogProviders: catalogProviders) {
             Image(assetName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size)
         } else {
-            // SF fallback (globe per design for long-tail; cloud/cpu variants noted for future refine)
-            RemodexIcon.image(systemName: "globe", size: size)
+            RemodexIcon.image(systemName: sfSymbolName(for: provider), size: size)
         }
+    }
+
+    // Back-compat for any direct calls without catalog.
+    @ViewBuilder
+    static func image(provider: String, size: CGFloat = 20) -> some View {
+        image(provider: provider, size: size, catalogProviders: [])
     }
 
     // UIMenu needs `UIImage`, so route provider rows through the same assets.
-    static func menuUIImage(provider: String) -> UIImage? {
-        menuUIImage(provider: provider, catalogProviders: nil)
+    static func menuUIImage(provider: String, catalogProviders: [OpenCodeCatalogProvider] = []) -> UIImage? {
+        if let assetName = assetName(for: provider, catalogProviders: catalogProviders) {
+            guard let image = UIImage(named: assetName) else { return nil }
+            return resizedMenuImage(image).withRenderingMode(.alwaysOriginal)
+        } else {
+            return RemodexIcon.menuUIImage(systemName: sfSymbolName(for: provider))
+        }
     }
 
-    static func menuUIImage(provider: String, catalogProviders: [OpenCodeProviderLogoCatalogEntry]?) -> UIImage? {
-        guard let assetName = assetName(for: provider, catalogProviders: catalogProviders) else {
-            return RemodexIcon.menuUIImage(systemName: "globe")
-        }
-        guard let image = UIImage(named: assetName) else { return nil }
-        return resizedMenuImage(image).withRenderingMode(.alwaysOriginal)
+    // Back-compat overload.
+    static func menuUIImage(provider: String) -> UIImage? {
+        menuUIImage(provider: provider, catalogProviders: [])
     }
 
     private static func resizedMenuImage(_ image: UIImage) -> UIImage {
@@ -88,13 +104,13 @@ struct RuntimeProviderLogoView: View {
     let provider: String
     var size: CGFloat = 20
 
-    @Environment(CodexService.self) private var codex
+    @Environment(CodexService.self) private var codex: CodexService?
 
     var body: some View {
         RuntimeProviderLogo.image(
             provider: provider,
-            catalogProviders: codex.openCodeLogoProviders,
-            size: size
+            size: size,
+            catalogProviders: codex?.openCodeCatalogProviders ?? []
         )
     }
 }

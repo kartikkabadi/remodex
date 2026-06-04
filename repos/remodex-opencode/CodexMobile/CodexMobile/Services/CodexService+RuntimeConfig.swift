@@ -2,7 +2,7 @@
 // Purpose: Runtime model/reasoning/access preferences, per-thread overrides, and model/list loading.
 // Layer: Service
 // Exports: CodexService runtime config APIs
-// Depends on: CodexModelOption, CodexReasoningEffortOption, CodexAccessMode
+// Depends on: CodexModelOption, CodexReasoningEffortOption, CodexAccessMode, OpenCodeCatalogProvider (for logo catalog)
 
 import Foundation
 
@@ -159,7 +159,9 @@ extension CodexService {
         openCodeRuntimeCatalogEntry?.opencode
     }
 
-    var openCodeLogoProviders: [OpenCodeProviderLogoCatalogEntry] {
+    /// Catalog-driven providers for logo resolution (id, name, logoAssetId? from BRAND-1).
+    /// Used by catalog resolver stub in RuntimeProviderLogo (SF fallback when no logoAssetId).
+    var openCodeCatalogProviders: [OpenCodeCatalogProvider] {
         openCodeRuntimeCatalogEntry?.opencode?.providers ?? []
     }
 

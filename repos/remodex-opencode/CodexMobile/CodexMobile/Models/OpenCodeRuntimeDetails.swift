@@ -1,7 +1,7 @@
 // FILE: OpenCodeRuntimeDetails.swift
-// Purpose: Nested OpenCode status from runtime/catalog and bridge-status.json opencode blocks.
+// Purpose: Nested OpenCode status from runtime/catalog and bridge-status.json opencode blocks. (providers for BRAND-5 catalog logo resolver)
 // Layer: Model
-// Exports: OpenCodeRuntimeDetails, OpenCodeConnectedProviderSummary, OpenCodeModelListMeta, OpenCodeProviderLogoCatalogEntry
+// Exports: OpenCodeRuntimeDetails, OpenCodeConnectedProviderSummary, OpenCodeModelListMeta, OpenCodeCatalogProvider
 // Depends on: Foundation
 
 import Foundation
@@ -19,6 +19,15 @@ struct OpenCodeProviderInventoryEntry: Codable, Hashable, Sendable {
     let authenticated: Bool
     let modelCount: Int?
     let logoProviderId: String?
+}
+
+// Catalog provider entry from runtime/catalog.opencode.providers (RP-BRAND-1 + BRAND-5 stub).
+// id is the provider key (e.g. "anthropic", "opencode-go"); logoAssetId present only for
+// cleared branded (maps to asset in Assets.xcassets); others use SF fallback.
+struct OpenCodeCatalogProvider: Codable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let logoAssetId: String?
 }
 
 struct OpenCodeModelListMeta: Codable, Hashable, Sendable {
@@ -44,16 +53,7 @@ struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let connectedProviders: [OpenCodeConnectedProviderSummary]?
     let providerInventory: [OpenCodeProviderInventoryEntry]?
     let providerDiscoveryReasonCode: String?
-    let authDiscoveryReasonCode: String?
-    let providerInventoryPartial: Bool?
-    let providers: [OpenCodeProviderLogoCatalogEntry]?
-}
-
-// Catalog entry for logo resolution (from runtime/catalog opencode.providers per RP-BRAND-1/2).
-// Matches on id (or caller-supplied logoProviderId key) to logoAssetId; enables catalog-driven
-// without hardcoding beyond the 4 core assets.
-struct OpenCodeProviderLogoCatalogEntry: Codable, Hashable, Sendable {
-    let id: String
-    let name: String
-    let logoAssetId: String?
+    let authDiscoveryReasonCode: String? = nil
+    let providerInventoryPartial: Bool? = nil
+    let providers: [OpenCodeCatalogProvider]? = nil
 }

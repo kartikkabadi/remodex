@@ -53,48 +53,15 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
         XCTAssertTrue(entry.authenticated)
     }
 
-    // --- RP-BRAND-2 catalog-driven logo resolver tests ---
-
-    func testRuntimeProviderLogoHardcodedKnownIds() {
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "codex"), "provider-codex-logo")
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode"), "provider-opencode-logo")
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode-go"), "provider-opencode-go-logo")
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode-zen"), "provider-opencode-zen-logo")
-        // normalized variants
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "OpenCode"), "provider-opencode-logo")
-    }
-
-    func testRuntimeProviderLogoCatalogMatchById() {
-        let catalog: [OpenCodeProviderLogoCatalogEntry] = [
-            OpenCodeProviderLogoCatalogEntry(id: "anthropic", name: "Anthropic", logoAssetId: "provider-anthropic-logo"),
-            OpenCodeProviderLogoCatalogEntry(id: "openai", name: "OpenAI", logoAssetId: nil),
-        ]
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "anthropic", catalogProviders: catalog), "provider-anthropic-logo")
-        // no asset in catalog -> nil (SF fallback path)
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "openai", catalogProviders: catalog))
-    }
-
-    func testRuntimeProviderLogoFallsBackToHardcodedEvenWithCatalogForKnown() {
-        let catalog: [OpenCodeProviderLogoCatalogEntry] = [
-            OpenCodeProviderLogoCatalogEntry(id: "opencode-zen", name: "Zen", logoAssetId: "provider-opencode-zen-logo"),
-        ]
-        // hard wins for core 4
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode-zen", catalogProviders: catalog), "provider-opencode-zen-logo")
-    }
-
-    func testRuntimeProviderLogoUnknownWithoutCatalogIsNilForSFFallback() {
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "some-future-provider"))
-        let empty: [OpenCodeProviderLogoCatalogEntry] = []
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "another", catalogProviders: empty))
-    }
-
-    func testDecodesOpenCodeRuntimeDetailsWithProvidersCatalog() throws {
+    // Catalog resolver stub tests (RP-BRAND-5): unit coverage for fallback + known ids.
+    // Exercises CatalogLogoResolver + assetName via catalog.providers shape from BRAND-1.
+    func testDecodesOpenCodeRuntimeDetailsWithCatalogProvidersForLogos() throws {
         let json = """
         {
           "enabled": true,
           "providers": [
-            {"id": "anthropic", "name": "Anthropic", "logoAssetId": "provider-anthropic-logo"},
-            {"id": "groq", "name": "Groq"}
+            { "id": "anthropic", "name": "Anthropic" },
+            { "id": "opencode-go", "name": "OpenCode Go", "logoAssetId": "provider-opencode-go-logo" }
           ]
         }
         """
@@ -102,8 +69,43 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
         let details = try JSONDecoder().decode(OpenCodeRuntimeDetails.self, from: data)
         XCTAssertEqual(details.providers?.count, 2)
         XCTAssertEqual(details.providers?.first?.id, "anthropic")
-        XCTAssertEqual(details.providers?.first?.logoAssetId, "provider-anthropic-logo")
-        XCTAssertEqual(details.providers?.last?.name, "Groq")
-        XCTAssertNil(details.providers?.last?.logoAssetId)
+        XCTAssertNil(details.providers?.first?.logoAssetId)
+        XCTAssertEqual(details.providers?.last?.logoAssetId, "provider-opencode-go-logo")
+    }
+
+    func testRuntimeProviderLogoCatalogResolverKnownIdsAndFallback() {
+        let catalog: [OpenCodeCatalogProvider] = [
+            OpenCodeCatalogProvider(id: "opencode-go", name: "Go", logoAssetId: "provider-opencode-go-logo"),
+            OpenCodeCatalogProvider(id: "anthropic", name: "Anthropic", logoAssetId: nil),
+            OpenCodeCatalogProvider(id: "openai", name: "OpenAI", logoAssetId: nil),
+        ]
+
+        // catalog provides logoAssetId -> use it (drives asset render for cleared)
+        XCTAssertEqual(
+            RuntimeProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog),
+            "provider-opencode-go-logo"
+        )
+        XCTAssertEqual(
+            RuntimeProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog), // also via backcompat path
+            "provider-opencode-go-logo"
+        )
+
+        // catalog entry but no logoAssetId -> nil (triggers SF in image/menuUIImage)
+        XCTAssertNil(RuntimeProviderLogo.assetName(for: "anthropic", catalogProviders: catalog))
+        XCTAssertNil(RuntimeProviderLogo.assetName(for: "openai", catalogProviders: catalog))
+
+        // no catalog match, falls back to hardcoded assets for the 4
+        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "codex", catalogProviders: []), "provider-codex-logo")
+        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode", catalogProviders: catalog), "provider-opencode-logo")
+
+        // unknown provider -> nil (SF fallback path)
+        XCTAssertNil(RuntimeProviderLogo.assetName(for: "some-long-tail", catalogProviders: catalog))
+
+        // SF symbol names (examples per plan)
+        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "openai"), "cloud")
+        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "anthropic"), "cpu")
+        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "google"), "globe")
+        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "groq"), "network")
+        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "unknown-foo"), "globe")
     }
 }

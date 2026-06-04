@@ -2,7 +2,7 @@
 // Purpose: Bottom bar with attachment/runtime/access menus, queue controls, and send button.
 // Layer: View Component
 // Exports: ComposerBottomBar
-// Depends on: SwiftUI, TurnComposerMetaMapper, UIKitMenuButton, TurnComposerRuntimeUIKitMenuBuilder, TurnComposerRuntimeState
+// Depends on: SwiftUI, TurnComposerMetaMapper, UIKitMenuButton, TurnComposerRuntimeUIKitMenuBuilder, CodexService (catalog for logos)
 
 import SwiftUI
 
@@ -380,6 +380,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
     let runtimeActions: TurnComposerRuntimeActions
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(CodexService.self) private var codex: CodexService?
 
     private var composerChromeForeground: Color {
         Color.primary.opacity(colorScheme == .dark ? 0.94 : 0.86)
@@ -428,7 +429,7 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                     isRuntimeSelectionLoading: isRuntimeSelectionLoading,
                     modelsErrorMessage: modelsErrorMessage,
                     openCodeProviderDiscoveryReasonCode: openCodeProviderDiscoveryReasonCode,
-                    openCodeLogoProviders: runtimeState.openCodeLogoProviders
+                    openCodeCatalogProviders: codex?.openCodeCatalogProviders ?? []
                 )
             )
         }
