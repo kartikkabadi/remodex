@@ -885,6 +885,64 @@ test("runtime/catalog clears reasonCode when OpenCode is enabled with agents", a
   }
 });
 
+test("runtime/catalog includes opencode.providers logo catalog (id,name,logoAssetId?,fallbackSymbol?) shape + count from inventory", async () => {
+  const responses = [];
+  // simulate providerInventory rows (as produced by buildProviderInventory + withLogoProviderId post-extend)
+  const mockInventory = [
+    { id: "anthropic", displayName: "Anthropic" /* no logo */ },
+    { id: "opencode-go", displayName: "OpenCode Go", logoProviderId: "opencode-go" },
+    { id: "opencode", displayName: "OpenCode Zen", logoProviderId: "opencode-zen" },
+  ];
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse: (msg) => responses.push(JSON.parse(msg)),
+    providers: [
+      {
+        id: "opencode",
+        getRuntimeStatus() {
+          return { providerInventory: mockInventory };
+        },
+        async listAgents() {
+          return [{ id: "build", label: "Build" }];
+        },
+      },
+    ],
+  });
+
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  delete process.env.REMODEX_DISABLE_OPENCODE;
+
+  router.handleApplicationMessage(
+    JSON.stringify({ id: "catalog-providers", method: "runtime/catalog" }),
+  );
+  await waitOneTick();
+
+  const catalog = responses.find((r) => r.id === "catalog-providers")?.result;
+  const opencodeRuntime = catalog.runtimes.find((runtime) => runtime.id === "opencode");
+  assert.ok(opencodeRuntime, "opencode runtime present");
+  const op = opencodeRuntime.opencode || {};
+  assert.ok(Array.isArray(op.providers), "opencode.providers must be present array (catalog shape)");
+  assert.equal(op.providers.length, 3, "providers count matches input inventory count");
+  const go = op.providers.find((p) => p.id === "opencode-go");
+  assert.ok(go);
+  assert.equal(go.name, "OpenCode Go");
+  assert.equal(go.logoAssetId, "provider-opencode-go-logo");
+  assert.equal(go.fallbackSymbol, undefined);
+  const zen = op.providers.find((p) => p.id === "opencode");
+  assert.ok(zen);
+  assert.equal(zen.logoAssetId, "provider-opencode-zen-logo");
+  const generic = op.providers.find((p) => p.id === "anthropic");
+  assert.ok(generic);
+  assert.equal(generic.name, "Anthropic");
+  assert.equal(generic.logoAssetId, undefined);
+
+  if (previousDisable === undefined) {
+    delete process.env.REMODEX_DISABLE_OPENCODE;
+  } else {
+    process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+  }
+});
+
 test("rejects explicit provider switches on owned threads", async () => {
   const fs = require("fs");
   const os = require("os");

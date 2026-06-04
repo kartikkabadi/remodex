@@ -2,7 +2,7 @@
 // Purpose: Routes provider-aware Remodex RPCs between Codex app-server and local provider harnesses.
 // Layer: Bridge runtime routing
 // Exports: createRuntimeProviderRouter plus merge helpers used by tests
-// Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store
+// Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store, ./opencode-provider-inventory (for logo catalog RP-BRAND-1)
 
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeProvider } = require("./opencode-provider");
@@ -26,6 +26,7 @@ const {
 } = require("./provider-capabilities");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 const { buildOpenCodeRuntimeStatus } = require("./opencode-runtime-status");
+const { buildProviderLogoCatalog } = require("./opencode-provider-inventory");
 
 const PROVIDER_FIELD_KEYS = [
   "modelProvider",
@@ -878,6 +879,11 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
             || readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "true",
         });
 
+  const providersForLogos = Array.isArray(runtimeStatus?.providerInventory)
+    ? runtimeStatus.providerInventory
+    : [];
+  const logoProviders = buildProviderLogoCatalog(providersForLogos);
+
   if (serverAvailability?.unavailableReason) {
     return {
       id: OPENCODE_PROVIDER_ID,
@@ -893,6 +899,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
         enabled: false,
         lastError: serverAvailability.unavailableReason,
         version: readString(serverAvailability.version) || runtimeStatus.version,
+        providers: logoProviders,
       },
     };
   }
@@ -967,6 +974,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       providerInventory: runtimeStatus.providerInventory || null,
       authDiscoveryReasonCode: runtimeStatus.authDiscoveryReasonCode || null,
       providerInventoryPartial: runtimeStatus.providerInventoryPartial ?? null,
+      providers: logoProviders,
     },
   };
 }

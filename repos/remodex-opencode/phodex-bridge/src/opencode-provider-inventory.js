@@ -3,7 +3,8 @@
 // Layer: Bridge runtime utility
 // Exports: loadProviderListInventory, resolvePreferredProviders,
 //          flattenConnectedProviderModels, refreshProviderInventory,
-//          resolveProviderListPayload, buildInventoryMeta
+//          resolveProviderListPayload, buildInventoryMeta,
+//          buildProviderLogoCatalog (for RP-BRAND-1 logo registry in catalog)
 // Depends on: ./opencode-client (buildModelFromAny, resolveProviderListPayload pattern)
 
 const { readString } = require("./normalize");
@@ -209,7 +210,27 @@ function withLogoProviderId(entry) {
   if (!logoProviderId) {
     return entry;
   }
-  return { ...entry, logoProviderId };
+  const logoAssetId = `provider-${logoProviderId}-logo`;
+  return { ...entry, logoProviderId, logoAssetId };
+}
+
+function buildProviderLogoCatalog(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  return list.map((entry) => {
+    const id = readString(entry.id);
+    const name = readString(entry.displayName) || formatProviderDisplayNameFromId(id) || id || "Unknown";
+    let logoAssetId = readString(entry.logoAssetId);
+    if (!logoAssetId) {
+      const lp = readString(entry.logoProviderId);
+      if (lp) logoAssetId = `provider-${lp}-logo`;
+    }
+    const item = { id, name };
+    if (logoAssetId) {
+      item.logoAssetId = logoAssetId;
+    }
+    // fallbackSymbol?: string — reserved for RP-BRAND-5 (SF Symbols e.g. "globe"); additive only, omitted here
+    return item;
+  });
 }
 
 function buildProviderInventory(inventory, options = {}) {
@@ -425,4 +446,5 @@ module.exports = {
   isOpenCodeManagedProvider,
   resolveProviderListPayload,
   resolveLogoProviderId,
+  buildProviderLogoCatalog,
 };

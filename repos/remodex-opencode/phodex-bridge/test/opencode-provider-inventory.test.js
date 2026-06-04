@@ -198,6 +198,7 @@ describe("buildProviderInventory", () => {
     const go = rows.find((row) => row.id === "opencode-go");
     assert.ok(go);
     assert.equal(go.logoProviderId, "opencode-go");
+    assert.equal(go.logoAssetId, "provider-opencode-go-logo");
     assert.equal(resolveLogoProviderId("opencode-go", "OpenCode Go"), "opencode-go");
   });
 
@@ -217,6 +218,7 @@ describe("buildProviderInventory", () => {
     assert.ok(zen);
     assert.equal(zen.displayName, "OpenCode Zen");
     assert.equal(zen.logoProviderId, "opencode-zen");
+    assert.equal(zen.logoAssetId, "provider-opencode-zen-logo");
     assert.equal(resolveLogoProviderId("opencode", "OpenCode Zen"), "opencode-zen");
   });
 
@@ -237,6 +239,7 @@ describe("buildProviderInventory", () => {
     assert.ok(row);
     assert.equal(row.displayName, "OpenCode Zenith");
     assert.equal(row.logoProviderId, undefined);
+    assert.equal(row.logoAssetId, undefined);
   });
 
   test("generic opencode provider has no logoProviderId", () => {
@@ -254,6 +257,7 @@ describe("buildProviderInventory", () => {
     const row = rows.find((entry) => entry.id === "opencode");
     assert.ok(row);
     assert.equal(row.logoProviderId, undefined);
+    assert.equal(row.logoAssetId, undefined);
   });
 
   test("dedupes canonical id casing from all[]", () => {
