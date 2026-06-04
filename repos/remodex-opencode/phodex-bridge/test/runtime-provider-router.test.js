@@ -29,6 +29,19 @@ function makeProvider(ownedThreadIds = []) {
   };
 }
 
+// Small helper (per review suggestion on Issue 9 capture hygiene): centralizes save/restore
+// for muting console during direct providerForRequest calls (used by the explicit-routes test).
+// Other tests that need the emitted logs (e.g. audit/decision) use their own collecting pattern.
+function withMutedConsole(fn) {
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    fn();
+  } finally {
+    console.log = originalLog;
+  }
+}
+
 test("providerModelsForModelList adds placeholder only when OpenCode is disabled and empty", () => {
   const realModel = {
     id: "anthropic/claude-sonnet-4",
@@ -165,40 +178,45 @@ test("mergeThreadListResult deduplicates provider-owned thread copies", () => {
 test("providerForRequest routes explicit OpenCode and honors explicit Codex fallback", () => {
   const provider = makeProvider(["thread-1"]);
 
-  assert.equal(
-    providerForRequest({ method: "turn/start", params: { threadId: "thread-1" } }, [provider]),
-    provider,
-  );
-  assert.equal(
-    providerForRequest(
-      {
-        method: "turn/start",
-        params: {
-          threadId: "thread-1",
-          modelProvider: "codex",
+  // Use helper (per review on Issue 9) to mute console for the 3 direct calls (prevents
+  // pollution from providerForRequest decision/owns_call side-effects added for RP-MSG-1).
+  // Sibling tests that assert on emitted logs use their own collecting pattern instead.
+  withMutedConsole(() => {
+    assert.equal(
+      providerForRequest({ method: "turn/start", params: { threadId: "thread-1" } }, [provider]),
+      provider,
+    );
+    assert.equal(
+      providerForRequest(
+        {
+          method: "turn/start",
+          params: {
+            threadId: "thread-1",
+            modelProvider: "codex",
+          },
         },
-      },
-      [provider],
-    ),
-    null,
-  );
-  assert.equal(
-    providerForRequest(
-      {
-        method: "turn/start",
-        params: {
-          threadId: "codex-thread",
-          collaborationMode: {
-            settings: {
-              model_provider: "open-code",
+        [provider],
+      ),
+      null,
+    );
+    assert.equal(
+      providerForRequest(
+        {
+          method: "turn/start",
+          params: {
+            threadId: "codex-thread",
+            collaborationMode: {
+              settings: {
+                model_provider: "open-code",
+              },
             },
           },
         },
-      },
-      [provider],
-    ),
-    provider,
-  );
+        [provider],
+      ),
+      provider,
+    );
+  });
 });
 
 test("stripRuntimeProviderFieldsForCodex removes top-level and nested provider selectors", () => {
@@ -1025,6 +1043,73 @@ test("turn/start logs bridge_turn_start_audit and bridge_ownership_mismatch", as
     assert.equal(turnStartAudit?.storedProvider, "opencode");
     assert.equal(turnStartAudit?.mismatch, true);
     assert.equal(mismatchLog?.errorCode, "thread_provider_mismatch");
+  } finally {
+    console.log = originalLog;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("providerForRequest logs ownsThread decision and router init", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-decision-"));
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.map((entry) => String(entry)).join(" "));
+  };
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned-oc", "opencode");
+
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ items: [] }),
+      sendApplicationResponse: () => {},
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [makeProvider(["thread-owned-oc"])],
+    });
+
+    // providerless request on owned thread hits owns lookup path (plus decision + init logs for RP-MSG-1)
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "decision-owns",
+        method: "turn/start",
+        params: {
+          threadId: "thread-owned-oc",
+        },
+      }),
+    );
+    await waitOneTick();
+
+    const parsedLogs = logs
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const decision = parsedLogs.find((entry) => entry.event === "provider_for_request_decision");
+    const ownsCall = parsedLogs.find((entry) => entry.event === "provider_for_request_owns_call");
+    const initLog = parsedLogs.find((entry) => entry.event === "runtime_provider_router_init");
+
+    assert.equal(decision?.requestedProvider, null);
+    assert.equal(decision?.hasExplicitProviderField, false);
+    assert.equal(decision?.storedProvider, "opencode");
+    assert.equal(decision?.resolvedProvider, "opencode");
+    assert.equal(decision?.matchReason, "owns_thread_match");
+    assert.equal(decision?.owns, true);
+    assert.equal(ownsCall?.threadId, "thread-owned-oc");
+    assert.ok(initLog, "startup router init log present");
   } finally {
     console.log = originalLog;
     fs.rmSync(tempDir, { recursive: true, force: true });

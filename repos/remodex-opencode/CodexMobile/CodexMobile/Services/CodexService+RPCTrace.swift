@@ -57,6 +57,10 @@ extension CodexService {
         error: Error?
     ) {
         guard RemodexRPCTrace.isEnabled else { return }
+        // Hoisted (per review nit on dupe from Issue 4 symmetry fix): safe, no side effects,
+        // always computed when trace enabled for result (used in failed/ok logs; snapshot after doesn't need).
+        let runtimeProvider = runtimeModelProviderForTurn(threadId: threadId)
+        let threadModelProvider = thread(for: threadId)?.modelProvider ?? ""
         if let error {
             let rpcCode: Int
             let errorCode: String
