@@ -604,6 +604,15 @@ extension CodexService {
         let turnFailureMessage = parseTurnFailureMessage(from: paramsObject)
 
         if let threadId = resolveThreadID(from: paramsObject, turnIdHint: completedTurnID) {
+            if let completedTurnID, let active = activeTurnID(for: threadId), active != completedTurnID {
+                // Strict late guard (RP-MSG-3): skip + trace if activeTurnID(threadId) != turnId
+                traceAssistantDeltaDrop(
+                    threadId: threadId,
+                    reason: "late_turn_mismatch",
+                    turnId: completedTurnID
+                )
+                return
+            }
             if let completedTurnID {
                 confirmLatestPendingUserMessage(threadId: threadId, turnId: completedTurnID)
             }

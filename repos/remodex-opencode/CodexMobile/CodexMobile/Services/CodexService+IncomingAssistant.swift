@@ -50,6 +50,11 @@ extension CodexService {
         }
 
         markIncomingThreadAsRunning(context.threadId, turnId: turnId)
+        // Strict late guard (RP-MSG-3): skip + trace if activeTurnID(threadId) != turnId
+        if let active = activeTurnID(for: context.threadId), active != turnId {
+            traceAssistantDeltaDrop(threadId: context.threadId, reason: "late_turn_mismatch", turnId: turnId)
+            return
+        }
         if activeTurnID(for: context.threadId) == nil {
             setActiveTurnID(turnId, for: context.threadId)
             threadIdByTurnID[turnId] = context.threadId
@@ -117,6 +122,11 @@ extension CodexService {
                 eventObject: eventObject,
                 itemObject: nil
             )
+            if let turnId, let active = activeTurnID(for: context.threadId), active != turnId {
+                // strict late guard for completion item
+                traceAssistantDeltaDrop(threadId: context.threadId, reason: "late_turn_mismatch", turnId: turnId)
+                return
+            }
             completeAssistantMessage(
                 threadId: context.threadId,
                 turnId: turnId,

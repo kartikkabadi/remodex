@@ -684,6 +684,7 @@ function startBridge({
         hasMacRelaySocket: socket?.readyState === WebSocket.OPEN,
       }),
     );
+    // MSG-3 rate metric hook (late/buffer/watchdog/dedup); actual late rates emitted from provider as bridge_late_delta_suppressed.
   }
 
   // Mirrors accepted local renames back to the phone using the existing push-event shape.

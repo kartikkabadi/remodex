@@ -91,11 +91,17 @@ extension CodexService {
         traceRunningSnapshot(threadId: threadId, label: "turn_start_result")
     }
 
-    func traceAssistantDeltaDrop(threadId: String?, reason: String) {
+    func traceAssistantDeltaDrop(threadId: String?, reason: String, turnId: String? = nil) {
         guard RemodexRPCTrace.isEnabled else { return }
-        RemodexRPCTrace.logger.debug(
-            "assistant_delta_drop threadId=\(threadId ?? "", privacy: .public) reason=\(reason, privacy: .public)"
-        )
+        if let turnId, !turnId.isEmpty {
+            RemodexRPCTrace.logger.debug(
+                "assistant_delta_drop threadId=\(threadId ?? "", privacy: .public) turnId=\(turnId, privacy: .public) reason=\(reason, privacy: .public)"
+            )
+        } else {
+            RemodexRPCTrace.logger.debug(
+                "assistant_delta_drop threadId=\(threadId ?? "", privacy: .public) reason=\(reason, privacy: .public)"
+            )
+        }
         if let threadId {
             traceRunningSnapshot(threadId: threadId, label: "delta_drop")
         }

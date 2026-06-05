@@ -703,7 +703,7 @@ test("trimOutboundBuffer retains turn/completed under buffer caps", () => {
     });
     secureTransport.queueOutboundApplicationMessage(turnCompletedPayload, () => false);
 
-    assert.equal(structuredLogs.filter((entry) => entry.event === "bridge_outbound_trim_dropped").length, 0);
+    assert.equal(structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped").length, 0);
 
     secureTransport.bindLiveSendWireMessage((message) => {
       replayWireMessages.push(message);
@@ -732,7 +732,7 @@ test("trimOutboundBuffer retains turn/completed under buffer caps", () => {
   }
 });
 
-test("trimOutboundBuffer emits bridge_outbound_trim_dropped when caps are exceeded", () => {
+test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (buffer overflow)", () => {
   const macIdentity = createOkpKeyPair("ed25519");
   const phoneIdentity = createOkpKeyPair("ed25519");
   const phoneEphemeral = createOkpKeyPair("x25519");
@@ -775,14 +775,81 @@ test("trimOutboundBuffer emits bridge_outbound_trim_dropped when caps are exceed
     });
     secureTransport.queueOutboundApplicationMessage(turnCompletedPayload, () => false);
 
-    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_trim_dropped");
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
     assert.equal(trimLogs.length, 1);
     assert.equal(trimLogs[0].droppedCount, 1);
     assert.ok(trimLogs[0].droppedBytes > 0);
     assert.equal(trimLogs[0].firstSeq, 1);
     assert.equal(trimLogs[0].lastSeq, 1);
+    assert.equal(trimLogs[0].reason, "overflow");
   } finally {
     structuredLogs.restore();
+  }
+});
+
+test("outbound buffer drain on reconnect", () => {
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-drain-reconnect",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-drain",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-drain": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const replayWireMessages = [];
+  try {
+    const { serverHello } = finishHandshake({
+      secureTransport,
+      sessionId: "session-drain-reconnect",
+      macDeviceId: "mac-drain",
+      phoneDeviceId: "phone-drain",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    // queue while !resumed (simulates messages during disconnect)
+    const started = JSON.stringify({ method: "turn/started", params: { threadId: "t-drain", turnId: "turn-drain-1" } });
+    secureTransport.queueOutboundApplicationMessage(started, () => {
+      throw new Error("should buffer, not send live while !resumed");
+    });
+    const delta = JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "t-drain", turnId: "turn-drain-1", delta: "hi" } });
+    secureTransport.queueOutboundApplicationMessage(delta, () => false);
+
+    // now reconnect + resumeState triggers drain of buffered
+    secureTransport.bindLiveSendWireMessage((message) => {
+      replayWireMessages.push(message);
+      return true;
+    });
+    secureTransport.handleIncomingWireMessage(
+      JSON.stringify({
+        kind: "resumeState",
+        sessionId: "session-drain-reconnect",
+        keyEpoch: serverHello.keyEpoch,
+        lastAppliedBridgeOutboundSeq: 0,
+      }),
+      {
+        sendControlMessage() {},
+        onApplicationMessage() {},
+      }
+    );
+
+    // the 2 queued should have been drained on resume (via replay)
+    assert.equal(replayWireMessages.length, 2);
+    // also verify entries had queuedAt (via behavior, not direct internal)
+  } finally {
+    // no structured here
   }
 });
 

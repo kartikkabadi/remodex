@@ -30,7 +30,7 @@ const HANDSHAKE_MODE_TRUSTED_RECONNECT = "trusted_reconnect";
 const SECURE_SENDER_MAC = "mac";
 const SECURE_SENDER_IPHONE = "iphone";
 const MAX_PAIRING_AGE_MS = 5 * 60 * 1000;
-const MAX_BRIDGE_OUTBOUND_MESSAGES = 500;
+const MAX_BRIDGE_OUTBOUND_MESSAGES = 100;
 const MAX_BRIDGE_OUTBOUND_BYTES = 10 * 1024 * 1024;
 
 function createBridgeSecureTransport({
@@ -111,8 +111,9 @@ function createBridgeSecureTransport({
     }
 
     const bufferEntry = {
+      queuedAt: Date.now(),
+      raw: normalizedPayload,
       bridgeOutboundSeq: nextBridgeOutboundSeq,
-      payloadText: normalizedPayload,
       sizeBytes: Buffer.byteLength(normalizedPayload, "utf8"),
     };
     nextBridgeOutboundSeq += 1;
@@ -510,11 +511,12 @@ function createBridgeSecureTransport({
       const lastSeq = outboundBuffer[removeCount - 1]?.bridgeOutboundSeq ?? null;
       console.log(
         JSON.stringify({
-          event: "bridge_outbound_trim_dropped",
+          event: "bridge_outbound_dropped",
           droppedCount: removeCount,
           droppedBytes: removedBytes,
           firstSeq,
           lastSeq,
+          reason: "overflow",
         })
       );
       outboundBuffer.splice(0, removeCount);
@@ -538,7 +540,7 @@ function createBridgeSecureTransport({
     const envelope = encryptEnvelopePayload(
       {
         bridgeOutboundSeq: entry.bridgeOutboundSeq,
-        payloadText: entry.payloadText,
+        payloadText: entry.raw,
       },
       activeSession.macToPhoneKey,
       SECURE_SENDER_MAC,

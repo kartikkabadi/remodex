@@ -1113,6 +1113,121 @@ test("watchdog completes hung prompt with opencode_turn_watchdog_timeout", async
   );
 });
 
+test("late delta suppressed when active turn mismatches (kill mid-turn scenario)", async () => {
+  const lateEvents = [];
+  let sseHandler = null;
+  const originalLog = console.log;
+  console.log = (...args) => {
+    for (const arg of args) {
+      if (typeof arg !== "string") {
+        continue;
+      }
+      try {
+        const payload = JSON.parse(arg);
+        if (payload.event === "bridge_late_delta_suppressed") {
+          lateEvents.push(payload);
+        }
+      } catch {
+        // ignore non-JSON log lines
+      }
+    }
+    originalLog(...args);
+  };
+  try {
+  let promptCalls = 0;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "300000",
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (cb) => {
+        sseHandler = cb;
+        return () => {};
+      },
+      prompt: async () => {
+        promptCalls += 1;
+        if (promptCalls > 1) {
+          return new Promise(() => {});
+        }
+      },
+      getMessages: async () => [],
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const threadId = start.thread.id;
+
+  const firstTurn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId, input: "first" },
+  });
+  const firstTurnId = firstTurn.turnId;
+  const subscribeDeadline = Date.now() + 500;
+  while (!sseHandler && Date.now() < subscribeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(sseHandler, "subscribeToEvents should register before turn events are replayed");
+
+  const interrupted = await provider.handleRequest({
+    id: 3,
+    method: "turn/interrupt",
+    params: { threadId, turnId: firstTurnId },
+  });
+  assert.equal(interrupted.interrupted, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const secondTurn = await provider.handleRequest({
+    id: 4,
+    method: "turn/start",
+    params: { threadId, input: "second" },
+  });
+  const secondTurnId = secondTurn.turnId;
+  assert.notEqual(firstTurnId, secondTurnId);
+
+  const secondTurnDeadline = Date.now() + 500;
+  while (promptCalls < 2 && Date.now() < secondTurnDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(promptCalls, 2);
+
+  sseHandler("item/agentMessage/delta", {
+    threadId,
+    turnId: firstTurnId,
+    delta: "late",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(lateEvents.length, 1);
+  assert.equal(lateEvents[0].reason, "active_turn_mismatch");
+  assert.equal(lateEvents[0].turnId, firstTurnId);
+  assert.equal(lateEvents[0].activeTurnId, secondTurnId);
+  assert.equal(lateEvents[0].method, "item/agentMessage/delta");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("kill mid-turn clears state without leak", async () => {
+  const provider = makeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_TEST: "1" },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      prompt: async () => {},
+      abort: async () => {},
+      getMessages: async () => [],
+    }),
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({ id: 2, method: "turn/start", params: { threadId: start.thread.id, input: "running" } });
+  const intr = await provider.handleRequest({ id: 3, method: "turn/interrupt", params: { threadId: start.thread.id } });
+  assert.equal(intr.interrupted, true);
+});
+
 function fakeSessionStoreFs() {
   const files = new Map();
   return {

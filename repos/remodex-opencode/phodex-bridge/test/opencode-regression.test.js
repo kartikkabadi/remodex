@@ -473,3 +473,50 @@ test("desktop/continueOpenCode succeeds when handoff env gate is on", async () =
     process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
   }
 });
+
+// MSG-3: DISABLE=1 regression for router/notify paths (late guard, dedup, buffer not affect codex passthrough)
+test("DISABLE_OPENCODE=1 keeps codex router catalog codex-only (no OC provider leakage)", async () => {
+  const previous = process.env.REMODEX_DISABLE_OPENCODE;
+  process.env.REMODEX_DISABLE_OPENCODE = "1";
+  try {
+    const responses = [];
+    const runtimeMessages = [];
+    const router = createRuntimeProviderRouter({
+      sendApplicationResponse: (msg) => responses.push(JSON.parse(msg)),
+      sendCodexRequest: async () => ({ items: [] }),
+      sendRuntimeMessage: (msg) => runtimeMessages.push(JSON.parse(msg)),
+      projectRegistry: { getOrCreateForCwd() { return { id: "p" }; } },
+      ownershipStore: { ownsThread() { return false; }, setOwnership() {}, getOwner() { return null; } },
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({ id: "catalog-disabled-msg3", method: "runtime/catalog", params: {} }),
+    );
+    await waitOneTick();
+
+    const catalog = responses.find((response) => response.id === "catalog-disabled-msg3")?.result;
+    assert.ok(catalog);
+    const codexRuntime = catalog.runtimes.find((runtime) => runtime.id === "codex");
+    const opencodeRuntime = catalog.runtimes.find((runtime) => runtime.id === "opencode");
+    assert.ok(codexRuntime);
+    assert.equal(opencodeRuntime, undefined);
+
+    const codexNotify = {
+      method: "turn/completed",
+      params: { threadId: "c1", turnId: "t1", status: "completed" },
+    };
+    router.handleApplicationMessage(JSON.stringify(codexNotify));
+    await waitOneTick();
+
+    const lateSuppressed = runtimeMessages.filter(
+      (message) => message.event === "bridge_late_delta_suppressed",
+    );
+    assert.equal(lateSuppressed.length, 0);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previous;
+    }
+  }
+});

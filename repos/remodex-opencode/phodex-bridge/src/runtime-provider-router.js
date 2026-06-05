@@ -697,6 +697,8 @@ function resolveProviders({
   if (isOpenCodeRuntimeDisabled(env)) {
     return [];
   }
+  // MSG-3: reliability metrics/rates (late guard, buffer drain, watchdog, dedup persist) active for OC notify paths.
+  // DISABLE=1 regression ensures codex notify/router paths unaffected (see opencode-regression.test.js).
   return [
     createOpenCodeProvider({
       sendApplicationMessage: sendRuntimeMessage || sendApplicationResponse,

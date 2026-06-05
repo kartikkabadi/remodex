@@ -1075,14 +1075,11 @@ function createOpenCodeProvider({
 
       const scheduleWatchdog = () => {
         clearWatchdog();
-        active.watchdogTimer = setTimeout(async () => {
+        active.watchdogTimer = setTimeout(() => {
           if (active.completed) {
             return;
           }
-          if (await hydrateAssistantFromSessionMessages(active)) {
-            completeTurn({ status: "completed", active, source: "watchdog_hydrate" });
-            return;
-          }
+          // Enforce watchdog: fire error if no complete within window (no hydrate recovery here).
           completeTurn({
             status: "failed",
             errorMessage: "OpenCode turn timed out waiting for completion.",
@@ -1113,6 +1110,27 @@ function createOpenCodeProvider({
             hasTurnId: Boolean(eventTurnId),
           }),
         );
+
+        // Strict late guard (MSG-3): skip + trace if event's turnId no longer matches active for thread.
+        // Prevents late deltas/completions from prior turns on same thread being forwarded after new turn starts.
+        const eventThreadId = readString(params && (params.threadId || params.thread_id)) || readString(active.thread.id);
+        const eventTurnIdForCheck = readString(eventTurnId || (params && (params.turnId || params.turn_id)));
+        if (eventTurnIdForCheck && eventThreadId) {
+          const currentActiveForThread = findActiveTurnByThread(eventThreadId);
+          if (currentActiveForThread && currentActiveForThread !== eventTurnIdForCheck) {
+            console.log(
+              JSON.stringify({
+                event: "bridge_late_delta_suppressed",
+                threadId: eventThreadId,
+                turnId: eventTurnIdForCheck,
+                activeTurnId: currentActiveForThread,
+                method,
+                reason: "active_turn_mismatch",
+              })
+            );
+            return;
+          }
+        }
 
         const enriched = {
           ...params,
