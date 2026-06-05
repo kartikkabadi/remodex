@@ -8,9 +8,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildModelFromAny,
+  buildStaticSlashCommands,
   createOpenCodeClient,
   dispatchEvent,
   flattenProviderModels,
+  normalizeCommandNameForSdk,
+  normalizeCommandTokenForAllowlist,
   resolveAgentsList,
   resolveSessionIdFromCreateResponse,
 } = require("../src/opencode-client");
@@ -44,6 +47,7 @@ function createMockOpencodeClientImpl() {
         create: async () => ({ sessionID: "ses_test" }),
         get: async () => ({}),
         prompt: async () => ({}),
+        command: async () => ({}),
         setConfig: async () => ({}),
         abort: async () => ({}),
         messages: async () => ({ messages: [] }),
@@ -98,6 +102,7 @@ test("creates client when baseUrl is provided", async () => {
   assert.equal(typeof client.replyToPermission, "function");
   assert.equal(typeof client.subscribeToEvents, "function");
   assert.equal(typeof client.fork, "function");
+  assert.equal(typeof client.sessionCommand, "function");
   assert.equal(typeof client.listCommands, "function");
   assert.equal(typeof client.listSkills, "function");
 });
@@ -315,6 +320,49 @@ test("getMessages returns message array", async () => {
 test("replyToPermission sends permission reply", async () => {
   const client = await createTestClient();
   await assert.doesNotReject(() => client.replyToPermission("perm-1", true));
+});
+
+test("normalizeCommandNameForSdk strips leading slash", () => {
+  assert.equal(normalizeCommandNameForSdk("/skills"), "skills");
+  assert.equal(normalizeCommandNameForSdk("skills"), "skills");
+});
+
+test("normalizeCommandTokenForAllowlist lowercases slash token", () => {
+  assert.equal(normalizeCommandTokenForAllowlist("/Skills"), "/skills");
+  assert.equal(normalizeCommandTokenForAllowlist("skills"), "/skills");
+});
+
+test("buildStaticSlashCommands marks builtins requiresArguments false", () => {
+  const builtins = buildStaticSlashCommands();
+  assert.ok(builtins.length >= 15);
+  assert.ok(builtins.every((entry) => entry.requiresArguments === false));
+});
+
+test("sessionCommand strips leading slash for SDK session.command", async () => {
+  const sdkCalls = [];
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      session: {
+        command: async (body) => {
+          sdkCalls.push(body);
+          return {};
+        },
+      },
+    }),
+  });
+
+  await client.sessionCommand({
+    sessionID: "ses_cmd",
+    command: "/skills",
+    arguments: "",
+    cwd: "/tmp/project",
+  });
+
+  assert.equal(sdkCalls.length, 1);
+  assert.equal(sdkCalls[0].command, "skills");
+  assert.equal(sdkCalls[0].arguments, "");
+  assert.equal(sdkCalls[0].directory, "/tmp/project");
 });
 
 test("listCommands API surface is exposed", async () => {

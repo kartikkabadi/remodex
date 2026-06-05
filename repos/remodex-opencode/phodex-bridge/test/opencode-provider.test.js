@@ -139,6 +139,7 @@ test("provider has expected API surface", () => {
   assert.equal(typeof provider.listModels, "function");
   assert.equal(typeof provider.listAgents, "function");
   assert.equal(typeof provider.listCommands, "function");
+  assert.equal(typeof provider.commandExecute, "function");
   assert.equal(typeof provider.listThreads, "function");
   assert.equal(typeof provider.handleRequest, "function");
   assert.equal(typeof provider.shutdown, "function");
@@ -169,6 +170,78 @@ test("listCommands returns static builtins when server factory throws on start",
   assert.deepEqual(
     tokens.slice(0, buildStaticSlashCommands().length),
     buildStaticSlashCommands().map((command) => command.token),
+  );
+});
+
+test("commandExecute forwards /skills to session.command command skills", async () => {
+  const sdkCommandCalls = [];
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_skills123" }),
+            command: async (body) => {
+              sdkCommandCalls.push(body);
+              return { info: {}, parts: [] };
+            },
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: "/tmp/skills-project" },
+  });
+
+  const result = await provider.commandExecute({
+    id: 2,
+    method: "command/execute",
+    params: {
+      threadId: start.thread.id,
+      command: "/skills",
+      arguments: "",
+      directory: "/tmp/skills-project",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sessionId, "ses_skills123");
+  assert.equal(sdkCommandCalls.length, 1);
+  assert.equal(sdkCommandCalls[0].command, "skills");
+  assert.equal(sdkCommandCalls[0].arguments, "");
+});
+
+test("commandExecute rejects commands not in allowlist", async () => {
+  const provider = makeProvider({
+    clientFactory: async () => ({
+      ...fakeClient(),
+      listCommands: async () => [{ token: "/build", title: "Build", description: "" }],
+      sessionCommand: async () => ({}),
+    }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: {},
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 2,
+        method: "command/execute",
+        params: { threadId: start.thread.id, command: "/skills" },
+      }),
+    { errorCode: "command_not_allowed" },
   );
 });
 

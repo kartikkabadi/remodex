@@ -184,6 +184,25 @@ function createRuntimeProviderRouter({
       return true;
     }
 
+    if (method === "command/execute") {
+      respondAsync(parsed, async () => {
+        const ownershipMismatch = resolveThreadOwnershipMismatch(parsed, threadOwnership);
+        if (ownershipMismatch) {
+          throw ownershipMismatch;
+        }
+        const opencodeProvider = runtimeProviders.find((p) => p.id === OPENCODE_PROVIDER_ID);
+        if (!opencodeProvider || typeof opencodeProvider.commandExecute !== "function") {
+          return { ok: false, errorCode: "opencode_unavailable" };
+        }
+        rememberProjectFromRequest(projectRegistry, parsed, {
+          source: "command-execute",
+          provider: OPENCODE_PROVIDER_ID,
+        });
+        return opencodeProvider.commandExecute(parsed);
+      });
+      return true;
+    }
+
     if (method === "skills/list") {
       respondAsync(parsed, async () => mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest));
       return true;

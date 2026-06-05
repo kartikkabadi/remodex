@@ -19,11 +19,24 @@ const { resolveLogoProviderId } = require("./opencode-provider-inventory");
 // TUI/CLI builtins not auto-returned by current SDK command.list (which focuses on Service/agent/skill-derived per vendored command + acp); keep manually in sync on vendored updates or future sync PR. Union deduped by token before return. Always test under default DISABLE=1 that codex paths unaffected.
 const BUILTINS = ['/undo','/redo','/share','/help','/init','/compact','/login','/logout','/models','/agents','/skills','/mcp','/config','/clear','/exit'];
 
+function normalizeCommandNameForSdk(token) {
+  const trimmed = readString(token).trim();
+  return trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+}
+
+function normalizeCommandTokenForAllowlist(token) {
+  const trimmed = readString(token).trim().toLowerCase();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
 function buildStaticSlashCommands() {
   return BUILTINS.map((token) => {
     const base = token.slice(1);
     const title = token === "/mcp" ? "MCP" : base.replace(/^\w/, (c) => c.toUpperCase());
-    return { token, title, description: "" };
+    return { token, title, description: "", requiresArguments: false };
   });
 }
 
@@ -336,6 +349,48 @@ async function createOpenCodeClient({
     };
   }
 
+  async function sessionCommand({
+    sessionID,
+    command,
+    arguments: args = "",
+    cwd,
+    model,
+    agent,
+  } = {}) {
+    const sdkName = normalizeCommandNameForSdk(command);
+    if (!sdkName) {
+      throw new Error("OpenCode session.command requires a command name.");
+    }
+
+    const body = {
+      sessionID,
+      command: sdkName,
+      arguments: readString(args) || "",
+    };
+    const directory = readString(cwd);
+    if (directory) {
+      body.directory = directory;
+    }
+    const normalizedAgent = readString(agent);
+    if (normalizedAgent) {
+      body.agent = normalizedAgent;
+    }
+    let parsedModel = null;
+    if (model && typeof model === "object" && model.providerID && model.modelID) {
+      parsedModel = {
+        providerID: readString(model.providerID),
+        modelID: readString(model.modelID),
+      };
+    } else if (model) {
+      parsedModel = parseOpenCodeModelSlug(model);
+    }
+    if (parsedModel?.providerID && parsedModel?.modelID) {
+      body.model = `${parsedModel.providerID}/${parsedModel.modelID}`;
+    }
+
+    return withTimeout(client.session.command(body), REQUEST_TIMEOUT_MS);
+  }
+
   async function fork(sessionId) {
     const response = await withTimeout(
       client.session.fork({ sessionID: sessionId }),
@@ -468,6 +523,7 @@ async function createOpenCodeClient({
     replyToPermission,
     subscribeToEvents,
     fork,
+    sessionCommand,
     listCommands,
     listSkills,
     selectTuiSession,
@@ -1113,6 +1169,8 @@ function resolveProviderAuthPayload(response) {
 module.exports = {
   BUILTINS,
   buildStaticSlashCommands,
+  normalizeCommandNameForSdk,
+  normalizeCommandTokenForAllowlist,
   createOpenCodeClient,
   dispatchEvent,
   normalizeSessionMessagesResponse,

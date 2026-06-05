@@ -698,6 +698,57 @@ test("skills/list merges Codex and OpenCode skill buckets", async () => {
   assert.deepEqual(names, ["codex-skill", "opencode-skill"]);
 });
 
+test("command/execute routes to opencode provider commandExecute", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listCommands() {
+          return [{ token: "/skills", title: "Skills", description: "" }];
+        },
+        async commandExecute(request) {
+          assert.equal(request.method, "command/execute");
+          assert.equal(request.params.command, "/skills");
+          return { ok: true, sessionId: "ses_router" };
+        },
+        listThreads: async () => ({ data: [] }),
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {},
+      },
+    ],
+  });
+
+  assert.equal(
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "cmd-exec-1",
+        method: "command/execute",
+        params: { threadId: "opencode-thread-1", command: "/skills" },
+      }),
+    ),
+    true,
+  );
+  await responsePromise;
+
+  assert.equal(responsePayload.id, "cmd-exec-1");
+  assert.deepEqual(responsePayload.result, { ok: true, sessionId: "ses_router" });
+});
+
 test("command/list returns empty when no opencode provider", async () => {
   let responsePayload = null;
   let resolveResponse;

@@ -20,6 +20,7 @@ const CAPABILITIES = [
   "supportsApprovals",
   "supportsStreamingTools",
   "supportsSlashCommands",
+  "supportsSlashCommandExecute",
   "supportsMCP",
   "supportsSkillAutocomplete",
   "supportsStructuredSkillInput",
@@ -39,6 +40,7 @@ const CODEX_CAPABILITIES = {
   supportsApprovals: true,
   supportsStreamingTools: true,
   supportsSlashCommands: true,
+  supportsSlashCommandExecute: false,
   supportsMCP: true,
   supportsSkillAutocomplete: true,
   supportsStructuredSkillInput: true,
@@ -58,6 +60,7 @@ const OPENCODE_CAPABILITIES = {
   supportsApprovals: true,
   supportsStreamingTools: true,
   supportsSlashCommands: true,
+  supportsSlashCommandExecute: true,
   supportsMCP: false,
   supportsSkillAutocomplete: true,
   // RP-SKILL-3: kept false pending upstream SDK support for skills:[] (or dedicated skill parts) in

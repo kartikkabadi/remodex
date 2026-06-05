@@ -11,6 +11,8 @@ const { createOpenCodeServer } = require("./opencode-server");
 const {
   buildStaticSlashCommands,
   createOpenCodeClient,
+  normalizeCommandNameForSdk,
+  normalizeCommandTokenForAllowlist,
   normalizeSessionMessagesResponse,
 } = require("./opencode-client");
 const {
@@ -1741,10 +1743,162 @@ function createOpenCodeProvider({
     }
   }
 
-  // command/execute not wired in handleRequest until PR4. On success: ensureThreadSession +
-  // markUserStartedInProcess after SDK execute completes.
-  async function commandExecute() {
-    throw unsupportedMethodError("command/execute");
+  async function commandExecute(request) {
+    const params = request?.params || {};
+    const threadId = readThreadId(params);
+    const commandToken = readString(params.command);
+    const commandSdk = normalizeCommandNameForSdk(commandToken);
+    const allowlistToken = normalizeCommandTokenForAllowlist(commandToken);
+
+    if (!allowlistToken) {
+      const error = new Error("command/execute requires a slash command token.");
+      error.errorCode = "command_required";
+      logCommandExecute({ commandToken, commandSdk, ok: false, errorCode: error.errorCode, threadId });
+      throw error;
+    }
+
+    let thread;
+    try {
+      thread = await ensureThreadSession(await requireThread(threadId));
+    } catch (error) {
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: false,
+        errorCode: readString(error?.errorCode) || "command_execute_failed",
+        threadId,
+      });
+      throw error;
+    }
+
+    const directory =
+      readString(params.directory || params.cwd) || readString(thread.cwd) || process.cwd();
+    const allowedCommands = await listCommands(directory);
+    const allowedTokens = new Set(
+      allowedCommands.map((entry) => normalizeCommandTokenForAllowlist(entry.token)),
+    );
+    if (!allowedTokens.has(allowlistToken)) {
+      const error = new Error(`Slash command not allowed: ${commandToken}`);
+      error.errorCode = "command_not_allowed";
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: false,
+        errorCode: error.errorCode,
+        threadId: thread.id,
+        directory,
+      });
+      throw error;
+    }
+
+    await ensureStarted();
+    if (!client || typeof client.sessionCommand !== "function") {
+      const error = new Error("OpenCode session.command is unavailable.");
+      error.errorCode = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: false,
+        errorCode: error.errorCode,
+        threadId: thread.id,
+      });
+      throw error;
+    }
+
+    if (!readString(thread.sessionId)) {
+      const sessionId = await client.createSession({ cwd: directory });
+      if (!readString(sessionId)) {
+        const error = new Error(
+          "OpenCode createSession returned no session id; cannot execute slash command.",
+        );
+        error.errorCode = ERROR_CODES.OPENCODE_TURN_FAILED.errorCode;
+        logCommandExecute({
+          commandToken,
+          commandSdk,
+          ok: false,
+          errorCode: error.errorCode,
+          threadId: thread.id,
+        });
+        throw error;
+      }
+      thread.sessionId = sessionId;
+      persistSessionRecord(thread);
+    }
+
+    const args =
+      readString(params.arguments) ||
+      readString(params.args) ||
+      "";
+
+    try {
+      await client.sessionCommand({
+        sessionID: thread.sessionId,
+        command: commandToken,
+        arguments: args,
+        cwd: directory,
+        model: thread.model,
+        agent: thread.agent,
+      });
+      markUserStartedInProcess(thread);
+      thread.updatedAt = new Date().toISOString();
+      threads.set(thread.id, thread);
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: true,
+        threadId: thread.id,
+        sessionId: thread.sessionId,
+        directory,
+      });
+      return { ok: true, sessionId: thread.sessionId };
+    } catch (error) {
+      if (isInvalidOpenCodeSessionError(error)) {
+        const expired = createOpenCodeSessionExpiredError(thread.id);
+        logCommandExecute({
+          commandToken,
+          commandSdk,
+          ok: false,
+          errorCode: expired.errorCode,
+          threadId: thread.id,
+        });
+        throw expired;
+      }
+      const failed = new Error(
+        readString(error?.message) || "OpenCode slash command execution failed.",
+      );
+      failed.errorCode = readString(error?.errorCode) || ERROR_CODES.OPENCODE_TURN_FAILED.errorCode;
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: false,
+        errorCode: failed.errorCode,
+        threadId: thread.id,
+      });
+      throw failed;
+    }
+  }
+
+  function logCommandExecute({
+    commandToken,
+    commandSdk,
+    ok,
+    errorCode = null,
+    threadId = null,
+    sessionId = null,
+    directory = null,
+  } = {}) {
+    console.log(
+      JSON.stringify({
+        event: "opencode_command_execute",
+        commandToken: readString(commandToken) || null,
+        commandSdk: readString(commandSdk) || null,
+        ok: ok === true,
+        errorCode: readString(errorCode) || null,
+        threadId: readString(threadId) || null,
+        sessionId: readString(sessionId) || null,
+        directory: readString(directory) || null,
+      }),
+    );
   }
 
   function rememberThreadProject(thread, source) {
@@ -1870,6 +2024,7 @@ function createOpenCodeProvider({
     listModels,
     listAgents,
     listCommands,
+    commandExecute,
     listSkills,
     listThreads,
     handleRequest,

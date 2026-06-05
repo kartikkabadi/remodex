@@ -364,6 +364,46 @@ test("command/list returns >= 15 static builtins when OpenCode server cannot sta
   assert.deepEqual(tokens.slice(0, buildStaticSlashCommands().length), buildStaticSlashCommands().map((c) => c.token));
 });
 
+test("command/execute returns opencode_unavailable when OpenCode provider is absent", async () => {
+  const { request } = createTestRouter({ providers: [] });
+  const response = await request({
+    id: "cmd-exec-off",
+    method: "command/execute",
+    params: {
+      threadId: "opencode-thread-test",
+      command: "/skills",
+    },
+  });
+
+  assert.equal(response.id, "cmd-exec-off");
+  assert.deepEqual(response.result, { ok: false, errorCode: "opencode_unavailable" });
+});
+
+test("command/execute returns opencode_unavailable when OpenCode is disabled", async () => {
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  process.env.REMODEX_DISABLE_OPENCODE = "1";
+  try {
+    const { request } = createTestRouter({});
+    const response = await request({
+      id: "cmd-exec-disable",
+      method: "command/execute",
+      params: {
+        threadId: "opencode-thread-test",
+        command: "/skills",
+      },
+    });
+
+    assert.equal(response.id, "cmd-exec-disable");
+    assert.deepEqual(response.result, { ok: false, errorCode: "opencode_unavailable" });
+  } finally {
+    if (previousDisable === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+    }
+  }
+});
+
 // opencode-regression.test.js for DISABLE=1 command paths parity
 test("command/list under default DISABLE=1 (via test-env) has no opencode provider (codex command paths unaffected)", async () => {
   const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;

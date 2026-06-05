@@ -31,5 +31,30 @@ final class ProviderCapabilitiesDecodeTests: XCTestCase {
 
         XCTAssertFalse(capabilities.supportsDesktopHandoff)
         XCTAssertFalse(capabilities.supportsMCP)
+        XCTAssertFalse(capabilities.supportsSlashCommandExecute)
+    }
+
+    func testMissingSupportsSlashCommandExecuteDefaultsToFalse() throws {
+        let json = """
+        {
+          "supportsAgentSelection": true,
+          "supportsReasoningEffort": false,
+          "supportsFastMode": false,
+          "supportsPlanMode": false,
+          "supportsStreamingTools": true,
+          "supportsApprovals": true,
+          "supportsFork": true,
+          "supportsVoice": false,
+          "supportsSlashCommands": true,
+          "supportsWorktree": false,
+          "supportsSkillAutocomplete": true,
+          "supportsSteer": false,
+          "supportsQueue": true
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let capabilities = try JSONDecoder().decode(ProviderCapabilities.self, from: data)
+
+        XCTAssertFalse(capabilities.supportsSlashCommandExecute)
     }
 }

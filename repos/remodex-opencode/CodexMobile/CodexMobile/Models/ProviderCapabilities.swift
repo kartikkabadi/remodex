@@ -18,6 +18,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsVoice: Bool
     let supportsDesktopHandoff: Bool
     let supportsSlashCommands: Bool
+    let supportsSlashCommandExecute: Bool
     let supportsMCP: Bool
     let supportsWorktree: Bool
     let supportsSkillAutocomplete: Bool
@@ -36,6 +37,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsVoice: Bool,
         supportsDesktopHandoff: Bool,
         supportsSlashCommands: Bool,
+        supportsSlashCommandExecute: Bool = false,
         supportsMCP: Bool,
         supportsWorktree: Bool,
         supportsSkillAutocomplete: Bool,
@@ -53,6 +55,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         self.supportsVoice = supportsVoice
         self.supportsDesktopHandoff = supportsDesktopHandoff
         self.supportsSlashCommands = supportsSlashCommands
+        self.supportsSlashCommandExecute = supportsSlashCommandExecute
         self.supportsMCP = supportsMCP
         self.supportsWorktree = supportsWorktree
         self.supportsSkillAutocomplete = supportsSkillAutocomplete
@@ -72,6 +75,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         case supportsVoice
         case supportsDesktopHandoff
         case supportsSlashCommands
+        case supportsSlashCommandExecute
         case supportsMCP
         case supportsWorktree
         case supportsSkillAutocomplete
@@ -92,6 +96,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsVoice = (try? container.decodeIfPresent(Bool.self, forKey: .supportsVoice)) ?? false
         supportsDesktopHandoff = (try? container.decodeIfPresent(Bool.self, forKey: .supportsDesktopHandoff)) ?? false
         supportsSlashCommands = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSlashCommands)) ?? true
+        supportsSlashCommandExecute =
+            (try? container.decodeIfPresent(Bool.self, forKey: .supportsSlashCommandExecute)) ?? false
         supportsMCP = (try? container.decodeIfPresent(Bool.self, forKey: .supportsMCP)) ?? false
         supportsWorktree = (try? container.decodeIfPresent(Bool.self, forKey: .supportsWorktree)) ?? false
         supportsSkillAutocomplete = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillAutocomplete)) ?? false
@@ -113,6 +119,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         try container.encode(supportsVoice, forKey: .supportsVoice)
         try container.encode(supportsDesktopHandoff, forKey: .supportsDesktopHandoff)
         try container.encode(supportsSlashCommands, forKey: .supportsSlashCommands)
+        try container.encode(supportsSlashCommandExecute, forKey: .supportsSlashCommandExecute)
         try container.encode(supportsMCP, forKey: .supportsMCP)
         try container.encode(supportsWorktree, forKey: .supportsWorktree)
         try container.encode(supportsSkillAutocomplete, forKey: .supportsSkillAutocomplete)
@@ -132,6 +139,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsVoice: true,
         supportsDesktopHandoff: true,
         supportsSlashCommands: true,
+        supportsSlashCommandExecute: false,
         supportsMCP: true,
         supportsWorktree: true,
         supportsSkillAutocomplete: true,
@@ -151,6 +159,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsVoice: false,
         supportsDesktopHandoff: false,
         supportsSlashCommands: true,
+        supportsSlashCommandExecute: true,
         supportsMCP: false,
         supportsWorktree: false,
         supportsSkillAutocomplete: true,

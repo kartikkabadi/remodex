@@ -69,6 +69,7 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
+        "supportsSlashCommandExecute": true,
         "supportsMCP": false,
         "supportsSkillAutocomplete": true,
         "supportsStructuredSkillInput": false,
@@ -294,6 +295,7 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
+        "supportsSlashCommandExecute": false,
         "supportsMCP": true,
         "supportsSkillAutocomplete": true,
         "supportsStructuredSkillInput": true,
@@ -324,6 +326,7 @@ All fields optional. Omit for first page.
         "supportsApprovals": true,
         "supportsStreamingTools": true,
         "supportsSlashCommands": true,
+        "supportsSlashCommandExecute": true,
         "supportsMCP": false,
         "supportsSkillAutocomplete": true,
         "supportsStructuredSkillInput": false,
@@ -382,6 +385,51 @@ Optional project directory for slash-command discovery. `directory` is preferred
 **Routing behavior:** Router calls `opencodeProvider.listCommands(directory)` when the OpenCode harness is registered. Otherwise returns `{ commands: [] }`. Does not consult thread ownership and does not call the Codex app-server.
 
 **OpenCode-only notes:** Requires OpenCode runtime not disabled (`REMODEX_DISABLE_OPENCODE` unset) and a running `opencode serve` instance (`ensureStarted`). On startup failure or SDK errors, the provider returns an empty array (warnings are logged on the bridge). Commands come from the SDK `command.list` query scoped to `directory`. iOS OpenCode threads load commands via `command/list` (`CodexService+SlashCommands`, `TurnViewModel.loadBridgeSlashCommandsIfNeeded`); Codex threads keep the hardcoded slash enum only.
+
+Static CLI builtins from `buildStaticSlashCommands()` include **`requiresArguments: false`** so zero-arg commands (e.g. `/skills`, `/clear`) can be sent immediately without an arguments sheet.
+
+### command/execute
+
+**Routing:** `router` — handled in `runtime-provider-router.js`, never forwarded to Codex
+
+**Params:**
+```json
+{
+  "threadId": "opencode-thread-1717000000-a1b2c3",
+  "command": "/skills",
+  "arguments": "",
+  "directory": "/path/to/project",
+  "cwd": "/path/to/project"
+}
+```
+
+`thread_id` and `id` are accepted aliases for `threadId`. `command` may include a leading `/`; the bridge strips it for OpenCode SDK `session.command` (`command: "skills"`). `arguments` is optional (defaults to `""`). `directory` / `cwd` scope allowlist discovery; when omitted, the owned thread's `cwd` is used.
+
+**Result (success):**
+```json
+{ "ok": true, "sessionId": "ses_abc123" }
+```
+
+**Result (OpenCode unavailable — provider not registered or disabled):**
+```json
+{ "ok": false, "errorCode": "opencode_unavailable" }
+```
+
+**Routing behavior:** `resolveThreadOwnershipMismatch` runs before the OpenCode provider (same as `turn/start`). When the OpenCode harness is registered, `opencodeProvider.commandExecute` validates the command against `listCommands(directory)`, ensures a session (`createSession` on first use), calls SDK `session.command`, sets `userStartedInProcess` on success, and logs `opencode_command_execute` (`commandToken`, `commandSdk`, `ok`, `errorCode`).
+
+**Errors (OpenCode provider):**
+
+| errorCode | When |
+|-----------|------|
+| `thread_not_found` | Unknown `threadId` |
+| `thread_provider_mismatch` | Explicit provider field conflicts with ownership store |
+| `command_required` | Missing `command` |
+| `command_not_allowed` | Token not in allowlist for `directory` |
+| `opencode_session_expired` | SDK session missing/404 |
+| `opencode_server_unreachable` | SDK client unavailable |
+| `opencode_turn_failed` | SDK `session.command` failed |
+
+**Capability:** `supportsSlashCommandExecute` (17th catalog flag) — `true` for OpenCode, `false` for Codex. Distinct from `supportsSlashCommands` (list/autocomplete visibility).
 
 ### skills/list
 

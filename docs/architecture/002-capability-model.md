@@ -1,7 +1,7 @@
 # ADR-002: Capability Model
 
 **Date:** 2026-05-30  
-**Status:** Accepted (updated 2026-06-02 — 15 flags + optional 16th)
+**Status:** Accepted (updated 2026-06-06 — 17 flags)
 
 ## Context
 
@@ -11,11 +11,11 @@ The iOS app must not make runtime-specific decisions for **visibility** ("if pro
 
 ## Decision
 
-Use **15 capability flags** (plus optional **16th** `supportsStructuredSkillInput`) as the source of truth for what the iOS composer shows, hides, or greys out.
+Use **17 capability flags** as the source of truth for what the iOS composer shows, hides, or greys out.
 
 Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilities.js`.
 
-### The 15 Flags
+### The 17 Flags
 
 | Flag | What it controls |
 |------|-----------------|
@@ -29,19 +29,20 @@ Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilit
 | `supportsFork` | Thread forking |
 | `supportsApprovals` | Tool approval UI |
 | `supportsStreamingTools` | Tool call cards in timeline |
-| `supportsSlashCommands` | Slash command autocomplete |
+| `supportsSlashCommands` | Slash command autocomplete / `command/list` |
+| `supportsSlashCommandExecute` | Bridge `command/execute` (OpenCode `session.command`) |
 | `supportsMCP` | MCP settings row |
 | `supportsSkillAutocomplete` | `$` skill autocomplete |
+| `supportsStructuredSkillInput` | Structured `skill` items on `turn/start` |
 | `supportsSteer` | Steer on queued drafts |
 | `supportsQueue` | Local draft queue |
-
-### 16th flag (structured skills)
 
 | Flag | Codex default | OpenCode default |
 |------|---------------|------------------|
 | `supportsStructuredSkillInput` | `true` | `false` |
+| `supportsSlashCommandExecute` | `false` | `true` |
 
-Do not overload `supportsSkillAutocomplete` — autocomplete ≠ structured turn payload.
+Do not overload `supportsSkillAutocomplete` — autocomplete ≠ structured turn payload. Do not overload `supportsSlashCommands` — list visibility ≠ execute RPC.
 
 ### Capability cascade
 

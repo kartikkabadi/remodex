@@ -117,6 +117,16 @@ test("OpenCode catalog advertises supportsDesktopHandoff after PR8 sign-off", ()
   );
 });
 
+test("OpenCode advertises supportsSlashCommandExecute for command/execute RPC", () => {
+  const capabilities = resolveModelCapabilities("opencode", {});
+  assert.equal(capabilities.supportsSlashCommandExecute, true);
+});
+
+test("Codex does not advertise supportsSlashCommandExecute", () => {
+  const capabilities = resolveModelCapabilities("codex", {});
+  assert.equal(capabilities.supportsSlashCommandExecute, false);
+});
+
 test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR1)", () => {
   const capabilities = resolveOpenCodeCatalogCapabilities({});
   const expected = {
@@ -131,6 +141,7 @@ test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR
     supportsApprovals: true,
     supportsStreamingTools: true,
     supportsSlashCommands: true,
+    supportsSlashCommandExecute: true,
     supportsMCP: false,
     supportsSkillAutocomplete: true,
     supportsStructuredSkillInput: false,
