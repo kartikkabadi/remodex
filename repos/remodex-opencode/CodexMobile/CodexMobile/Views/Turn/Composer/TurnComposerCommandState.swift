@@ -232,7 +232,7 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         for command: BridgeSlashCommand,
         openCodeBuiltins: Set<String> = OpenCodeSlashBuiltins.tokens,
         codexOverlapTokens: Set<String>,
-        skillNames: Set<String>
+        skillNames: Set<String> = []
     ) -> SlashCommandSection {
         if let explicit = SlashCommandSection(bridgeSectionHint: command.section) {
             return explicit

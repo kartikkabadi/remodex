@@ -574,6 +574,11 @@ enum TurnTimelineReducer {
     // Collapses optimistic phone-send rows with their confirmed runtime echoes so
     // a locally-started turn does not render duplicate user prompts.
     static func removeDuplicateUserMessages(in messages: [CodexMessage]) -> [CodexMessage] {
+        let upgraded = mergeUserMessageDeliveryUpgrades(in: messages)
+        return collapseDuplicatePendingUserMessages(in: upgraded)
+    }
+
+    private static func mergeUserMessageDeliveryUpgrades(in messages: [CodexMessage]) -> [CodexMessage] {
         var result: [CodexMessage] = []
         result.reserveCapacity(messages.count)
 
@@ -601,6 +606,43 @@ enum TurnTimelineReducer {
         return result
     }
 
+    private static func collapseDuplicatePendingUserMessages(in messages: [CodexMessage]) -> [CodexMessage] {
+        var result: [CodexMessage] = []
+        result.reserveCapacity(messages.count)
+
+        for message in messages {
+            guard message.role == .user else {
+                result.append(message)
+                continue
+            }
+
+            guard let previousIndex = result.indices.reversed().first(where: { index in
+                shouldCollapseDuplicatePendingUserMessages(previous: result[index], incoming: message)
+            }) else {
+                result.append(message)
+                continue
+            }
+
+            result[previousIndex] = mergedUserMessage(previous: result[previousIndex], incoming: message)
+        }
+
+        return result
+    }
+
+    private static func shouldCollapseDuplicatePendingUserMessages(
+        previous: CodexMessage,
+        incoming: CodexMessage
+    ) -> Bool {
+        previous.role == .user
+            && incoming.role == .user
+            && previous.deliveryState == .pending
+            && incoming.deliveryState == .pending
+            && previous.threadId == incoming.threadId
+            && messageTextsMatchForDedupe(previous.text, incoming.text)
+            && userMessageMetadataLooksCompatible(previous: previous, incoming: incoming)
+            && abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= userDedupeTimeWindowSeconds
+    }
+
     private static func shouldMergeUserMessages(previous: CodexMessage, incoming: CodexMessage) -> Bool {
         guard previous.role == .user,
               incoming.role == .user,
@@ -617,12 +659,6 @@ enum TurnTimelineReducer {
                 && previous.deliveryState == .pending
                 && incoming.deliveryState == .confirmed
                 && abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= userDedupeTimeWindowSeconds
-        }
-
-        if previous.deliveryState == .pending,
-           incoming.deliveryState == .pending,
-           abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= userDedupeTimeWindowSeconds {
-            return true
         }
 
         // Allow only the phone-send upgrade path: optimistic local row without turnId

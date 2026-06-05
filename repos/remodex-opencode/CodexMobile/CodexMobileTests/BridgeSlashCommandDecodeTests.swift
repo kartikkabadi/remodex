@@ -156,32 +156,43 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
 
         service.requestTransportOverride = { _, _ in
             requestCount += 1
-            if requestCount == 1 {
-                var commands: [JSONValue] = []
-                for index in 0..<CodexService.minimumPersistedSlashCommandCount {
-                    commands.append(
-                        .object([
-                            "token": .string("/cmd\(index)"),
-                            "title": .string("Cmd \(index)"),
-                            "description": .string(""),
-                        ])
-                    )
-                }
+            if requestCount == 2 {
                 return RPCMessage(
                     id: .string(UUID().uuidString),
-                    result: .object(["commands": .array(commands)]),
+                    result: .object(["commands": .array([])]),
                     includeJSONRPC: false
+                )
+            }
+
+            var commands: [JSONValue] = []
+            for index in 0..<CodexService.minimumPersistedSlashCommandCount {
+                commands.append(
+                    .object([
+                        "token": .string("/cmd\(index)"),
+                        "title": .string("Cmd \(index)"),
+                        "description": .string(""),
+                    ])
                 )
             }
             return RPCMessage(
                 id: .string(UUID().uuidString),
-                result: .object(["commands": .array([])]),
+                result: .object(["commands": .array(commands)]),
                 includeJSONRPC: false
             )
         }
 
         let first = try await service.fetchSlashCommands(directory: "/tmp/mem-cache-clear")
         XCTAssertEqual(first.count, CodexService.minimumPersistedSlashCommandCount)
+
+        // Expire the in-memory TTL so the next fetch observes transport empty-success.
+        let cacheKey = "/tmp/mem-cache-clear"
+        if let cached = service.slashCommandCacheByDirectory[cacheKey] {
+            service.slashCommandCacheByDirectory[cacheKey] = SlashCommandCacheEntry(
+                commands: cached.commands,
+                fetchedAt: Date(timeIntervalSince1970: 0),
+                directory: cached.directory
+            )
+        }
 
         let empty = try await service.fetchSlashCommands(directory: "/tmp/mem-cache-clear")
         XCTAssertTrue(empty.isEmpty)
@@ -613,7 +624,7 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             for: BridgeSlashCommand(token: "/mcp", title: "MCP", description: ""),
             codexOverlapTokens: []
         )
-        XCTAssertEqual(section, .ocBuiltin)
+        XCTAssertEqual(section, SlashCommandSection.ocBuiltin)
     }
 
     func testSlashSection_codexOverlapCompactUsesOcBuiltin() {
@@ -627,7 +638,7 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             for: BridgeSlashCommand(token: "/compact", title: "Compact", description: ""),
             codexOverlapTokens: codexTokens
         )
-        XCTAssertEqual(section, .ocBuiltin)
+        XCTAssertEqual(section, SlashCommandSection.ocBuiltin)
     }
 
     func testSlashSection_skillDerived() {
@@ -635,14 +646,14 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             for: BridgeSlashCommand(token: "/lint", title: "Lint", description: "", source: "skill"),
             codexOverlapTokens: []
         )
-        XCTAssertEqual(bySource, .skillDerived)
+        XCTAssertEqual(bySource, SlashCommandSection.skillDerived)
 
         let byName = BridgeSlashCommand.classifySection(
             for: BridgeSlashCommand(token: "/review-skill", title: "Review", description: ""),
             codexOverlapTokens: [],
             skillNames: ["review-skill"]
         )
-        XCTAssertEqual(byName, .skillDerived)
+        XCTAssertEqual(byName, SlashCommandSection.skillDerived)
     }
 
     func testSlashSection_agent() {
@@ -651,21 +662,21 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
                 for: BridgeSlashCommand(token: "/agents", title: "Agents", description: ""),
                 codexOverlapTokens: []
             ),
-            .agent
+            SlashCommandSection.agent
         )
         XCTAssertEqual(
             BridgeSlashCommand.classifySection(
                 for: BridgeSlashCommand(token: "/tool", title: "Tool", description: "", source: "mcp"),
                 codexOverlapTokens: []
             ),
-            .agent
+            SlashCommandSection.agent
         )
         XCTAssertEqual(
             BridgeSlashCommand.classifySection(
                 for: BridgeSlashCommand(token: "/delegate", title: "Delegate", description: "", agent: "build"),
                 codexOverlapTokens: []
             ),
-            .agent
+            SlashCommandSection.agent
         )
     }
 
@@ -694,11 +705,11 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertEqual(command.section, "skill")
         XCTAssertEqual(
             BridgeSlashCommand.classifySection(for: command, codexOverlapTokens: []),
-            .skillDerived
+            SlashCommandSection.skillDerived
         )
     }
 
-    func testDecodeSlashCommandsParsesRequiresArguments() {
+    func testDecodeSlashCommandsParsesRequiresArguments() throws {
         let service = makeService()
         let result: JSONValue = .object([
             "commands": .array([
@@ -962,6 +973,9 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
                 modelProvider: "codex",
                 displayName: "GPT-5.5",
                 description: "",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: nil,
                 capabilities: .defaultCodex
             ),
         ]
@@ -1058,7 +1072,7 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             ],
             codexOverlapTokens: []
         )
-        XCTAssertEqual(grouped.map(\.section), [.ocBuiltin, .skillDerived])
+        XCTAssertEqual(grouped.map(\.section), [SlashCommandSection.ocBuiltin, SlashCommandSection.skillDerived])
         XCTAssertEqual(grouped[0].commands.map(\.token), ["/undo"])
         XCTAssertEqual(grouped[1].commands.map(\.token), ["/build"])
     }
@@ -1089,6 +1103,9 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
                 modelProvider: "opencode",
                 displayName: "GPT-5.5",
                 description: "",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: nil,
                 capabilities: .defaultOpenCode
             ),
         ]

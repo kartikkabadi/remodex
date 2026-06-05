@@ -1495,7 +1495,6 @@ final class TurnTimelineReducerTests: XCTestCase {
             createdAt: now.addingTimeInterval(0.4),
             turnID: "turn-1"
         )
-        confirmed.deliveryState = .confirmed
 
         let deduped = TurnTimelineReducer.removeDuplicateUserMessages(in: [first, second, confirmed])
 
