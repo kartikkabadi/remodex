@@ -35,4 +35,4 @@ Details and gates: integration plan file above.
 
 ---
 
-*Last updated: 2026-06-05*
+*Last updated: 2026-06-06 (MERGE-A / Theme A on `main`)*
