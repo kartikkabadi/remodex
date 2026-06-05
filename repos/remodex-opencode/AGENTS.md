@@ -67,7 +67,7 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 
 - **`2fd364a`** bundles PR0b iOS compile fixes with a large `phodex-bridge` OpenCode stack sync (router, provider, handoff modules). Treat that bridge delta as intentional baseline — do not revert wholesale when doing Phase 1 follow-ups; use targeted tests and capability flags instead.
 
-## Phase 1 (done — PR8 catalog flip blocked on device E2E)
+## Phase 1 (done — PR8 catalog flip signed off)
 
 | Slice | Status |
 |-------|--------|
@@ -76,7 +76,7 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 | PR4 structured skills | Done — `supportsStructuredSkillInput: false` for OpenCode; iOS gated via `supportsStructuredSkillInput(forThreadId:)` |
 | PR5 handoff regression | Done — `opencode-handoff.test.js` + `desktop-handler.test.js` negatives; `005-error-taxonomy.md` aligned |
 | PR6 handoff iOS routing | Done — `DesktopHandoffService` / `TurnViewModel+DesktopHandoff` / toolbar capability gate |
-| PR8 `supportsDesktopHandoff` | **Blocked** — catalog stays `false`; flip after device E2E checklist 8c |
+| PR8 `supportsDesktopHandoff` | **Done** — catalog `true` after device E2E sign-off; RPC still requires `REMODEX_OPENCODE_HANDOFF=1` on Mac |
 
 ## Phase 2 (done — base `38ad72b`)
 
@@ -96,4 +96,4 @@ Bridge tests use `node -r ./test/test-env.js --test --test-force-exit` only. Do 
 | PR19 plugin UI | Done | `@plugin` autocomplete gated for OpenCode |
 | PR20 slash | Done | `openCodeExcludedTokens`; `availableCommandsForProvider` test |
 
-**Device E2E prep:** Use meta workspace `remodex:opencode` on `main` only (nested `repos/remodex-opencode/.git` removed — single git root). **`main` must stay clean** at integration commits for Kartik device sign-off — see `docs/operations/device-e2e-opencode.md` pre-flight.
+**Device E2E:** Signed off on `main`. See meta workspace [`docs/operations/device-e2e-signoff.md`](../../docs/operations/device-e2e-signoff.md). Use `main` at integration commits; checklist reference: [`device-e2e-opencode.md`](../../docs/operations/device-e2e-opencode.md).

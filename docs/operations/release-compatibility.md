@@ -35,7 +35,7 @@
 | Reasoning/effort | enabled per model | enabled/greyed per model | Greyed if no effort levels |
 | Fast mode | enabled per model | enabled/greyed per model | Greyed if unsupported |
 | Codex Plan mode (+) | enabled | n/a | Hidden on OpenCode threads |
-| Slash commands | enabled | partial | `command/list` on OpenCode threads (PR3); device proof: step **8a** / O8 |
+| Slash commands | enabled | enabled | `command/list` on OpenCode threads (PR3); device proof: [device-e2e-signoff.md](device-e2e-signoff.md) |
 | Image attachments | enabled | partial | OpenCode sends file URL parts when path present; otherwise text placeholder; composer blocks attach until multimodal E2E |
 | Skills /$ | enabled | enabled | Bridge merges `skills/list` with OpenCode `app.skills()`; device proof: O9 |
 | MCP settings | enabled | greyed | Configure MCP in OpenCode on the Mac; Remodex does not manage OpenCode MCP from the phone (`supportsMCP: false`) |
@@ -44,7 +44,7 @@
 | Streaming timeline | enabled | enabled | SDK event stream mapped to timeline |
 | Tool call cards | enabled | enabled | Tool calls rendered from SDK events |
 | Voice mode | enabled | n/a | Hidden on OpenCode |
-| Desktop handoff | enabled | greyed | Catalog `supportsDesktopHandoff: false` until device steps **8c** + [device-e2e-opencode.md](device-e2e-opencode.md) O12–O16; Mac bridge requires `REMODEX_OPENCODE_HANDOFF=1` for RPC when promoted |
+| Desktop handoff | enabled | enabled | Catalog `supportsDesktopHandoff: true`; Mac bridge requires `REMODEX_OPENCODE_HANDOFF=1` for RPC; device proof: [device-e2e-signoff.md](device-e2e-signoff.md) O12–O16 |
 | Approvals/perms | enabled | enabled | SDK permission reply channel |
 | Fork thread | enabled | enabled | `thread/fork` via OpenCode provider |
 | Steer | enabled | greyed | No OpenCode SDK steer API |
@@ -57,7 +57,7 @@
 | OpenCode beta label | n/a | enabled | `RuntimeInfo.showsBetaLabel` from catalog; `OpenCodeBetaCapsule` in Shared |
 | Settings default OpenCode agent | n/a | enabled | Default for new chats; per-thread override on composer |
 
-*Cells are `enabled` | `greyed` | `partial` | `simulator-only` | `n/a`. OpenCode `enabled` rows above assume [device-e2e-opencode.md](device-e2e-opencode.md) has passed on iPhone + Mac.*
+*Cells are `enabled` | `greyed` | `partial` | `simulator-only` | `n/a`. OpenCode `enabled` rows above reflect device E2E sign-off on `main` — see [device-e2e-signoff.md](device-e2e-signoff.md).*
 
 ## Device E2E checklist (iPhone + Mac)
 
@@ -73,7 +73,7 @@ Run before release. Bridge: `cd phodex-bridge && npm start` (OpenCode on by defa
 2. OpenCode thread: agent submenu changes agent; turn sends with selected agent; greyed voice/plan where capabilities false.
 3. Send a turn on OpenCode; streaming text and tool cards render.
 4. Stop button works mid-turn.
-5. OpenCode thread: fork enabled; desktop handoff greyed until catalog flip after step **8c**.
+5. OpenCode thread: fork enabled; desktop handoff visible when catalog `supportsDesktopHandoff: true` and Mac has `REMODEX_OPENCODE_HANDOFF=1`.
 6. Disable OpenCode on Mac (`REMODEX_DISABLE_OPENCODE=1`); `runtime/catalog` is Codex-only (no OpenCode row) — model picker has no OpenCode group; no unavailable banner for a missing OpenCode catalog entry.
 7. Bridge restart; OpenCode thread still routes correctly (thread ownership / rehydration).
 8. Codex regression: `REMODEX_DISABLE_OPENCODE=1` on Mac — composer unchanged for Codex threads.
@@ -89,4 +89,4 @@ Run before release. Bridge: `cd phodex-bridge && npm start` (OpenCode on by defa
 | `REMODEX_OPENCODE_HANDOFF=1` (or `true`) | Operator Mac bridges that offer handoff | `desktop/continueOpenCode` runs; iOS shows handoff when catalog `supportsDesktopHandoff` is true |
 | unset / `0` / `false` | Default safe rollout | RPC returns `opencode_handoff_disabled`; iOS may still show control if an old catalog is cached — prefer matching env with catalog promotion |
 
-Catalog advertises `supportsDesktopHandoff: true` for OpenCode only after PR8 device sign-off (steps **8c**, O12–O16). **Always** set `REMODEX_OPENCODE_HANDOFF=1` on production Mac bridges where handoff should work once promoted.
+Catalog advertises `supportsDesktopHandoff: true` for OpenCode after PR8 device sign-off (complete — see [device-e2e-signoff.md](device-e2e-signoff.md)). **Always** set `REMODEX_OPENCODE_HANDOFF=1` on production Mac bridges where handoff should work.

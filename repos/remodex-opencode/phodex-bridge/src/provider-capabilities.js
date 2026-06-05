@@ -52,7 +52,7 @@ const OPENCODE_CAPABILITIES = {
   supportsFastMode: false,
   supportsPlanMode: false,
   supportsVoice: false,
-  supportsDesktopHandoff: false,
+  supportsDesktopHandoff: true,
   supportsWorktree: false,
   supportsFork: true,
   supportsApprovals: true,

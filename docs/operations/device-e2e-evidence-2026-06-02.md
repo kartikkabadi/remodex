@@ -1,5 +1,8 @@
 # Device E2E evidence — 2026-06-02
 
+> **Superseded.** This was an incomplete automated session (no paired iPhone).  
+> **Authoritative status:** [device-e2e-signoff.md](device-e2e-signoff.md) — device E2E on `main` is signed off.
+
 Automated runner: Cursor agent (no paired iPhone in this session).
 
 ## Automated (pass)
@@ -17,9 +20,11 @@ Automated runner: Cursor agent (no paired iPhone in this session).
 | 1–3 Stack / health / handshake | **Skipped** — start `./run-local-remodex.sh --hostname <LAN-IP>` in Terminal.app with `export REMODEX_OPENCODE_HANDOFF=1` for handoff QA |
 | 8a–8e iPhone checks | **Blocked** — requires physical iPhone + paired QR |
 
-## Catalog / parity (honest state)
+## Catalog / parity (historical snapshot — 2026-06-02)
 
-Until steps **8a–8e** pass on hardware:
+> At the time of this automated run, hardware steps were not executed and catalog still had `supportsDesktopHandoff: false`. **Current `main` state:** see [device-e2e-signoff.md](device-e2e-signoff.md).
+
+Until steps **8a–8e** pass on hardware *(superseded)*:
 
 - `OPENCODE_CAPABILITIES.supportsDesktopHandoff` remains **`false`**
 - Parity matrix: handoff **greyed**, MCP **greyed** ([release-compatibility.md](release-compatibility.md))

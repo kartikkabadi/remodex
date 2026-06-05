@@ -1,5 +1,8 @@
 # Device E2E — OpenCode parity sign-off
 
+> **Status:** Device E2E **signed off** on `main`. Authoritative record: [device-e2e-signoff.md](device-e2e-signoff.md).  
+> This file remains the **checklist reference** for re-validation or release notes.
+
 ## Pre-flight (automated)
 
 Before Kartik runs steps O0–O17 on device:
@@ -7,7 +10,7 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **562/562** green. If a run shows **561/562**, re-run once before blocking (known flake on `session.idle` dedupe under load; fixed in tree). |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **604/604** green (2026-06-05 on `main`). If a run shows **603/604**, re-run once before blocking (known flake on `session.idle` dedupe under load). |
 | Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
@@ -16,7 +19,7 @@ Before Kartik runs steps O0–O17 on device:
 
 | Step | When |
 |------|------|
-| **O12** (toolbar “Continue on Desktop”) | **Blocked** until PR8 catalog flip (`supportsDesktopHandoff: true` after device sign-off). UI stays hidden while catalog is `false`. |
+| **O12** (toolbar “Continue on Desktop”) | Visible when catalog `supportsDesktopHandoff: true` (signed off on `main`) and Mac has `REMODEX_OPENCODE_HANDOFF=1`. |
 | **O13**, **O16** (handoff RPC + env-off regression) | Can run **before** PR8 with `REMODEX_OPENCODE_HANDOFF=1` on Mac — validates bridge RPC and error taxonomy without catalog advertisement. |
 | **O14–O15** | After O13; O15 anytime on Codex-only thread |
 
@@ -59,7 +62,7 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 
 | Step | Check | Pass criterion |
 |------|--------|----------------|
-| O4 | `runtime/catalog` | OpenCode runtime `enabled: true`, agents listed, `capabilities.supportsSlashCommands` true; `supportsDesktopHandoff` false until step **8c** passes |
+| O4 | `runtime/catalog` | OpenCode runtime `enabled: true`, agents listed, `capabilities.supportsSlashCommands` true; `supportsDesktopHandoff: true` after PR8 sign-off |
 | O5 | Model picker | Codex and OpenCode groups; select OpenCode model; agent submenu visible |
 | O6 | New thread + turn | Send prompt; streaming text and tool cards render; Stop works mid-turn |
 | O7 | Bridge restart | Stop/start bridge; resume same OpenCode thread; send another turn (rehydration) |

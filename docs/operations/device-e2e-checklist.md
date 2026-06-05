@@ -38,7 +38,7 @@ Use this after bridge and iOS changes land. Run Mac steps in **Terminal.app** (n
 | 8d | Rehydration | Stop/start bridge; resume same OpenCode thread; send another turn |
 | 8e | Codex-only | `REMODEX_DISABLE_OPENCODE=1` — no OpenCode in catalog; Codex composer unchanged |
 
-Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md). After **8a–8e** pass on physical iPhone + Mac, promote parity rows in [release-compatibility.md](release-compatibility.md) and flip `supportsDesktopHandoff` in `provider-capabilities.js` (PR8).
+Full OpenCode parity sign-off (slash, skills, handoff, rehydration): [device-e2e-opencode.md](device-e2e-opencode.md). **Signed off on `main`** — see [device-e2e-signoff.md](device-e2e-signoff.md). After re-validation on hardware, update [release-compatibility.md](release-compatibility.md) if parity rows change.
 
 ## Regression
 

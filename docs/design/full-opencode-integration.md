@@ -1,6 +1,6 @@
 # Full OpenCode Support in Remodex — Design Document
 
-> **Superseded for planning and PR order.** Use [master-opencode-integration.md](master-opencode-integration.md) as the canonical source of truth. This file remains as historical context for the original PR1–8 draft.
+> **Superseded for planning and PR order.** Use [master-opencode-integration.md](master-opencode-integration.md) as the canonical source of truth. **Device E2E signed off on `main`** — [device-e2e-signoff.md](../operations/device-e2e-signoff.md). This file remains as historical context for the original PR1–8 draft.
 
 | Field | Value |
 |-------|-------|

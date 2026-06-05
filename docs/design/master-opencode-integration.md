@@ -5,7 +5,7 @@
 | **Title** | Full OpenCode Support in Remodex — Master Architecture & Integration Plan |
 | **Author** | Systems Architecture (design-doc-writer) |
 | **Date** | 2026-06-02 |
-| **Status** | Draft for approval (rev. 4 — user decisions incorporated) |
+| **Status** | Draft for approval (rev. 4 — user decisions incorporated). **Device E2E signed off on `main`** — see `docs/operations/device-e2e-signoff.md`. |
 | **Workspace** | `$REMODEX_WORKSPACE` |
 | **Active code** | `repos/remodex-opencode/` (`phodex-bridge/` + `CodexMobile/`) |
 | **Supersedes** | `docs/design/full-opencode-integration.md` — **blocking:** prior doc must be amended in Phase 0 before “plan approved” |
@@ -23,9 +23,19 @@ This document is the **single authoritative plan** for:
 2. What is **planned but not shipped end-to-end** (Phase 1 — evolved PR1–8)
 3. What was **never planned** and needs explicit Phase 2 design (gaps from gap analysis)
 
-**Non-negotiable:** Codex regression with `REMODEX_DISABLE_OPENCODE=1` must remain identical to today. No upstream PRs before device E2E per `AGENTS.md`.
+**Non-negotiable:** Codex regression with `REMODEX_DISABLE_OPENCODE=1` must remain identical to today. Device E2E on `main` is signed off (`docs/operations/device-e2e-signoff.md`); upstream PRs require explicit release approval.
 
 **Critical audit correction:** Thread **rehydration after bridge restart** is **implemented** (`opencode-provider.js` `rehydrateThreadIfNeeded`, `test/opencode-restart-rehydrate.test.js`). Phase 1 **drops the old PR2 rehydration work** and reallocates effort to docs honesty + remaining UX gaps.
+
+### Status update (2026-06-05)
+
+| Item | State |
+|------|--------|
+| Device E2E on `main` | **Signed off** — [device-e2e-signoff.md](../operations/device-e2e-signoff.md) |
+| PR8 `supportsDesktopHandoff` (OpenCode catalog) | **`true`** on `main` (restored after erroneous revert in `4e3527c`) |
+| Phase 1 exit checklist (§ below) | **Complete** — unchecked boxes in this doc are stale |
+| Upstream PRs | Allowed after sign-off; coordinate release timing with Kartik |
+| Execute-plan follow-on (16 PRs) | Separate track — [.cursor/EXECUTE-PLAN-RECOVERY-a6c7a11c.md](../../.cursor/EXECUTE-PLAN-RECOVERY-a6c7a11c.md) |
 
 ---
 

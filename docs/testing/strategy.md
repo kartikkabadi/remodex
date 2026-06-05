@@ -87,7 +87,7 @@
 - Verify bridge restart preserves thread ownership
 - Verify Codex-only path regression
 
-**Done bar:** Signed off by Kartik. Parity matrix filled with verified cells.
+**Done bar:** Signed off on `main` — see [device-e2e-signoff.md](../operations/device-e2e-signoff.md). Re-run checklist for major releases or parity changes.
 
 ## What Is NOT Tested
 

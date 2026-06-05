@@ -80,7 +80,7 @@ iPhone (CodexMobile)
 - Remodex push / `pushServiceUrl` / APNs.
 - OpenCode.app Mac notification timing.
 - Upstream OpenCode serve fixes.
-- PR8 catalog flip before device E2E.
+- PR8 catalog flip (complete on `main` — see `docs/operations/device-e2e-signoff.md`).
 - VPS/TLS relay deployment.
 - Repo-root ad-hoc markdown.
 
@@ -429,7 +429,7 @@ cd ../relay && npm test # after PR1–2
 6. **PR5 = trusted-reconnect hook + 4004 `.retrying`** — not replacing existing 4004 copy/foreground reconnect.
 7. **`slimModelForMobileList`** is the model/list slim path (not `slimModelForRelay`).
 8. **`relay.js` via `server.js` is canonical** — deprecate/sync `phodex-backend-relay.mjs`.
-9. **PR8 blocked** until device E2E (`AGENTS.md`).
+9. **PR8** — catalog flip complete after device E2E sign-off (`docs/operations/device-e2e-signoff.md`).
 
 ---
 

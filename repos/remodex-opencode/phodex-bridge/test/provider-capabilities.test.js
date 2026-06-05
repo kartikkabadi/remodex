@@ -26,13 +26,13 @@ test("Codex provider has standard capabilities (no agent selection)", () => {
   assert.equal(capabilities.supportsMCP, true);
 });
 
-test("OpenCode provider has agent selection enabled and fast/plan/voice/desktop/worktree disabled", () => {
+test("OpenCode provider has agent selection and handoff enabled; fast/plan/voice/worktree disabled", () => {
   const capabilities = resolveModelCapabilities("opencode", {});
   assert.equal(capabilities.supportsAgentSelection, true);
   assert.equal(capabilities.supportsFastMode, false);
   assert.equal(capabilities.supportsPlanMode, false);
   assert.equal(capabilities.supportsVoice, false);
-  assert.equal(capabilities.supportsDesktopHandoff, false);
+  assert.equal(capabilities.supportsDesktopHandoff, true);
   assert.equal(capabilities.supportsWorktree, false);
   assert.equal(capabilities.supportsFork, true);
   assert.equal(capabilities.supportsApprovals, true);
@@ -109,11 +109,11 @@ test("OpenCode does not enable structured skill input until SDK spike", () => {
   assert.equal(capabilities.supportsSkillAutocomplete, true);
 });
 
-test("OpenCode catalog keeps supportsDesktopHandoff false until device E2E (PR8)", () => {
-  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, false);
+test("OpenCode catalog advertises supportsDesktopHandoff after PR8 sign-off", () => {
+  assert.equal(resolveOpenCodeCatalogCapabilities({}).supportsDesktopHandoff, true);
   assert.equal(
     resolveModelCapabilities("opencode", {}, {}).supportsDesktopHandoff,
-    false,
+    true,
   );
 });
 
@@ -125,7 +125,7 @@ test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR
     supportsFastMode: false,
     supportsPlanMode: false,
     supportsVoice: false,
-    supportsDesktopHandoff: false,
+    supportsDesktopHandoff: true,
     supportsWorktree: false,
     supportsFork: true,
     supportsApprovals: true,
