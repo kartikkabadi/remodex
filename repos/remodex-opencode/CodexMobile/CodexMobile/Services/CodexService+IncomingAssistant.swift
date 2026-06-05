@@ -92,6 +92,9 @@ extension CodexService {
         if hasMatchingPendingUserMessage(threadId: threadId, text: text) {
             return
         }
+        if hasMatchingConfirmedUserMessage(threadId: threadId, turnId: turnId, text: text) {
+            return
+        }
 
         markMirroredRunningCatchupNeeded(for: threadId)
         appendConfirmedMirroredUserMessage(

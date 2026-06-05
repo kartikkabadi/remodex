@@ -1343,16 +1343,26 @@ extension CodexService {
         message: CodexMessage,
         turnId: String
     ) -> Int? {
-        // Keep intentionally repeated sends separate when more than one local row fits.
         let matchingIndices = merged.indices.filter { index in
             shouldReconcileUserHistoryMessage(merged[index], with: message, turnId: turnId)
         }
 
-        guard matchingIndices.count == 1 else {
+        guard !matchingIndices.isEmpty else {
             return nil
         }
+        if matchingIndices.count == 1 {
+            return matchingIndices[0]
+        }
 
-        return matchingIndices[0]
+        let normalizedTurnId = normalizedHistoryIdentifier(turnId)
+        let sameTurnIndices = matchingIndices.filter { index in
+            normalizedHistoryIdentifier(merged[index].turnId) == normalizedTurnId
+        }
+        let candidates = sameTurnIndices.isEmpty ? matchingIndices : sameTurnIndices
+        return candidates.min(by: { lhs, rhs in
+            abs(message.createdAt.timeIntervalSince(merged[lhs].createdAt))
+                < abs(message.createdAt.timeIntervalSince(merged[rhs].createdAt))
+        })
     }
 
     nonisolated static func uniquePendingUserHistoryMergeIndex(

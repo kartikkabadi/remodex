@@ -1341,6 +1341,26 @@ extension CodexService {
         }) ?? false
     }
 
+    // Skips runtime echoes once the phone row is already confirmed for this turn.
+    func hasMatchingConfirmedUserMessage(threadId: String, turnId: String?, text: String) -> Bool {
+        let normalizedIncomingText = Self.normalizedMessageText(text)
+        guard !normalizedIncomingText.isEmpty else {
+            return false
+        }
+
+        return messagesByThread[threadId]?.contains(where: { candidate in
+            guard candidate.role == .user,
+                  candidate.deliveryState == .confirmed,
+                  Self.normalizedMessageText(candidate.text) == normalizedIncomingText else {
+                return false
+            }
+            guard let turnId, !turnId.isEmpty else {
+                return true
+            }
+            return candidate.turnId == nil || candidate.turnId == turnId
+        }) ?? false
+    }
+
     // Upserts a confirmed user row mirrored from a desktop-origin rollout so
     // reopened threads can display the remote prompt immediately without
     // disturbing the phone-native pending-send path.

@@ -654,11 +654,18 @@ enum TurnTimelineReducer {
 
         let previousTurnId = normalizedIdentifier(previous.turnId)
         let incomingTurnId = normalizedIdentifier(incoming.turnId)
-        if let previousTurnId, let incomingTurnId {
-            return previousTurnId == incomingTurnId
-                && previous.deliveryState == .pending
-                && incoming.deliveryState == .confirmed
-                && abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= userDedupeTimeWindowSeconds
+        if let previousTurnId, let incomingTurnId, previousTurnId == incomingTurnId {
+            let withinWindow = abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= userDedupeTimeWindowSeconds
+            if previous.deliveryState == .confirmed,
+               incoming.deliveryState == .confirmed,
+               withinWindow {
+                return true
+            }
+            if previous.deliveryState == .pending,
+               incoming.deliveryState == .confirmed,
+               withinWindow {
+                return true
+            }
         }
 
         // Allow only the phone-send upgrade path: optimistic local row without turnId

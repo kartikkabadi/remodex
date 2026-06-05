@@ -851,7 +851,7 @@ struct TurnView: View {
     }
 
     private func handleSend() {
-        guard !isVoiceInputActive else { return }
+        guard !isVoiceInputActive, !viewModel.isSending else { return }
         viewModel.clearComposerAutocomplete()
         viewModel.sendTurn(codex: codex, subscriptions: subscriptions, threadID: thread.id)
         isInputFocused = false

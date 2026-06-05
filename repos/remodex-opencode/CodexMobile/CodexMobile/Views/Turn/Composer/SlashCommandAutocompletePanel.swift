@@ -57,14 +57,11 @@ struct SlashCommandAutocompletePanel: View {
     }
 
     var body: some View {
-        GeometryReader { _ in
-            panelContent(screenHeight: ComposerAutocompletePanelHeight.screenHeightForCap)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(4)
-        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 4)
+        panelContent(screenHeight: ComposerAutocompletePanelHeight.screenHeightForCap)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+            .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .padding(.horizontal, 4)
     }
 
     @ViewBuilder
@@ -167,6 +164,7 @@ struct SlashCommandAutocompletePanel: View {
                     sectionCount: sectionCount,
                     screenHeight: screenHeight
                 ))
+                .clipped()
 
                 Button {
                     HapticFeedback.shared.triggerImpactFeedback(style: .light)
