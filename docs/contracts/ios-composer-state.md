@@ -140,7 +140,7 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 | Tap source | Behavior |
 |------------|----------|
 | OpenCode zero-arg (`requiresArguments == false`) | `sendBridgeSlashCommand` → bridge `command/execute` when `supportsSlashCommandExecute` |
-| OpenCode requires arguments | `SlashCommandArgumentsSheet` stub (PR5b production sheet) — no draft prefill |
+| OpenCode requires arguments | `SlashCommandArgumentsSheet` (one field per hint; multiline for `$ARGUMENTS`-only) → `command/execute` with `argumentFields`, `template`, `hints` |
 | OpenCode full sheet (“See all”) | Same routing as inline (`onSelectSlashCommandItem`, not prefill) |
 | Codex `.compact` | `compactThread` RPC — not `turn/start` with `/compact` |
 | Codex `.status` / `.feedback` | Host callbacks via ViewModel (`onShowStatus`, `onOpenFeedbackMail`) |
@@ -150,9 +150,9 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 
 **Catalog drift:** On `command_not_allowed`, iOS invalidates persisted slash cache for `directory` and refetches `command/list` before surfacing the error.
 
-**Grey-out:** When `supportsSlashCommands` is true but `supportsSlashCommandExecute` is false, slash rows stay visible but disabled (no prefill fallback). Commands with `requiresArguments == true` remain tappable to open the arguments sheet stub.
+**Grey-out:** When `supportsSlashCommands` is true but `supportsSlashCommandExecute` is false, slash rows stay visible but disabled (no prefill fallback). Commands with `requiresArguments == true` remain tappable to open the arguments sheet (submit disabled when execute is false).
 
-**`BridgeSlashCommand` decode:** includes `requiresArguments` (defaults `false` when omitted; static bridge builtins set `false` explicitly).
+**`BridgeSlashCommand` decode:** includes `requiresArguments` (defaults `false` when omitted; static bridge builtins set `false` explicitly). PR5b adds optional `template` and `hints[]` from bridge `command/list`; bridge derives `requiresArguments` for SDK rows (`hints.length > 0` or template matches `$ARGUMENTS` / `$n`).
 
 **Empty OpenCode list:** After a successful fetch with zero commands, show inline hint “No commands for this project” (no `reasonCode` until bridge adds one).
 

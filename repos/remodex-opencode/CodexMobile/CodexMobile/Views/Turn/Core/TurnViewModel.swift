@@ -1242,7 +1242,25 @@ final class TurnViewModel {
         sendBridgeSlashCommand(command, hostContext: hostContext)
     }
 
-    func sendBridgeSlashCommand(_ command: BridgeSlashCommand, hostContext: TurnSlashHostContext) {
+    func submitSlashCommandArguments(
+        command: BridgeSlashCommand,
+        argumentFields: [BridgeSlashCommandArgumentField],
+        hostContext: TurnSlashHostContext
+    ) {
+        sendBridgeSlashCommand(
+            command,
+            hostContext: hostContext,
+            argumentFields: argumentFields,
+            dismissArgumentsSheetOnSuccess: true
+        )
+    }
+
+    func sendBridgeSlashCommand(
+        _ command: BridgeSlashCommand,
+        hostContext: TurnSlashHostContext,
+        argumentFields: [BridgeSlashCommandArgumentField]? = nil,
+        dismissArgumentsSheetOnSuccess: Bool = false
+    ) {
         let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedToken.isEmpty else { return }
 
@@ -1267,11 +1285,17 @@ final class TurnViewModel {
                     threadId: threadId,
                     command: trimmedToken,
                     directory: hostContext.thread.gitWorkingDirectory,
-                    clientCommandId: clientCommandId
+                    clientCommandId: clientCommandId,
+                    argumentFields: argumentFields,
+                    template: command.template,
+                    hints: command.hints
                 )
                 if result.ok {
                     hostContext.codex.markThreadAsRunning(threadId)
                     hostContext.codex.lastErrorMessage = nil
+                    if dismissArgumentsSheetOnSuccess {
+                        self.dismissSlashCommandArgumentsSheet()
+                    }
                     return
                 }
 
@@ -1360,6 +1384,8 @@ final class TurnViewModel {
             return "OpenCode is not available to run \(commandToken)."
         case "thread_not_found":
             return "This thread could not be found on the Mac."
+        case "command_arguments_required":
+            return "Enter all required arguments for \(commandToken)."
         default:
             return "Could not run \(commandToken)."
         }

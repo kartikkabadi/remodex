@@ -376,7 +376,17 @@ Optional project directory for slash-command discovery. `directory` is preferred
     {
       "token": "/build",
       "title": "Build",
-      "description": "Build the project"
+      "description": "Build the project",
+      "requiresArguments": false
+    },
+    {
+      "token": "/init",
+      "title": "Init",
+      "description": "guided AGENTS.md setup",
+      "requiresArguments": true,
+      "template": "Focus:\n$ARGUMENTS",
+      "hints": ["$ARGUMENTS"],
+      "source": "command"
     }
   ]
 }
@@ -398,13 +408,16 @@ Static CLI builtins from `buildStaticSlashCommands()` include **`requiresArgumen
   "threadId": "opencode-thread-1717000000-a1b2c3",
   "command": "/skills",
   "arguments": "",
+  "argumentFields": [{ "key": "$ARGUMENTS", "value": "user text" }],
+  "template": "Focus:\n$ARGUMENTS",
+  "hints": ["$ARGUMENTS"],
   "clientCommandId": "550e8400-e29b-41d4-a716-446655440000",
   "directory": "/path/to/project",
   "cwd": "/path/to/project"
 }
 ```
 
-`thread_id` and `id` are accepted aliases for `threadId`. `command` may include a leading `/`; the bridge strips it for OpenCode SDK `session.command` (`command: "skills"`). `arguments` is optional (defaults to `""`). `clientCommandId` is optional (iOS UUID per tap); when present, the bridge drops duplicate executes for the same `threadId + commandToken + clientCommandId` within **5s** and logs `opencode_command_execute_deduped`. `directory` / `cwd` scope allowlist discovery; when omitted, the owned thread's `cwd` is used.
+`thread_id` and `id` are accepted aliases for `threadId`. `command` may include a leading `/`; the bridge strips it for OpenCode SDK `session.command` (`command: "skills"`). `arguments` is optional (defaults to `""`) for zero-arg commands (PR5a). **PR5b:** when `argumentFields` is non-empty, the bridge runs `serializeCommandArguments({ template, hints, fields })` and passes the resulting single string to SDK `session.command.arguments` (PM-1; mirrors `session/prompt.ts`). `template` and `hints` may be omitted when the allowlisted `command/list` row already carries them. `clientCommandId` is optional (iOS UUID per tap); when present, the bridge drops duplicate executes for the same `threadId + commandToken + clientCommandId` within **5s** and logs `opencode_command_execute_deduped`. `directory` / `cwd` scope allowlist discovery; when omitted, the owned thread's `cwd` is used.
 
 **Result (success):**
 ```json
@@ -430,6 +443,7 @@ Duplicate within dedupe window:
 | `thread_not_found` | Unknown `threadId` |
 | `thread_provider_mismatch` | Explicit provider field conflicts with ownership store |
 | `command_required` | Missing `command` |
+| `command_arguments_required` | Command requires input but `argumentFields` / `arguments` missing |
 | `command_not_allowed` | Token not in allowlist for `directory` |
 | `opencode_session_expired` | SDK session missing/404 |
 | `opencode_server_unreachable` | SDK client unavailable |

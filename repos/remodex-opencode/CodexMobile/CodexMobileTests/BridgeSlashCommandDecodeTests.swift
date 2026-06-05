@@ -731,6 +731,75 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertEqual(decoded["commands"]?.first?.requiresArguments, false)
     }
 
+    func testDecodeSlashCommandsParsesTemplateAndHints() throws {
+        let payload = """
+        {
+          "commands": [{
+            "token": "/init",
+            "title": "Init",
+            "description": "Setup",
+            "requiresArguments": true,
+            "template": "Focus:\\n$ARGUMENTS",
+            "hints": ["$ARGUMENTS"]
+          }]
+        }
+        """
+        let data = try XCTUnwrap(payload.data(using: .utf8))
+        let decoded = try JSONDecoder().decode([String: [BridgeSlashCommand]].self, from: data)
+        let command = try XCTUnwrap(decoded["commands"]?.first)
+        XCTAssertEqual(command.template, "Focus:\n$ARGUMENTS")
+        XCTAssertEqual(command.hints, ["$ARGUMENTS"])
+        XCTAssertEqual(command.argumentFieldSpecs.count, 1)
+        XCTAssertTrue(command.argumentFieldSpecs[0].isMultiline)
+    }
+
+    func testBridgeSlashCommandArgumentFieldSpecsUseNumericPlaceholdersWhenHintsMissing() {
+        let command = BridgeSlashCommand(
+            token: "/plan",
+            title: "Plan",
+            description: "",
+            requiresArguments: true,
+            template: "Plan $2 then $1"
+        )
+        XCTAssertEqual(command.argumentFieldSpecs.map(\.id), ["$1", "$2"])
+        XCTAssertFalse(command.argumentFieldSpecs[0].isMultiline)
+    }
+
+    func testExecuteBridgeSlashCommandSendsArgumentFields() async throws {
+        let service = makeService()
+        var capturedFields: JSONValue?
+
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "command/execute")
+            capturedFields = params?.objectValue?["argumentFields"]
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "ok": .bool(true),
+                    "sessionId": .string("ses_args"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        _ = try await service.executeBridgeSlashCommand(
+            threadId: "thread-args",
+            command: "/init",
+            directory: "/tmp/args",
+            clientCommandId: UUID(),
+            argumentFields: [
+                BridgeSlashCommandArgumentField(key: "$ARGUMENTS", value: "focus on tests"),
+            ],
+            template: "Focus:\n$ARGUMENTS",
+            hints: ["$ARGUMENTS"]
+        )
+
+        let fields = try XCTUnwrap(capturedFields?.arrayValue)
+        XCTAssertEqual(fields.count, 1)
+        XCTAssertEqual(fields[0].objectValue?["key"]?.stringValue, "$ARGUMENTS")
+        XCTAssertEqual(fields[0].objectValue?["value"]?.stringValue, "focus on tests")
+    }
+
     func testExecuteBridgeSlashCommandSendsClientCommandId() async throws {
         let service = makeService()
         var capturedMethod: String?

@@ -66,11 +66,24 @@ enum OpenCodeSlashBuiltins {
     ]
 }
 
+struct BridgeSlashCommandArgumentField: Equatable, Sendable {
+    let key: String
+    let value: String
+}
+
+struct SlashCommandArgumentFieldSpec: Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let isMultiline: Bool
+}
+
 struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
     let token: String
     let title: String
     let description: String
     let requiresArguments: Bool
+    let template: String?
+    let hints: [String]?
     let source: String?
     let agent: String?
     let provider: String?
@@ -81,6 +94,8 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         title: String,
         description: String,
         requiresArguments: Bool = false,
+        template: String? = nil,
+        hints: [String]? = nil,
         source: String? = nil,
         agent: String? = nil,
         provider: String? = nil,
@@ -90,6 +105,8 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         self.title = title
         self.description = description
         self.requiresArguments = requiresArguments
+        self.template = template
+        self.hints = hints
         self.source = source
         self.agent = agent
         self.provider = provider
@@ -101,6 +118,8 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         case title
         case description
         case requiresArguments
+        case template
+        case hints
         case source
         case agent
         case provider
@@ -113,6 +132,8 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         title = try container.decode(String.self, forKey: .title)
         description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
         requiresArguments = (try? container.decodeIfPresent(Bool.self, forKey: .requiresArguments)) ?? false
+        template = try container.decodeIfPresent(String.self, forKey: .template)
+        hints = try container.decodeIfPresent([String].self, forKey: .hints)
         source = try container.decodeIfPresent(String.self, forKey: .source)
         agent = try container.decodeIfPresent(String.self, forKey: .agent)
         provider = try container.decodeIfPresent(String.self, forKey: .provider)
@@ -125,6 +146,8 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         try container.encode(title, forKey: .title)
         try container.encode(description, forKey: .description)
         try container.encode(requiresArguments, forKey: .requiresArguments)
+        try container.encodeIfPresent(template, forKey: .template)
+        try container.encodeIfPresent(hints, forKey: .hints)
         try container.encodeIfPresent(source, forKey: .source)
         try container.encodeIfPresent(agent, forKey: .agent)
         try container.encodeIfPresent(provider, forKey: .provider)
@@ -132,6 +155,55 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
     }
 
     var id: String { token }
+
+    var argumentFieldSpecs: [SlashCommandArgumentFieldSpec] {
+        let resolvedHints = resolvedArgumentHints
+        if !resolvedHints.isEmpty {
+            let argumentsOnly = resolvedHints.count == 1 && resolvedHints[0] == "$ARGUMENTS"
+            return resolvedHints.map { hint in
+                SlashCommandArgumentFieldSpec(
+                    id: hint,
+                    label: hint == "$ARGUMENTS" ? "Arguments" : hint,
+                    isMultiline: argumentsOnly && hint == "$ARGUMENTS"
+                )
+            }
+        }
+        return extractedNumericPlaceholderKeys.map { placeholder in
+            SlashCommandArgumentFieldSpec(
+                id: placeholder,
+                label: placeholder,
+                isMultiline: false
+            )
+        }
+    }
+
+    private var resolvedArgumentHints: [String] {
+        let trimmedHints = (hints ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return trimmedHints
+    }
+
+    private var extractedNumericPlaceholderKeys: [String] {
+        guard let template else { return [] }
+        let pattern = #"\$\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(template.startIndex..<template.endIndex, in: template)
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for match in regex.matches(in: template, range: range) {
+            guard let swiftRange = Range(match.range, in: template) else { continue }
+            let token = String(template[swiftRange])
+            if seen.insert(token).inserted {
+                ordered.append(token)
+            }
+        }
+        return ordered.sorted { lhs, rhs in
+            let left = Int(lhs.dropFirst()) ?? 0
+            let right = Int(rhs.dropFirst()) ?? 0
+            return left < right
+        }
+    }
 
     private var searchBlob: String {
         "\(title) \(description) \(token)".lowercased()

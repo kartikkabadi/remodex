@@ -16,6 +16,11 @@ const {
   normalizeSessionMessagesResponse,
 } = require("./opencode-client");
 const {
+  deriveRequiresArguments,
+  normalizeArgumentFields,
+  serializeCommandArguments,
+} = require("./opencode-command-arguments");
+const {
   DEFAULT_OPENCODE_MODEL,
   OPENCODE_PROVIDER_ID,
   appendNonEmpty,
@@ -1867,10 +1872,40 @@ function createOpenCodeProvider({
       persistSessionRecord(thread);
     }
 
-    const args =
-      readString(params.arguments) ||
-      readString(params.args) ||
-      "";
+    const matchedCommand =
+      allowedCommands.find(
+        (entry) => normalizeCommandTokenForAllowlist(entry.token) === allowlistToken,
+      ) || null;
+    const template =
+      readString(params.template) || readString(matchedCommand?.template) || "";
+    const hints = Array.isArray(params.hints)
+      ? params.hints.map((entry) => readString(entry)).filter(Boolean)
+      : Array.isArray(matchedCommand?.hints)
+        ? matchedCommand.hints.map((entry) => readString(entry)).filter(Boolean)
+        : [];
+    const argumentFields = normalizeArgumentFields(params.argumentFields);
+    const requiresArguments =
+      matchedCommand?.requiresArguments === true ||
+      deriveRequiresArguments(template, hints);
+
+    let args = readString(params.arguments) || readString(params.args) || "";
+    if (argumentFields.length > 0) {
+      args = serializeCommandArguments({ template, hints, fields: argumentFields });
+    } else if (requiresArguments && !readString(args)) {
+      const error = new Error(
+        "command/execute requires argumentFields for slash commands that need input.",
+      );
+      error.errorCode = "command_arguments_required";
+      logCommandExecute({
+        commandToken,
+        commandSdk,
+        ok: false,
+        errorCode: error.errorCode,
+        threadId: thread.id,
+        directory,
+      });
+      throw error;
+    }
 
     try {
       await client.sessionCommand({

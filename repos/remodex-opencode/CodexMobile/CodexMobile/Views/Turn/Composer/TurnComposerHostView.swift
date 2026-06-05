@@ -428,9 +428,21 @@ struct TurnComposerHostView: View {
         }
         .sheet(isPresented: $viewModel.isShowingSlashCommandArgumentsSheet) {
             if let command = viewModel.pendingSlashCommandArguments {
-                SlashCommandArgumentsSheet(command: command) {
-                    viewModel.dismissSlashCommandArgumentsSheet()
-                }
+                SlashCommandArgumentsSheet(
+                    command: command,
+                    supportsExecute: codex.runtimeCapabilitiesForTurn(threadId: thread.id)
+                        .supportsSlashCommandExecute,
+                    onSubmit: { fields in
+                        viewModel.submitSlashCommandArguments(
+                            command: command,
+                            argumentFields: fields,
+                            hostContext: slashHostContext
+                        )
+                    },
+                    onDismiss: {
+                        viewModel.dismissSlashCommandArgumentsSheet()
+                    }
+                )
             }
         }
         }

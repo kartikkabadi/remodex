@@ -365,6 +365,44 @@ test("sessionCommand strips leading slash for SDK session.command", async () => 
   assert.equal(sdkCalls[0].directory, "/tmp/project");
 });
 
+test("listCommands maps SDK template hints and requiresArguments", async () => {
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      command: {
+        list: async () => [
+          {
+            name: "plan",
+            title: "Plan",
+            description: "Plan work",
+            template: "Focus:\n$ARGUMENTS",
+            hints: ["$ARGUMENTS"],
+            source: "command",
+          },
+          {
+            name: "lint",
+            title: "Lint",
+            description: "Lint project",
+            template: "Run lint",
+            hints: [],
+          },
+        ],
+      },
+    }),
+  });
+
+  const commands = await client.listCommands("/tmp/project");
+  const plan = commands.find((entry) => entry.token === "/plan");
+  const lint = commands.find((entry) => entry.token === "/lint");
+  assert.ok(plan, "includes SDK /plan");
+  assert.equal(plan.requiresArguments, true);
+  assert.equal(plan.template, "Focus:\n$ARGUMENTS");
+  assert.deepEqual(plan.hints, ["$ARGUMENTS"]);
+  assert.equal(plan.source, "command");
+  assert.ok(lint, "includes SDK /lint");
+  assert.equal(lint.requiresArguments, false);
+});
+
 test("listCommands API surface is exposed", async () => {
   const client = await createTestClient();
   const commands = await client.listCommands("/tmp/project");

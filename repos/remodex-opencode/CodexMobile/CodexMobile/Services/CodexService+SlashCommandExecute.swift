@@ -29,6 +29,29 @@ extension CodexService {
         directory: String?,
         clientCommandId: UUID
     ) async throws -> BridgeSlashCommandExecuteResult {
+        try await executeBridgeSlashCommand(
+            threadId: threadId,
+            command: command,
+            arguments: arguments,
+            directory: directory,
+            clientCommandId: clientCommandId,
+            argumentFields: nil,
+            template: nil,
+            hints: nil
+        )
+    }
+
+    /// Runs `command/execute` with structured argument fields (PR5b).
+    func executeBridgeSlashCommand(
+        threadId: String,
+        command: String,
+        arguments: String = "",
+        directory: String?,
+        clientCommandId: UUID,
+        argumentFields: [BridgeSlashCommandArgumentField]?,
+        template: String?,
+        hints: [String]?
+    ) async throws -> BridgeSlashCommandExecuteResult {
         var paramsObject: RPCObject = [
             "threadId": .string(threadId),
             "command": .string(command),
@@ -37,6 +60,22 @@ extension CodexService {
         ]
         if let normalizedDirectory = Self.normalizedSlashCommandDirectory(directory) {
             paramsObject["directory"] = .string(normalizedDirectory)
+        }
+        if let template, !template.isEmpty {
+            paramsObject["template"] = .string(template)
+        }
+        if let hints, !hints.isEmpty {
+            paramsObject["hints"] = .array(hints.map { .string($0) })
+        }
+        if let argumentFields, !argumentFields.isEmpty {
+            paramsObject["argumentFields"] = .array(
+                argumentFields.map { field in
+                    .object([
+                        "key": .string(field.key),
+                        "value": .string(field.value),
+                    ])
+                }
+            )
         }
 
         do {

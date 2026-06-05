@@ -272,6 +272,111 @@ test("commandExecute dedupes duplicate clientCommandId within 5s", async () => {
   assert.equal(sdkCommandCalls.length, 1);
 });
 
+test("commandExecute serializes argumentFields before session.command", async () => {
+  const sdkCommandCalls = [];
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_args123" }),
+            command: async (body) => {
+              sdkCommandCalls.push(body);
+              return { info: {}, parts: [] };
+            },
+          },
+          command: {
+            list: async () => [
+              {
+                name: "plan",
+                title: "Plan",
+                description: "Plan work",
+                template: "Plan for $1 with notes $2",
+                hints: ["$1", "$2"],
+              },
+            ],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: "/tmp/args-project" },
+  });
+
+  const result = await provider.commandExecute({
+    id: 2,
+    method: "command/execute",
+    params: {
+      threadId: start.thread.id,
+      command: "/plan",
+      directory: "/tmp/args-project",
+      template: "Plan for $1 with notes $2",
+      hints: ["$1", "$2"],
+      argumentFields: [
+        { key: "$1", value: "auth" },
+        { key: "$2", value: "edge cases" },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(sdkCommandCalls.length, 1);
+  assert.equal(sdkCommandCalls[0].command, "plan");
+  assert.equal(sdkCommandCalls[0].arguments, 'auth "edge cases"');
+});
+
+test("commandExecute rejects requiresArguments commands without argumentFields", async () => {
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_reject123" }),
+            command: async () => ({}),
+          },
+          command: {
+            list: async () => [
+              {
+                name: "review",
+                title: "Review",
+                description: "Review changes",
+                template: "Input: $ARGUMENTS",
+                hints: ["$ARGUMENTS"],
+              },
+            ],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: "/tmp/reject-project" },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 2,
+        method: "command/execute",
+        params: {
+          threadId: start.thread.id,
+          command: "/review",
+          directory: "/tmp/reject-project",
+        },
+      }),
+    (error) => error?.errorCode === "command_arguments_required",
+  );
+});
+
 test("commandExecute rejects commands not in allowlist", async () => {
   const provider = makeProvider({
     clientFactory: async () => ({

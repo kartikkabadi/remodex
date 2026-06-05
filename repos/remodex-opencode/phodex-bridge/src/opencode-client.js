@@ -7,6 +7,7 @@
 // Depends on: @opencode-ai/sdk/v2 (dynamic ESM import), ./opencode-models, ./provider-capabilities
 
 const { readString } = require("./normalize");
+const { mapSdkCommandToBridge } = require("./opencode-command-arguments");
 const {
   OPENCODE_PROVIDER_ID,
   DEFAULT_OPENCODE_MODEL,
@@ -412,11 +413,7 @@ async function createOpenCodeClient({
         client.command.list({ query: { directory: readString(directory) || process.cwd() } }),
         REQUEST_TIMEOUT_MS,
       );
-      derived = (Array.isArray(commands) ? commands : []).map((c) => ({
-        token: readString(c.token || c.name || c),
-        title: readString(c.title || c.displayName || c.token || c.name || c),
-        description: readString(c.description) || "",
-      }));
+      derived = (Array.isArray(commands) ? commands : []).map((c) => mapSdkCommandToBridge(c));
     } catch (error) {
       console.warn(`${logPrefix} OpenCode command.list() failed: ${error.message}`);
       derived = [];
@@ -1171,6 +1168,7 @@ module.exports = {
   buildStaticSlashCommands,
   normalizeCommandNameForSdk,
   normalizeCommandTokenForAllowlist,
+  mapSdkCommandToBridge,
   createOpenCodeClient,
   dispatchEvent,
   normalizeSessionMessagesResponse,
