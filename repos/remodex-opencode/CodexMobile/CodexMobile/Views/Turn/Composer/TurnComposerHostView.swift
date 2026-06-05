@@ -71,11 +71,27 @@ struct TurnComposerHostView: View {
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
             modelProvider: modelProvider
         )
+        let slashQuery: String = {
+            if case .commands(let query) = viewModel.slashCommandPanelState {
+                return query
+            }
+            return ""
+        }()
+        let groupedBridgeSlashSections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])] = {
+            guard slashSource == .bridgeCommands else { return [] }
+            return viewModel.groupedBridgeSlashCommandSections(
+                matching: slashQuery,
+                allowsForkCommand: allowsForkCommand,
+                modelProvider: modelProvider,
+                thread: thread
+            )
+        }()
         let autocompleteState = TurnComposerAutocompleteState(
             availableSlashCommands: viewModel.availableSlashCommandItems(
                 allowsForkCommand: allowsForkCommand,
                 slashSource: slashSource
             ),
+            groupedBridgeSlashSections: groupedBridgeSlashSections,
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
             usesBridgeSlashCommands: slashSource == .bridgeCommands,
             isLoadingBridgeSlashCommands: viewModel.isLoadingBridgeSlashCommands,

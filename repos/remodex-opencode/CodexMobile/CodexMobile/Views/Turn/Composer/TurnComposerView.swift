@@ -377,6 +377,7 @@ private struct TurnComposerAutocompletePanels: View {
                 SlashCommandAutocompletePanel(
                     state: state.slashCommandPanelState,
                     availableCommands: state.availableSlashCommands,
+                    groupedBridgeSlashSections: state.groupedBridgeSlashSections,
                     supportsSlashCommands: state.supportsSlashCommands,
                     usesBridgeSlashCommands: state.usesBridgeSlashCommands,
                     isLoadingBridgeSlashCommands: state.isLoadingBridgeSlashCommands,
@@ -394,7 +395,8 @@ private struct TurnComposerAutocompletePanels: View {
                     onSelectCommand: onSelectSlashCommand,
                     onSelectReviewTarget: onSelectCodeReviewTarget,
                     onSelectForkDestination: onSelectForkDestination,
-                    onClose: onCloseSlashCommandPanel
+                    onClose: onCloseSlashCommandPanel,
+                    onSeeAll: {} // TODO(RP-CMD-2): full command browser
                 )
             }
         }
@@ -670,6 +672,7 @@ private struct ComposerPreviewContent: View {
             ),
             autocompleteState: TurnComposerAutocompleteState(
                 availableSlashCommands: TurnComposerSlashCommand.allCommands.map { .codex($0) },
+                groupedBridgeSlashSections: [],
                 supportsSlashCommands: true,
                 usesBridgeSlashCommands: false,
                 isLoadingBridgeSlashCommands: false,

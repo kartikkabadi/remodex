@@ -1126,6 +1126,39 @@ final class TurnViewModel {
         loadBridgeSlashCommandsIfNeeded(codex: codex, thread: thread)
     }
 
+    func groupedBridgeSlashCommandSections(
+        matching query: String,
+        allowsForkCommand: Bool,
+        modelProvider: String,
+        thread: CodexThread
+    ) -> [(section: SlashCommandSection, commands: [BridgeSlashCommand])] {
+        let commands: [BridgeSlashCommand]
+        if bridgeSlashCommands.isEmpty && !didLoadBridgeSlashCommandsSuccessfully {
+            commands = TurnComposerSlashCommand.minimalFallbackSlashCommands()
+        } else {
+            commands = bridgeSlashCommands
+        }
+
+        let cacheKey = autocompleteCacheKey(forRoot: normalizedAutocompleteRoot(for: thread))
+        let skillNames = Set(
+            (cachedSkillSearchIndexByRoot[cacheKey] ?? []).map { entry in
+                entry.skill.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }.filter { !$0.isEmpty }
+        )
+        let codexOverlapTokens = Set(
+            TurnComposerSlashCommand.availableCommandsForProvider(
+                allowsForkCommand: allowsForkCommand,
+                modelProvider: modelProvider
+            ).map(\.commandToken)
+        )
+        return BridgeSlashCommand.groupedSections(
+            commands: commands,
+            matching: query,
+            codexOverlapTokens: codexOverlapTokens,
+            skillNames: skillNames
+        )
+    }
+
     func availableSlashCommandItems(
         allowsForkCommand: Bool,
         slashSource: TurnComposerSlashCommandSource

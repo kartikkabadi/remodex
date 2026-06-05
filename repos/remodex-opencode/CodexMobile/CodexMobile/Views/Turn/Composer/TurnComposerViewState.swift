@@ -8,6 +8,7 @@ import SwiftUI
 
 struct TurnComposerAutocompleteState {
     let availableSlashCommands: [TurnComposerSlashCommandItem]
+    let groupedBridgeSlashSections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
     let supportsSlashCommands: Bool
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool

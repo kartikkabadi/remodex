@@ -1,14 +1,15 @@
 // FILE: SlashCommandAutocompletePanel.swift
-// Purpose: Inline slash-command picker for composer actions like Code Review and Fork.
+// Purpose: Inline slash-command picker (V2 sectioned panel for OpenCode bridge; flat list for Codex enum).
 // Layer: View Component
 // Exports: SlashCommandAutocompletePanel
-// Depends on: SwiftUI, AutocompleteRowButtonStyle, TurnViewModel
+// Depends on: SwiftUI, AutocompleteRowButtonStyle, RuntimeProviderLogoView, TurnViewModel
 
 import SwiftUI
 
 struct SlashCommandAutocompletePanel: View {
     let state: TurnComposerSlashCommandPanelState
     let availableCommands: [TurnComposerSlashCommandItem]
+    let groupedBridgeSlashSections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
     let supportsSlashCommands: Bool
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool
@@ -27,11 +28,15 @@ struct SlashCommandAutocompletePanel: View {
     let onSelectReviewTarget: (TurnComposerReviewTarget) -> Void
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onClose: () -> Void
+    var onSeeAll: (() -> Void)? = nil
 
-    private static let rowHeight: CGFloat = 50
-    private static let maxVisibleRows = 6
+    private static let codexRowHeight: CGFloat = 50
+    private static let codexMaxVisibleRows = 6
+    private static let bridgeRowHeight: CGFloat = 60
+    private static let bridgeMaxVisibleRows = 12
+    private static let sectionHeaderHeight: CGFloat = 24
 
-    private static func visibleListHeight(for count: Int) -> CGFloat {
+    private static func visibleListHeight(rowHeight: CGFloat, maxVisibleRows: Int, count: Int) -> CGFloat {
         rowHeight * CGFloat(min(count, maxVisibleRows))
     }
 
@@ -60,100 +65,264 @@ struct SlashCommandAutocompletePanel: View {
 
     @ViewBuilder
     private func commandList(query: String) -> some View {
+        if usesBridgeSlashCommands {
+            bridgeCommandListV2(query: query)
+        } else {
+            codexCommandList(query: query)
+        }
+    }
+
+    @ViewBuilder
+    private func codexCommandList(query: String) -> some View {
         let items = TurnComposerSlashCommandItem.filtered(matching: query, within: availableCommands)
 
         VStack(alignment: .leading, spacing: 0) {
-            if !supportsSlashCommands {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(AppFont.caption2())
-                        .foregroundStyle(.secondary)
-                    Text("Slash commands not supported by this runtime")
-                        .font(AppFont.caption())
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
+            slashCapabilityBanner
 
             if isLoadingBridgeSlashCommands {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading commands…")
-                        .font(AppFont.caption())
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                slashLoadingRow
             } else if items.isEmpty {
-                if usesBridgeSlashCommands,
-                   let bridgeSlashCommandsLoadError,
-                   query.isEmpty {
-                    bridgeSlashCommandsFailureView(message: bridgeSlashCommandsLoadError)
-                } else if showsBridgeSlashCommandsEmptyHint, query.isEmpty {
-                    Text("No commands for this project")
-                        .font(AppFont.footnote())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                } else {
-                    Text("No commands for /\(query)")
-                        .font(AppFont.footnote())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                }
+                slashEmptyState(query: query, hasFilteredItems: false)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(items) { item in
-                            let isEnabled = isCommandEnabled(item) && supportsSlashCommands
-                            let disabledReason: String? = !supportsSlashCommands
-                                ? ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
-                                : (!isCommandEnabled(item) ? commandSubtitle(for: item) : nil)
-                            Button {
-                                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                                onSelectCommand(item)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    commandIcon(for: item, isEnabled: isEnabled)
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.commandToken)
-                                            .font(AppFont.subheadline(weight: .semibold))
-                                            .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
-                                            .lineLimit(1)
-
-                                        Text(commandSubtitle(for: item))
-                                            .font(AppFont.caption2())
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-
-                                    Spacer(minLength: 8)
-
-                                    Text(item.title)
-                                        .font(AppFont.footnote())
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(height: Self.rowHeight)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(AutocompleteRowButtonStyle())
-                            .capabilityGreyOut(isEnabled: isEnabled, reason: disabledReason)
+                            codexCommandRow(item)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .scrollIndicators(.visible)
-                .frame(height: Self.visibleListHeight(for: items.count))
+                .frame(height: Self.visibleListHeight(
+                    rowHeight: Self.codexRowHeight,
+                    maxVisibleRows: Self.codexMaxVisibleRows,
+                    count: items.count
+                ))
             }
         }
+    }
+
+    @ViewBuilder
+    private func bridgeCommandListV2(query: String) -> some View {
+        let filteredCount = groupedBridgeSlashSections.reduce(0) { $0 + $1.commands.count }
+
+        VStack(alignment: .leading, spacing: 0) {
+            slashCapabilityBanner
+
+            if isLoadingBridgeSlashCommands {
+                slashLoadingRow
+            } else if filteredCount == 0 {
+                slashEmptyState(query: query, hasFilteredItems: false)
+            } else {
+                if filteredCount > 0 {
+                    HStack(spacing: 6) {
+                        Text("Commands")
+                            .font(AppFont.subheadline(weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("(\(filteredCount))")
+                            .font(AppFont.subheadline(weight: .regular))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(groupedBridgeSlashSections, id: \.section) { group in
+                            bridgeSectionHeader(group.section.displayTitle)
+                            ForEach(group.commands) { command in
+                                bridgeCommandRow(command, section: group.section)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollIndicators(.visible)
+                .frame(height: Self.visibleListHeight(
+                    rowHeight: Self.bridgeRowHeight,
+                    maxVisibleRows: Self.bridgeMaxVisibleRows,
+                    count: filteredCount
+                ))
+
+                Button {
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    onSeeAll?()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("See all")
+                            .font(AppFont.subheadline(weight: .semibold))
+                            .foregroundStyle(Color.indigo)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(AppFont.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 32, alignment: .center)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(AutocompleteRowButtonStyle())
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var slashCapabilityBanner: some View {
+        if !supportsSlashCommands {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(AppFont.caption2())
+                    .foregroundStyle(.secondary)
+                Text("Slash commands not supported by this runtime")
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var slashLoadingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading commands…")
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func slashEmptyState(query: String, hasFilteredItems: Bool) -> some View {
+        if usesBridgeSlashCommands,
+           let bridgeSlashCommandsLoadError,
+           query.isEmpty,
+           !hasFilteredItems {
+            bridgeSlashCommandsFailureView(message: bridgeSlashCommandsLoadError)
+        } else if showsBridgeSlashCommandsEmptyHint, query.isEmpty {
+            Text("No commands for this project")
+                .font(AppFont.footnote())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        } else {
+            Text("No commands for /\(query)")
+                .font(AppFont.footnote())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private func bridgeSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(AppFont.caption(weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: Self.sectionHeaderHeight, alignment: .bottomLeading)
+    }
+
+    private func bridgeCommandRow(_ command: BridgeSlashCommand, section: SlashCommandSection) -> some View {
+        let item = TurnComposerSlashCommandItem.bridge(command)
+        let isEnabled = supportsSlashCommands
+        return Button {
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            onSelectCommand(item)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    RuntimeProviderLogoView(
+                        provider: command.resolvedProviderID(for: section),
+                        size: 14
+                    )
+
+                    Text(command.token)
+                        .font(AppFont.subheadline(weight: .semibold))
+                        .foregroundStyle(Color.indigo)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(command.title)
+                        .font(AppFont.footnote())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let description = Self.descriptionLabel(from: command.description) {
+                    Text(description)
+                        .font(AppFont.caption2())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.bridgeRowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AutocompleteRowButtonStyle())
+        .capabilityGreyOut(
+            isEnabled: isEnabled,
+            reason: isEnabled ? nil : ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+        )
+    }
+
+    private func codexCommandRow(_ item: TurnComposerSlashCommandItem) -> some View {
+        let isEnabled = isCommandEnabled(item) && supportsSlashCommands
+        let disabledReason: String? = !supportsSlashCommands
+            ? ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+            : (!isCommandEnabled(item) ? commandSubtitle(for: item) : nil)
+        return Button {
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            onSelectCommand(item)
+        } label: {
+            HStack(spacing: 10) {
+                commandIcon(for: item, isEnabled: isEnabled)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.commandToken)
+                        .font(AppFont.subheadline(weight: .semibold))
+                        .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                        .lineLimit(1)
+
+                    Text(commandSubtitle(for: item))
+                        .font(AppFont.caption2())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(item.title)
+                    .font(AppFont.footnote())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.codexRowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AutocompleteRowButtonStyle())
+        .capabilityGreyOut(isEnabled: isEnabled, reason: disabledReason)
+    }
+
+    static func descriptionLabel(from rawDescription: String) -> String? {
+        let normalized = rawDescription
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func bridgeSlashCommandsFailureView(message: String) -> some View {
@@ -263,7 +432,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.rowHeight)
+            .frame(height: Self.codexRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())
@@ -295,7 +464,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.rowHeight)
+            .frame(height: Self.codexRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())

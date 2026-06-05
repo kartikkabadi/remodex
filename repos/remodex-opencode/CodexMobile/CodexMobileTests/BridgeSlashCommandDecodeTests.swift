@@ -439,6 +439,109 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertTrue(minimalItems.allSatisfy { $0.codexCommand == nil })
     }
 
+    func testSlashSection_ocBuiltin() {
+        let section = BridgeSlashCommand.classifySection(
+            for: BridgeSlashCommand(token: "/mcp", title: "MCP", description: ""),
+            codexOverlapTokens: []
+        )
+        XCTAssertEqual(section, .ocBuiltin)
+    }
+
+    func testSlashSection_codexOverlapCompactUsesOcBuiltin() {
+        let codexTokens = Set(
+            TurnComposerSlashCommand.availableCommandsForProvider(
+                allowsForkCommand: true,
+                modelProvider: "opencode"
+            ).map(\.commandToken)
+        )
+        let section = BridgeSlashCommand.classifySection(
+            for: BridgeSlashCommand(token: "/compact", title: "Compact", description: ""),
+            codexOverlapTokens: codexTokens
+        )
+        XCTAssertEqual(section, .ocBuiltin)
+    }
+
+    func testSlashSection_skillDerived() {
+        let bySource = BridgeSlashCommand.classifySection(
+            for: BridgeSlashCommand(token: "/lint", title: "Lint", description: "", source: "skill"),
+            codexOverlapTokens: []
+        )
+        XCTAssertEqual(bySource, .skillDerived)
+
+        let byName = BridgeSlashCommand.classifySection(
+            for: BridgeSlashCommand(token: "/review-skill", title: "Review", description: ""),
+            codexOverlapTokens: [],
+            skillNames: ["review-skill"]
+        )
+        XCTAssertEqual(byName, .skillDerived)
+    }
+
+    func testSlashSection_agent() {
+        XCTAssertEqual(
+            BridgeSlashCommand.classifySection(
+                for: BridgeSlashCommand(token: "/agents", title: "Agents", description: ""),
+                codexOverlapTokens: []
+            ),
+            .agent
+        )
+        XCTAssertEqual(
+            BridgeSlashCommand.classifySection(
+                for: BridgeSlashCommand(token: "/tool", title: "Tool", description: "", source: "mcp"),
+                codexOverlapTokens: []
+            ),
+            .agent
+        )
+        XCTAssertEqual(
+            BridgeSlashCommand.classifySection(
+                for: BridgeSlashCommand(token: "/delegate", title: "Delegate", description: "", agent: "build"),
+                codexOverlapTokens: []
+            ),
+            .agent
+        )
+    }
+
+    func testDecodeSlashCommandsOptionalFields() throws {
+        let json = """
+        {
+          "commands": [
+            {
+              "token": "/build",
+              "title": "Build",
+              "description": "Build project",
+              "source": "skill",
+              "agent": "build",
+              "provider": "opencode",
+              "section": "skill"
+            }
+          ]
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let envelope = try JSONDecoder().decode([String: [BridgeSlashCommand]].self, from: data)
+        let command = try XCTUnwrap(envelope["commands"]?.first)
+        XCTAssertEqual(command.source, "skill")
+        XCTAssertEqual(command.agent, "build")
+        XCTAssertEqual(command.provider, "opencode")
+        XCTAssertEqual(command.section, "skill")
+        XCTAssertEqual(
+            BridgeSlashCommand.classifySection(for: command, codexOverlapTokens: []),
+            .skillDerived
+        )
+    }
+
+    func testGroupedSectionsOmitsEmpty() {
+        let grouped = BridgeSlashCommand.groupedSections(
+            commands: [
+                BridgeSlashCommand(token: "/undo", title: "Undo", description: ""),
+                BridgeSlashCommand(token: "/build", title: "Build", description: "", source: "skill"),
+            ],
+            codexOverlapTokens: []
+        )
+        XCTAssertEqual(grouped.map(\.section), [.ocBuiltin, .skillDerived])
+        XCTAssertEqual(grouped[0].commands.map(\.token), ["/undo"])
+        XCTAssertEqual(grouped[1].commands.map(\.token), ["/build"])
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "BridgeSlashCommandDecodeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard

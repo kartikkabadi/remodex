@@ -9,15 +9,102 @@
 
 import Foundation
 
+enum SlashCommandSection: String, CaseIterable, Sendable {
+    case codexBuiltin = "codex-builtin"
+    case ocBuiltin = "oc-builtin"
+    case agent
+    case skillDerived = "skill"
+
+    var displayTitle: String {
+        switch self {
+        case .codexBuiltin:
+            return "Codex"
+        case .ocBuiltin:
+            return "OpenCode"
+        case .agent:
+            return "Agents"
+        case .skillDerived:
+            return "Skills"
+        }
+    }
+
+    static let displayOrder: [SlashCommandSection] = [
+        .codexBuiltin, .ocBuiltin, .agent, .skillDerived,
+    ]
+
+    init?(bridgeSectionHint: String?) {
+        guard let bridgeSectionHint else { return nil }
+        let normalized = bridgeSectionHint.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "codex", "codex-builtin":
+            self = .codexBuiltin
+        case "oc", "oc-builtin", "opencode", "opencode-builtin":
+            self = .ocBuiltin
+        case "agent", "agents":
+            self = .agent
+        case "skill", "skills", "skill-derived":
+            self = .skillDerived
+        default:
+            return nil
+        }
+    }
+
+    var defaultProviderID: String {
+        switch self {
+        case .codexBuiltin:
+            return "codex"
+        case .ocBuiltin, .agent, .skillDerived:
+            return "opencode"
+        }
+    }
+}
+
+enum OpenCodeSlashBuiltins {
+    static let tokens: Set<String> = [
+        "/undo", "/redo", "/share", "/help", "/init", "/compact", "/login", "/logout",
+        "/models", "/agents", "/skills", "/mcp", "/config", "/clear", "/exit",
+    ]
+}
+
 struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
     let token: String
     let title: String
     let description: String
+    let source: String?
+    let agent: String?
+    let provider: String?
+    let section: String?
+
+    init(
+        token: String,
+        title: String,
+        description: String,
+        source: String? = nil,
+        agent: String? = nil,
+        provider: String? = nil,
+        section: String? = nil
+    ) {
+        self.token = token
+        self.title = title
+        self.description = description
+        self.source = source
+        self.agent = agent
+        self.provider = provider
+        self.section = section
+    }
 
     var id: String { token }
 
     private var searchBlob: String {
         "\(title) \(description) \(token)".lowercased()
+    }
+
+    func resolvedProviderID(for section: SlashCommandSection) -> String {
+        let trimmedProvider = provider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedProvider.isEmpty {
+            return trimmedProvider
+        }
+        return section.defaultProviderID
     }
 
     static func filtered(
@@ -29,6 +116,76 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
             return commands
         }
         return commands.filter { $0.searchBlob.contains(trimmedQuery) }
+    }
+
+    static func classifySection(
+        for command: BridgeSlashCommand,
+        openCodeBuiltins: Set<String> = OpenCodeSlashBuiltins.tokens,
+        codexOverlapTokens: Set<String>,
+        skillNames: Set<String>
+    ) -> SlashCommandSection {
+        if let explicit = SlashCommandSection(bridgeSectionHint: command.section) {
+            return explicit
+        }
+
+        let normalizedSource = command.source?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedSource == "skill" {
+            return .skillDerived
+        }
+
+        let normalizedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let skillToken = normalizedToken.hasPrefix("/") ? String(normalizedToken.dropFirst()) : normalizedToken
+        if skillNames.contains(skillToken) {
+            return .skillDerived
+        }
+
+        if normalizedSource == "mcp" {
+            return .agent
+        }
+        let trimmedAgent = command.agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedAgent.isEmpty || normalizedToken == "/agents" {
+            return .agent
+        }
+        let classificationBlob = "\(command.title) \(command.description)".lowercased()
+        if classificationBlob.contains("agent") {
+            return .agent
+        }
+
+        if openCodeBuiltins.contains(normalizedToken) {
+            return .ocBuiltin
+        }
+
+        if codexOverlapTokens.contains(normalizedToken) {
+            return .codexBuiltin
+        }
+
+        return .ocBuiltin
+    }
+
+    static func groupedSections(
+        commands: [BridgeSlashCommand],
+        matching query: String = "",
+        openCodeBuiltins: Set<String> = OpenCodeSlashBuiltins.tokens,
+        codexOverlapTokens: Set<String>,
+        skillNames: Set<String> = []
+    ) -> [(section: SlashCommandSection, commands: [BridgeSlashCommand])] {
+        let filtered = filtered(matching: query, within: commands)
+        var buckets: [SlashCommandSection: [BridgeSlashCommand]] = [:]
+        for command in filtered {
+            let section = classifySection(
+                for: command,
+                openCodeBuiltins: openCodeBuiltins,
+                codexOverlapTokens: codexOverlapTokens,
+                skillNames: skillNames
+            )
+            buckets[section, default: []].append(command)
+        }
+        return SlashCommandSection.displayOrder.compactMap { section in
+            guard let sectionCommands = buckets[section], !sectionCommands.isEmpty else {
+                return nil
+            }
+            return (section: section, commands: sectionCommands)
+        }
     }
 }
 
