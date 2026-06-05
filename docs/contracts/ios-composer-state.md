@@ -158,7 +158,9 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 
 **Fetch failure:** Show “Couldn't load commands. Tap to retry.” with a Retry control; do not show the empty-project hint until a successful fetch returns zero commands.
 
-**OpenCode V2 panel (RP-CMD-2, post Theme B):** When `usesBridgeSlashCommands`, `SlashCommandAutocompletePanel` groups `BridgeSlashCommand` rows into sections (Codex / OpenCode / Agents / Skills), 60pt rows, up to 12 visible, `RuntimeProviderLogoView` badges, `Commands (N)` header, and **See all** affordance. Codex enum threads keep the flat six-command list (50pt / 6 visible). Optional decode fields on `BridgeSlashCommand`: `source`, `agent`, `provider`, `section` (tolerant; heuristics when absent).
+**OpenCode V2 panel (RP-CMD-2, post Theme B, PR6):** When `usesBridgeSlashCommands`, `SlashCommandAutocompletePanel` groups `BridgeSlashCommand` rows into sections (Codex / OpenCode / Agents / Skills), Dynamic Type–scaled 60pt rows, **up to 3 visible inline** (scroll within cap), height capped at **28% of screen** via `ComposerAutocompletePanelHeight`, `RuntimeProviderLogoView` badges, `Commands (N)` header, and **See all** → `BridgeSlashCommandsFullListSheet`. Codex enum threads keep the flat six-command list (50pt / 6 visible, unchanged). Optional decode fields on `BridgeSlashCommand`: `source`, `agent`, `provider`, `section` (tolerant; heuristics when absent).
+
+**Skills inline panel (RP-SKILL-2, PR6):** `SkillAutocompletePanel` uses the same **3-row / 28% screen** cap and **See all** → `BridgeSkillsFullListSheet` with current `skillAutocompleteItems` (query-filtered). Selection calls `onSelectSkillAutocomplete` (same as inline).
 
 ### Other Controls
 

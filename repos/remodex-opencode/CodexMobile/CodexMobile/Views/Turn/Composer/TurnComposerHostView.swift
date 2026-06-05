@@ -47,6 +47,7 @@ struct TurnComposerHostView: View {
     var onContinueOnDesktop: (() -> Void)?
 
     @State private var isShowingAllBridgeSlashCommands = false
+    @State private var isShowingAllSkills = false
 
     private var slashHostContext: TurnSlashHostContext {
         TurnSlashHostContext(
@@ -342,6 +343,9 @@ struct TurnComposerHostView: View {
                 guard slashSource == .bridgeCommands else { return }
                 isShowingAllBridgeSlashCommands = true
             },
+            onSeeAllSkills: {
+                isShowingAllSkills = true
+            },
             onRemoveMentionedFile: { mentionID in
                 viewModel.removeMentionedFile(id: mentionID)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
@@ -384,6 +388,19 @@ struct TurnComposerHostView: View {
             isDesktopHandoffLoading: isDesktopHandoffLoading,
             onContinueOnDesktop: onContinueOnDesktop
         )
+        .sheet(isPresented: $isShowingAllSkills) {
+            BridgeSkillsFullListSheet(
+                items: viewModel.skillAutocompleteItems,
+                onSelect: { skill in
+                    isShowingAllSkills = false
+                    viewModel.onSelectSkillAutocomplete(skill)
+                    viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
+                },
+                onDismiss: {
+                    isShowingAllSkills = false
+                }
+            )
+        }
         .sheet(isPresented: $isShowingAllBridgeSlashCommands) {
             if slashSource == .bridgeCommands {
                 BridgeSlashCommandsFullListSheet(

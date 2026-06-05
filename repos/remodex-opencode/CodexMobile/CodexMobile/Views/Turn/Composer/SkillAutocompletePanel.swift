@@ -2,7 +2,7 @@
 // Purpose: Autocomplete dropdown for $-skill mentions (V2: sectioned by scope, provider badges, 60pt rows, count header, See all).
 // Layer: View Component
 // Exports: SkillAutocompletePanel
-// Depends on: SwiftUI, AutocompleteRowButtonStyle, SkillDisplayNameFormatter, RuntimeProviderLogoView
+// Depends on: SwiftUI, AutocompleteRowButtonStyle, SkillDisplayNameFormatter, RuntimeProviderLogoView, ComposerAutocompletePanelHeight
 
 import SwiftUI
 
@@ -13,15 +13,16 @@ struct SkillAutocompletePanel: View {
     let onSelect: (CodexSkillMetadata) -> Void
     var onSeeAll: (() -> Void)? = nil
 
-    private static let rowHeight: CGFloat = 60
-    private static let maxVisibleRows = 12
-    private static let sectionHeaderHeight: CGFloat = 24
-
-    private static func visibleListHeight(for count: Int) -> CGFloat {
-        rowHeight * CGFloat(min(count, maxVisibleRows))
-    }
+    @ScaledMetric(relativeTo: .subheadline) private var rowHeight: CGFloat = 60
+    @ScaledMetric(relativeTo: .caption) private var sectionHeaderHeight: CGFloat = 24
+    @ScaledMetric(relativeTo: .subheadline) private var countHeaderHeight: CGFloat = 32
+    @ScaledMetric(relativeTo: .subheadline) private var seeAllRowHeight: CGFloat = 32
 
     private var groupedByScope: [(scopeKey: String, skills: [CodexSkillMetadata])] {
+        Self.groupedByScope(items)
+    }
+
+    static func groupedByScope(_ items: [CodexSkillMetadata]) -> [(scopeKey: String, skills: [CodexSkillMetadata])] {
         let grouped = Dictionary(grouping: items) { $0.scope ?? "global" }
         let preferredOrder = ["project", "global"]
         var result: [(String, [CodexSkillMetadata])] = []
@@ -39,7 +40,27 @@ struct SkillAutocompletePanel: View {
         return result
     }
 
+    static func scopeTitle(for key: String) -> String {
+        switch key {
+        case "project": return "Project"
+        case "global": return "Global"
+        default: return key.capitalized
+        }
+    }
+
     var body: some View {
+        GeometryReader { _ in
+            panelContent(screenHeight: ComposerAutocompletePanelHeight.screenHeightForCap)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(4)
+        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func panelContent(screenHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if isLoading {
                 HStack(spacing: 8) {
@@ -58,7 +79,6 @@ struct SkillAutocompletePanel: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
             } else {
-                // Search header with count (per RP-SKILL-2)
                 if !items.isEmpty {
                     HStack(spacing: 6) {
                         Text("Skills")
@@ -71,6 +91,7 @@ struct SkillAutocompletePanel: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
+                    .frame(height: countHeaderHeight, alignment: .center)
                 }
 
                 ScrollView {
@@ -78,51 +99,14 @@ struct SkillAutocompletePanel: View {
                         ForEach(groupedByScope, id: \.scopeKey) { group in
                             sectionHeader(scopeTitle(for: group.scopeKey))
                             ForEach(group.skills) { skill in
-                                Button {
-                                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                                    onSelect(skill)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 8) {
-                                            RuntimeProviderLogoView(provider: skill.provider ?? "codex", size: 14)
-
-                                            Text(SkillDisplayNameFormatter.displayName(for: skill.name))
-                                                .font(AppFont.subheadline(weight: .semibold))
-                                                .foregroundStyle(Color.indigo)
-                                                .lineLimit(1)
-
-                                            Spacer(minLength: 8)
-
-                                            Text(skill.name)
-                                                .font(AppFont.footnote())
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
-
-                                        if let description = Self.descriptionLabel(from: skill.description) {
-                                            Text(description)
-                                                .font(AppFont.caption2())
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .frame(height: Self.rowHeight)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(AutocompleteRowButtonStyle())
+                                skillRow(skill)
                             }
                         }
                     }
                 }
                 .scrollIndicators(.visible)
-                .frame(height: Self.visibleListHeight(for: items.count))
+                .frame(height: inlineListHeight(screenHeight: screenHeight))
 
-                // "See all" button (per RP-SKILL-2)
                 if !items.isEmpty {
                     Button {
                         HapticFeedback.shared.triggerImpactFeedback(style: .light)
@@ -138,7 +122,7 @@ struct SkillAutocompletePanel: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 12)
-                        .frame(height: 32, alignment: .center)
+                        .frame(height: seeAllRowHeight, alignment: .center)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(AutocompleteRowButtonStyle())
@@ -146,20 +130,59 @@ struct SkillAutocompletePanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(4)
-        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 4)
     }
 
-    // MARK: - Private
+    private func inlineListHeight(screenHeight: CGFloat) -> CGFloat {
+        let sectionAllowance = ComposerAutocompletePanelHeight.sectionHeaderAllowance(
+            sectionCount: groupedByScope.count,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
+        return ComposerAutocompletePanelHeight.cappedListHeight(
+            rowHeight: rowHeight,
+            headerHeights: sectionAllowance,
+            rowCount: items.count,
+            screenHeight: screenHeight
+        )
+    }
 
-    private func scopeTitle(for key: String) -> String {
-        switch key {
-        case "project": return "Project"
-        case "global": return "Global"
-        default: return key.capitalized
+    private func skillRow(_ skill: CodexSkillMetadata) -> some View {
+        Button {
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            onSelect(skill)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    RuntimeProviderLogoView(provider: skill.provider ?? "codex", size: 14)
+
+                    Text(SkillDisplayNameFormatter.displayName(for: skill.name))
+                        .font(AppFont.subheadline(weight: .semibold))
+                        .foregroundStyle(Color.indigo)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(skill.name)
+                        .font(AppFont.footnote())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let description = Self.descriptionLabel(from: skill.description) {
+                    Text(description)
+                        .font(AppFont.caption2())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: rowHeight)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(AutocompleteRowButtonStyle())
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -167,7 +190,11 @@ struct SkillAutocompletePanel: View {
             .font(AppFont.caption(weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
-            .frame(height: Self.sectionHeaderHeight, alignment: .bottomLeading)
+            .frame(height: sectionHeaderHeight, alignment: .bottomLeading)
+    }
+
+    private func scopeTitle(for key: String) -> String {
+        Self.scopeTitle(for: key)
     }
 
     static func descriptionLabel(from rawDescription: String?) -> String? {

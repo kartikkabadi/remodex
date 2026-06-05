@@ -2,7 +2,7 @@
 // Purpose: Inline slash-command picker (V2 sectioned panel for OpenCode bridge; flat list for Codex enum).
 // Layer: View Component
 // Exports: SlashCommandAutocompletePanel
-// Depends on: SwiftUI, AutocompleteRowButtonStyle, RuntimeProviderLogoView, TurnViewModel
+// Depends on: SwiftUI, AutocompleteRowButtonStyle, RuntimeProviderLogoView, TurnViewModel, ComposerAutocompletePanelHeight
 
 import SwiftUI
 
@@ -31,31 +31,34 @@ struct SlashCommandAutocompletePanel: View {
     let onClose: () -> Void
     var onSeeAll: (() -> Void)? = nil
 
-    private static let codexRowHeight: CGFloat = 50
-    private static let codexMaxVisibleRows = 6
-    private static let bridgeRowHeight: CGFloat = 60
-    private static let bridgeMaxVisibleRows = 12
-    private static let sectionHeaderHeight: CGFloat = 24
+    @ScaledMetric(relativeTo: .subheadline) private var codexRowHeight: CGFloat = 50
+    @ScaledMetric(relativeTo: .subheadline) private var bridgeRowHeight: CGFloat = 60
+    @ScaledMetric(relativeTo: .caption) private var sectionHeaderHeight: CGFloat = 24
+    @ScaledMetric(relativeTo: .subheadline) private var commandsCountHeaderHeight: CGFloat = 32
+    @ScaledMetric(relativeTo: .subheadline) private var seeAllRowHeight: CGFloat = 32
 
-    private static func visibleListHeight(rowHeight: CGFloat, maxVisibleRows: Int, count: Int) -> CGFloat {
-        rowHeight * CGFloat(min(count, maxVisibleRows))
+    private static let codexMaxVisibleRows = 6
+
+    private func codexVisibleListHeight(count: Int) -> CGFloat {
+        codexRowHeight * CGFloat(min(count, Self.codexMaxVisibleRows))
+    }
+
+    private func bridgeInlineListHeight(filteredCount: Int, sectionCount: Int, screenHeight: CGFloat) -> CGFloat {
+        let sectionAllowance = ComposerAutocompletePanelHeight.sectionHeaderAllowance(
+            sectionCount: sectionCount,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
+        return ComposerAutocompletePanelHeight.cappedListHeight(
+            rowHeight: bridgeRowHeight,
+            headerHeights: sectionAllowance,
+            rowCount: filteredCount,
+            screenHeight: screenHeight
+        )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switch state {
-            case .hidden:
-                EmptyView()
-
-            case .commands(let query):
-                commandList(query: query)
-
-            case .codeReviewTargets:
-                reviewTargetList
-
-            case .forkDestinations(let destinations):
-                forkDestinationList(destinations: destinations)
-            }
+        GeometryReader { _ in
+            panelContent(screenHeight: ComposerAutocompletePanelHeight.screenHeightForCap)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -65,9 +68,29 @@ struct SlashCommandAutocompletePanel: View {
     }
 
     @ViewBuilder
-    private func commandList(query: String) -> some View {
+    private func panelContent(screenHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch state {
+            case .hidden:
+                EmptyView()
+
+            case .commands(let query):
+                commandList(query: query, screenHeight: screenHeight)
+
+            case .codeReviewTargets:
+                reviewTargetList
+
+            case .forkDestinations(let destinations):
+                forkDestinationList(destinations: destinations)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func commandList(query: String, screenHeight: CGFloat) -> some View {
         if usesBridgeSlashCommands {
-            bridgeCommandListV2(query: query)
+            bridgeCommandListV2(query: query, screenHeight: screenHeight)
         } else {
             codexCommandList(query: query)
         }
@@ -94,18 +117,15 @@ struct SlashCommandAutocompletePanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .scrollIndicators(.visible)
-                .frame(height: Self.visibleListHeight(
-                    rowHeight: Self.codexRowHeight,
-                    maxVisibleRows: Self.codexMaxVisibleRows,
-                    count: items.count
-                ))
+                .frame(height: codexVisibleListHeight(count: items.count))
             }
         }
     }
 
     @ViewBuilder
-    private func bridgeCommandListV2(query: String) -> some View {
+    private func bridgeCommandListV2(query: String, screenHeight: CGFloat) -> some View {
         let filteredCount = groupedBridgeSlashSections.reduce(0) { $0 + $1.commands.count }
+        let sectionCount = groupedBridgeSlashSections.count
 
         VStack(alignment: .leading, spacing: 0) {
             slashCapabilityBanner
@@ -127,6 +147,7 @@ struct SlashCommandAutocompletePanel: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
+                    .frame(height: commandsCountHeaderHeight, alignment: .center)
                 }
 
                 ScrollView {
@@ -141,10 +162,10 @@ struct SlashCommandAutocompletePanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .scrollIndicators(.visible)
-                .frame(height: Self.visibleListHeight(
-                    rowHeight: Self.bridgeRowHeight,
-                    maxVisibleRows: Self.bridgeMaxVisibleRows,
-                    count: filteredCount
+                .frame(height: bridgeInlineListHeight(
+                    filteredCount: filteredCount,
+                    sectionCount: sectionCount,
+                    screenHeight: screenHeight
                 ))
 
                 Button {
@@ -161,7 +182,7 @@ struct SlashCommandAutocompletePanel: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 12)
-                    .frame(height: 32, alignment: .center)
+                    .frame(height: seeAllRowHeight, alignment: .center)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(AutocompleteRowButtonStyle())
@@ -225,7 +246,7 @@ struct SlashCommandAutocompletePanel: View {
             .font(AppFont.caption(weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
-            .frame(height: Self.sectionHeaderHeight, alignment: .bottomLeading)
+            .frame(height: sectionHeaderHeight, alignment: .bottomLeading)
     }
 
     private func bridgeCommandRow(_ command: BridgeSlashCommand, section: SlashCommandSection) -> some View {
@@ -267,7 +288,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.bridgeRowHeight)
+            .frame(height: bridgeRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())
@@ -329,7 +350,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.codexRowHeight)
+            .frame(height: codexRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())
@@ -451,7 +472,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.codexRowHeight)
+            .frame(height: codexRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())
@@ -483,7 +504,7 @@ struct SlashCommandAutocompletePanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: Self.codexRowHeight)
+            .frame(height: codexRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(AutocompleteRowButtonStyle())
