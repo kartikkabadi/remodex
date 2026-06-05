@@ -1,8 +1,8 @@
 # Execute-plan `a6c7a11c` — status
 
 **Last verified:** 2026-06-06  
-**Meta `main` HEAD:** *(pending MERGE-D)*  
-**Integration target:** current `main` (Themes A–C merged; Theme D in progress)
+**Meta `main` HEAD:** `a2960e6`  
+**Integration target:** current `main` — **all four themes merged** (16/16 PR intents)
 
 **Index:** [`execute-plan-a6c7a11c-INDEX.md`](execute-plan-a6c7a11c-INDEX.md)  
 **How to finish:** [`.cursor/plans/execute-plan-a6c7a11c-integration.plan.md`](../../.cursor/plans/execute-plan-a6c7a11c-integration.plan.md)
@@ -13,10 +13,10 @@
 
 | Layer | State |
 |-------|--------|
-| **On `main` today** | Pre–execute-plan OpenCode + doc/E2E sign-off + **Themes A–C** (PRs 2–15 except 1,16) on `main` @ `a5bc674`. **14 / 16** execute-plan PRs on `main` before Theme D. |
-| **In Grok worktrees** | All 14 worktrees committed; PR-10 and PR-16 implemented on integration branches (not from worktrees). |
-| **Shipping** | No Graphite stack, no GitHub PRs; **Theme A** fast-forward merged to `main`. |
-| **Next step** | Finish **Theme D** (PR-1 docs + PR-16 closeout) → owner device iteration (O0–O17). |
+| **On `main` today** | Pre–execute-plan OpenCode + doc/E2E sign-off + **all four themes** (PRs 1–16 intents) @ `a2960e6`. **16 / 16** on `main`. |
+| **In Grok worktrees** | Historical; source of cherry-picks. PR-10 and PR-16 were greenfield on integration branches. |
+| **Shipping** | Meta `main` only (no upstream Remodex PR yet). |
+| **Next step** | Owner **device final bar** (O0–O17, `REMODEX_DISABLE_OPENCODE=1` regression) → upstream export to `Emanuele-web04/remodex`. |
 
 ---
 
@@ -44,7 +44,7 @@ Execute-plan work **adds** messaging hardening, full skills/slash enumeration an
 
 | PR | Intent (short) | On `main` | Worktree | Theme | Notes |
 |----|----------------|-----------|----------|-------|-------|
-| 1 | Docs reconcile | Pending MERGE-D | Committed `5abbb91` | D | Theme D branch |
+| 1 | Docs reconcile | **Yes** (`aa51d67`) | Committed `5abbb91` | D | MERGE-D |
 | 2 | MSG-1 logging / -32000 | **Yes** (`73edf15` + router fix `d06bbd9`) | Committed `2db351a` | A | MERGE-A |
 | 3 | MSG-2 thinking vs final | **Yes** (`18e860a`) | Committed `49879bb` | A | MERGE-A |
 | 4 | SKILL-1 enumeration | **Yes** (`7a41714`) | Committed `d2185e4` | B | MERGE-B |
@@ -59,14 +59,13 @@ Execute-plan work **adds** messaging hardening, full skills/slash enumeration an
 | 13 | MSG-3 reliability | **Yes** (`f05dab7` + router fix `d06bbd9`) | Committed `d308c0b` | A | MERGE-A |
 | 14 | SKILL-3 structured input | **Yes** (`e5ea080`) | Committed `f77625c` | B | MERGE-B |
 | 15 | BRAND-4 phase-2 + runbook | **Yes** (`a5bc674`) | Committed `5c8a512` | C | MERGE-C |
-| 16 | Obs + docs closeout | Pending MERGE-D | Greenfield on `integrate/theme-d-closeout` | D | STATUS/INDEX sync + gates |
+| 16 | Obs + docs closeout | **Yes** (`a2960e6`) | Greenfield closeout | D | MERGE-D |
 
 ### Counts
 
-- **Merged to `main`:** 9 / 16 (PR-2,3,4,5,6,9,10,13,14)  
-- **Committed in worktree:** 14 / 16 (PR-10, PR-16 landed on main)
-- **WIP uncommitted:** none (PR-13 committed in worktree before MERGE-A)  
-- **Greenfield remaining:** PR-10 (Theme B2), PR-16 (Theme D)
+- **Merged to `main`:** 16 / 16  
+- **WIP uncommitted:** none  
+- **Greenfield remaining:** none (PR-10, PR-16 landed on `main`)
 
 ---
 
@@ -91,7 +90,7 @@ Work lands on `main` in **four merges**, not sixteen:
 | A — Messaging | `integrate/theme-a-messaging` | 2, 3, 13 | **Complete** → `main` @ `d06bbd9` (611/611 `npm test`, 208/208 `test:opencode`) |
 | B — Composer | `integrate/theme-b-composer` | 4, 5, 6, 9, **10**, 14 | **Complete** → `main` @ `1943062` (612/612 `npm test`, 209/209 `test:opencode`) |
 | C — Branding | `integrate/theme-c-branding` | 7, 8, 11, 12, 15 | **Complete** → `main` @ `a5bc674` (613/613, 210/210) |
-| D — Closeout | `integrate/theme-d-closeout` | 1, 16 | In progress |
+| D — Closeout | `integrate/theme-d-closeout` | 1, 16 | **Complete** → `main` @ `a2960e6` |
 
 Per-theme gate: `npm test` + `npm run test:opencode` after each merge.
 
@@ -138,6 +137,7 @@ Full paths and artifact index: [`.cursor/EXECUTE-PLAN-RECOVERY-a6c7a11c.md`](../
 | 2026-06-06 | **MERGE-A complete** | Cherry-pick order 2→3→13 on `integrate/theme-a-messaging` from `c765ef6`; fast-forward `main` → **`d06bbd922e982613e9a10e4e4fc45c11dbe47f60`**. Gates: `npm test` **611/611**, `npm run test:opencode` **208/208**. Follow-up commit restored RP-MSG-1 `providerForRequest` audit logs dropped by PR-13 auto-merge. Conflicts: `runtime-provider-router.test.js` (PR-2), `SettingsRuntimeDefaultsCard.swift` (PR-3). `bridge.js` handler cascade unchanged (desktop→git→router→passthrough). |
 | 2026-06-06 | **MERGE-B complete** | Cherry-picks PR-4 (`d2185e4`), PR-5 (`4e9f258`+`03affbc`), PR-6 (`e5786d7`), PR-14 (`f77625c`), PR-9 (`bfe2ac3`); greenfield PR-10 slash V2 (`1943062`). Gates: **612/612**, **209/209**. Conflicts: `bridge-rpc.md`, `runtime-provider-router.js` (PR-4), `opencode-client.test.js` (PR-5). |
 | 2026-06-06 | **MERGE-C complete** | Cherry-picks 7→12→11→8→15 (`2da46b4`…`5c8a512`). Gates: **613/613**, **210/210**. PR-8 conflicts resolved in logo/menu Swift files (theirs). |
+| 2026-06-06 | **MERGE-D complete** | PR-1 (`5abbb91`) + PR-16 closeout (`a2960e6`). Gates: **613/613**, **210/210**. **Execute-plan 16/16 on `main`.** |
 
 ---
 
