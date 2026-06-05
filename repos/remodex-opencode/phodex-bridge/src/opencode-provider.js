@@ -185,6 +185,7 @@ function createOpenCodeProvider({
   } = {}) {
     let ownershipWithoutSession = 0;
     let sessionWithoutOwnership = 0;
+    let invalidSessionPruned = 0;
     let sdkValidations = 0;
 
     for (const { threadId } of ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID)) {
@@ -207,6 +208,7 @@ function createOpenCodeProvider({
         continue;
       }
       if (invalidSessionThreadIds.has(threadId)) {
+        invalidSessionPruned += 1;
         removeOrphanOpenCodeThread(threadId);
         continue;
       }
@@ -221,21 +223,30 @@ function createOpenCodeProvider({
       const valid = await validateOwnedThreadSession(sessionId);
       if (!valid) {
         invalidSessionThreadIds.add(threadId);
+        invalidSessionPruned += 1;
         removeOrphanOpenCodeThread(threadId);
       }
     }
 
-    const prunedCount = ownershipWithoutSession + sessionWithoutOwnership;
+    const prunedCount =
+      ownershipWithoutSession + sessionWithoutOwnership + invalidSessionPruned;
     console.log(
       JSON.stringify({
         event: "opencode_storage_mismatch",
         ownership_without_session: ownershipWithoutSession,
         session_without_ownership: sessionWithoutOwnership,
+        invalid_session_pruned: invalidSessionPruned,
         sdk_validations: sdkValidations,
       }),
     );
     maybeLogOpenCodePruneOpsHint({ prunedCount });
-    return { ownershipWithoutSession, sessionWithoutOwnership, sdkValidations, prunedCount };
+    return {
+      ownershipWithoutSession,
+      sessionWithoutOwnership,
+      invalidSessionPruned,
+      sdkValidations,
+      prunedCount,
+    };
   }
 
   function scheduleStartupPrune() {
@@ -511,7 +522,9 @@ function createOpenCodeProvider({
       return true;
     }
     try {
-      const messages = normalizeSessionMessagesResponse(await client.getMessages(sessionId));
+      const messages = normalizeSessionMessagesResponse(
+        await client.getMessages(sessionId, { limit: 1 }),
+      );
       return Array.isArray(messages) && messages.length > 0;
     } catch {
       return false;
@@ -692,8 +705,7 @@ function createOpenCodeProvider({
   async function listThreads(params = {}) {
     const limit = boundedPositiveInteger(params.limit, 50);
     const includeArchived = params.includeArchived === true || params.include_archived === true;
-    const includeFullRehydrate =
-      params.includeFullRehydrate === true || params.include_full_rehydrate === true;
+    const includeFullRehydrate = readString(env.REMODEX_LIST_THREADS_FULL_REHYDRATE) === "1";
 
     let removedOrphanOwnership = 0;
     let removedOrphanSession = 0;
@@ -1729,11 +1741,9 @@ function createOpenCodeProvider({
     }
   }
 
-  // Stub for future command/execute RPC — call ensureThreadSession + markUserStartedInProcess on success.
-  async function commandExecute(request) {
-    const params = request.params || {};
-    const thread = await ensureThreadSession(await requireThread(readThreadId(params)));
-    markUserStartedInProcess(thread);
+  // command/execute not wired in handleRequest until PR4. On success: ensureThreadSession +
+  // markUserStartedInProcess after SDK execute completes.
+  async function commandExecute() {
     throw unsupportedMethodError("command/execute");
   }
 

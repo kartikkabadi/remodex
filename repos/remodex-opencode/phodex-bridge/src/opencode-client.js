@@ -264,9 +264,14 @@ async function createOpenCodeClient({
     return withTimeout(client.session.abort({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
   }
 
-  async function getMessages(sessionId) {
+  async function getMessages(sessionId, options = {}) {
+    const request = { sessionID: sessionId };
+    const limit = Number(options?.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      request.limit = limit;
+    }
     const response = await withTimeout(
-      client.session.messages({ sessionID: sessionId }),
+      client.session.messages(request),
       REQUEST_TIMEOUT_MS,
     );
     return normalizeSessionMessagesResponse(response);
