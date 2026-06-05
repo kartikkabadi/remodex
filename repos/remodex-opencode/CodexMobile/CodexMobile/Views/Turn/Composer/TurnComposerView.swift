@@ -741,6 +741,7 @@ private struct ComposerPreviewContent: View {
                 runtimeUnavailableReasonCode: nil,
                 disabledProviderIDs: [],
                 catalogProviderIDs: ["codex"],
+                openCodeCatalogProviders: [],
                 unavailableReasonByProviderID: [:],
                 reasonCodeByProviderID: [:],
                 showsBetaLabel: false,
