@@ -77,6 +77,14 @@ function createRuntimeProviderRouter({
     void opencodeProvider.warmup();
   }
 
+  console.log(
+    JSON.stringify({
+      event: "runtime_provider_router_init",
+      providers: runtimeProviders.map((p) => p && p.id).filter(Boolean),
+      opencodeWarmupSkipped: skipOpenCodeWarmup,
+    }),
+  );
+
   function handleApplicationMessage(rawMessage) {
     const parsed = safeParseJSON(rawMessage);
     if (!parsed) {
@@ -196,7 +204,7 @@ function createRuntimeProviderRouter({
       return true;
     }
 
-    const provider = providerForRequest(parsed, runtimeProviders);
+    const provider = providerForRequest(parsed, runtimeProviders, threadOwnership);
     if (!provider) {
       return false;
     }
@@ -388,7 +396,10 @@ function logBridgeTurnStartAudit(request, ownershipStore) {
   const params = request.params || {};
   const threadId = readThreadId(params);
   const normalizedRequested = normalizeExplicitRequestedProvider(params);
-  const storedProvider = threadId ? ownershipStore.getOwnership(threadId) : null;
+  const storedProvider = threadId && ownershipStore && typeof ownershipStore.getOwnership === "function"
+    ? ownershipStore.getOwnership(threadId)
+    : null;
+  const hasExplicit = hasExplicitProviderField(params);
 
   console.log(
     JSON.stringify({
@@ -396,6 +407,7 @@ function logBridgeTurnStartAudit(request, ownershipStore) {
       threadId,
       rpcRequestId: request.id ?? null,
       requestedProvider: normalizedRequested,
+      hasExplicitProviderField: hasExplicit,
       storedProvider: storedProvider || null,
       mismatch: Boolean(
         storedProvider && normalizedRequested && storedProvider !== normalizedRequested,
@@ -425,23 +437,35 @@ function logBridgeOwnershipMismatch(request, ownershipStore, error) {
 function resolveThreadOwnershipMismatch(request, ownershipStore) {
   const params = request.params || {};
   const threadId = readThreadId(params);
+  const storedProvider = threadId && ownershipStore && typeof ownershipStore.getOwnership === "function"
+    ? ownershipStore.getOwnership(threadId)
+    : null;
+  const requestedProvider = readModelProvider(params);
+  const hasExplicit = hasExplicitProviderField(params);
+  const normalizedRequested = hasExplicit && requestedProvider
+    ? (isOpenCodeProvider(requestedProvider) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID)
+    : null;
+
+  console.log(
+    JSON.stringify({
+      event: "resolve_thread_ownership_check",
+      rpcRequestId: request.id ?? null,
+      threadId: threadId || null,
+      requestedProvider: normalizedRequested,
+      hasExplicitProviderField: hasExplicit,
+      storedProvider: storedProvider || null,
+    }),
+  );
+
   if (!threadId) {
     return null;
   }
-
-  const storedProvider = ownershipStore.getOwnership(threadId);
   if (!storedProvider) {
     return null;
   }
-
-  const requestedProvider = readModelProvider(params);
-  if (!hasExplicitProviderField(params)) {
+  if (!hasExplicit) {
     return null;
   }
-
-  const normalizedRequested = isOpenCodeProvider(requestedProvider)
-    ? OPENCODE_PROVIDER_ID
-    : CODEX_PROVIDER_ID;
   if (storedProvider === normalizedRequested) {
     return null;
   }
@@ -461,23 +485,93 @@ function normalizeExplicitRequestedProvider(params = {}) {
   return isOpenCodeProvider(readModelProvider(params)) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID;
 }
 
-function providerForRequest(request, providers) {
+function providerForRequest(request, providers, ownershipStore = null) {
   const params = request.params || {};
   const providerFromRequest = readModelProvider(params);
   const hasProviderField = hasExplicitProviderField(params);
+  const threadId = readThreadId(params);
+  const storedProvider = threadId && ownershipStore && typeof ownershipStore.getOwnership === "function"
+    ? ownershipStore.getOwnership(threadId)
+    : null;
+
+  // Use normalized form for requestedProvider in logs (for consistency with resolve/audit which use canonical OPENCODE/CODEX or null when !hasExplicit).
+  // This avoids raw variants (e.g. "open-code") or default-"codex" (for !has) in the field.
+  const requestedProviderForLog = hasProviderField
+    ? (isOpenCodeProvider(providerFromRequest) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID)
+    : null;
+
   if (isOpenCodeProvider(providerFromRequest)) {
-    return providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID) || null;
+    const resolved = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID) || null;
+    console.log(
+      JSON.stringify({
+        event: "provider_for_request_decision",
+        rpcRequestId: request.id ?? null,
+        requestedProvider: requestedProviderForLog,
+        hasExplicitProviderField: hasProviderField,
+        storedProvider: storedProvider || null,
+        resolvedProvider: resolved ? resolved.id : null,
+        matchReason: "explicit_opencode",
+        owns: false,
+      }),
+    );
+    return resolved;
   }
   if (hasProviderField) {
+    console.log(
+      JSON.stringify({
+        event: "provider_for_request_decision",
+        rpcRequestId: request.id ?? null,
+        requestedProvider: requestedProviderForLog,
+        hasExplicitProviderField: hasProviderField,
+        storedProvider: storedProvider || null,
+        resolvedProvider: null,
+        matchReason: "explicit_non_oc_passthrough",
+        owns: false,
+      }),
+    );
     return null;
   }
 
-  const threadId = readThreadId(params);
   if (!threadId) {
+    console.log(
+      JSON.stringify({
+        event: "provider_for_request_decision",
+        rpcRequestId: request.id ?? null,
+        requestedProvider: requestedProviderForLog,
+        hasExplicitProviderField: hasProviderField,
+        storedProvider: storedProvider || null,
+        resolvedProvider: null,
+        matchReason: "no_thread_id",
+        owns: false,
+      }),
+    );
     return null;
   }
 
-  return providers.find((provider) => provider.ownsThread(threadId)) || null;
+  console.log(
+    JSON.stringify({
+      event: "provider_for_request_owns_call",
+      rpcRequestId: request.id ?? null,
+      threadId,
+      requestedProvider: requestedProviderForLog,
+      hasExplicitProviderField: hasProviderField,
+      storedProvider: storedProvider || null,
+    }),
+  );
+  const resolved = providers.find((provider) => provider.ownsThread(threadId)) || null;
+  console.log(
+    JSON.stringify({
+      event: "provider_for_request_decision",
+      rpcRequestId: request.id ?? null,
+      requestedProvider: requestedProviderForLog,
+      hasExplicitProviderField: hasProviderField,
+      storedProvider: storedProvider || null,
+      resolvedProvider: resolved ? resolved.id : null,
+      matchReason: resolved ? "owns_thread_match" : "no_owning_provider",
+      owns: !!resolved,
+    }),
+  );
+  return resolved;
 }
 
 function mergeModelListResult(codexResult, providerModels, extras = {}) {
