@@ -2,7 +2,29 @@
 
 **Status:** **Signed off** on `main` (OpenCode core parity on physical iPhone + Mac).  
 **Canonical base commit:** `12542248efa6b9d99b4d49b177e2b41f45961939` (`1254224`)  
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-06
+
+## Addendum — composer + ghost fix stack (execute-plan `5bdac085`)
+
+**Merged to `main`:** `6f23a9e` (2026-06-06) — iPad OpenCode E2E composer fixes (design rev 7).
+
+| Automated gate | Result | Date |
+|----------------|--------|------|
+| Bridge `npm test` on `main` | **645/645 pass** | 2026-06-06 |
+| `REMODEX_DISABLE_OPENCODE=1` regression | Covered in `opencode-regression.test.js` (incl. `command/execute`) | 2026-06-06 |
+
+**Targeted device re-check required** (rows **A–H** + **O17** per [`ipad-opencode-e2e-composer-fixes-eedfe10f.md`](../design/ipad-opencode-e2e-composer-fixes-eedfe10f.md) acceptance matrix):
+
+| ID | Verify on iPad |
+|----|----------------|
+| A | QR connect → Projects: no burst of ghost “OpenCode chat” rows |
+| B | Single send → one user bubble, one assistant reply (no duplicate “Hey”) |
+| C/G | `/` and `$` panels ≤3 rows; See all opens full sheet |
+| D/E/F | Tap `/skills` → executes (not prefill); full slash sheet same |
+| H | Custom `command/foo.md` with hints → arguments sheet → execute |
+| O17 | `REMODEX_DISABLE_OPENCODE=1` → Codex threads/slash unchanged |
+
+**Device / evidence:** _Pending Kartik iPad + Mac pairing run._
 
 ## Why this file exists
 
