@@ -35,7 +35,7 @@ This document is the **single authoritative plan** for:
 | PR8 `supportsDesktopHandoff` (OpenCode catalog) | **`true`** on `main` (restored after erroneous revert in `4e3527c`) |
 | Phase 1 exit checklist (§ below) | **Complete** — unchecked boxes in this doc are stale |
 | Upstream PRs | Allowed after sign-off; coordinate release timing with Kartik |
-| Execute-plan follow-on (16 PRs) | Separate track — [.cursor/EXECUTE-PLAN-RECOVERY-a6c7a11c.md](../../.cursor/EXECUTE-PLAN-RECOVERY-a6c7a11c.md) |
+| Execute-plan follow-on (16 PRs) | Separate track — [`execute-plan-a6c7a11c-INDEX.md`](../operations/execute-plan-a6c7a11c-INDEX.md) |
 
 ---
 

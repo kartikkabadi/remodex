@@ -69,6 +69,18 @@ remodex:opencode/
 
 Completed in `repos/remodex-opencode` on base `38ad72b`. See `repos/remodex-opencode/AGENTS.md` Phase 2 table. PR8 catalog handoff flip **done** — see `docs/operations/device-e2e-signoff.md`.
 
+## Execute-plan follow-on (16 PRs — in progress)
+
+Grok `/execute-plan` `a6c7a11c` (Jun 2026) implemented most PRs in isolated worktrees; **0/16 merged to `main`**.
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/operations/execute-plan-a6c7a11c-INDEX.md`](docs/operations/execute-plan-a6c7a11c-INDEX.md) | Start here |
+| [`docs/operations/execute-plan-a6c7a11c-STATUS.md`](docs/operations/execute-plan-a6c7a11c-STATUS.md) | Done vs not done |
+| [`.cursor/plans/execute-plan-a6c7a11c-integration.plan.md`](.cursor/plans/execute-plan-a6c7a11c-integration.plan.md) | How to finish (Phase 0 → Themes A–D) |
+
+Do not resume Grok TUI; use worktree git + integration plan.
+
 ## Workflow
 
 ### Branch strategy
