@@ -98,6 +98,8 @@ struct TurnComposerView: View {
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
     let onRetryBridgeSlashCommands: () -> Void
+    var onSeeAllBridgeSlashCommands: () -> Void = {}
+    var onSeeAllSkills: () -> Void = {}
     let onRemoveMentionedFile: (String) -> Void
     let onRemoveMentionedSkill: (String) -> Void
     let onRemoveMentionedPlugin: (String) -> Void
@@ -283,7 +285,9 @@ struct TurnComposerView: View {
                                 onSelectCodeReviewTarget: onSelectCodeReviewTarget,
                                 onSelectForkDestination: onSelectForkDestination,
                                 onCloseSlashCommandPanel: onCloseSlashCommandPanel,
-                                onRetryBridgeSlashCommands: onRetryBridgeSlashCommands
+                                onRetryBridgeSlashCommands: onRetryBridgeSlashCommands,
+                                onSeeAllBridgeSlashCommands: onSeeAllBridgeSlashCommands,
+                                onSeeAllSkills: onSeeAllSkills
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -314,6 +318,8 @@ private struct TurnComposerAutocompletePanels: View {
     let onSelectForkDestination: (TurnComposerForkDestination) -> Void
     let onCloseSlashCommandPanel: () -> Void
     let onRetryBridgeSlashCommands: () -> Void
+    var onSeeAllBridgeSlashCommands: () -> Void = {}
+    var onSeeAllSkills: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -350,7 +356,7 @@ private struct TurnComposerAutocompletePanels: View {
                         isLoading: state.isSkillAutocompleteLoading,
                         query: state.skillAutocompleteQuery,
                         onSelect: onSelectSkillAutocomplete,
-                        onSeeAll: {} // wired for V2 "See all" (full list expansion or future skill browser; no-op default ok upstream)
+                        onSeeAll: onSeeAllSkills
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
@@ -396,7 +402,7 @@ private struct TurnComposerAutocompletePanels: View {
                     onSelectReviewTarget: onSelectCodeReviewTarget,
                     onSelectForkDestination: onSelectForkDestination,
                     onClose: onCloseSlashCommandPanel,
-                    onSeeAll: {} // TODO(RP-CMD-2): full command browser
+                    onSeeAll: onSeeAllBridgeSlashCommands
                 )
             }
         }

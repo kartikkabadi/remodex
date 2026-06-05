@@ -8,7 +8,11 @@
 
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
-const { createOpenCodeClient, normalizeSessionMessagesResponse } = require("./opencode-client");
+const {
+  buildStaticSlashCommands,
+  createOpenCodeClient,
+  normalizeSessionMessagesResponse,
+} = require("./opencode-client");
 const {
   DEFAULT_OPENCODE_MODEL,
   OPENCODE_PROVIDER_ID,
@@ -581,13 +585,18 @@ function createOpenCodeProvider({
   }
 
   async function listCommands(directory) {
+    const staticBuiltins = buildStaticSlashCommands();
     try {
       await ensureStarted();
     } catch {
-      return [];
+      return staticBuiltins;
     }
     // listCommands composes full set (SDK client.command.list + static BUILTINS union in client); dir passed through.
-    return client.listCommands(directory);
+    try {
+      return await client.listCommands(directory);
+    } catch {
+      return staticBuiltins;
+    }
   }
 
   async function listSkills(directory) {

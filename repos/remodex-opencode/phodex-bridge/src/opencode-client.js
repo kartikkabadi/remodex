@@ -19,6 +19,14 @@ const { resolveLogoProviderId } = require("./opencode-provider-inventory");
 // TUI/CLI builtins not auto-returned by current SDK command.list (which focuses on Service/agent/skill-derived per vendored command + acp); keep manually in sync on vendored updates or future sync PR. Union deduped by token before return. Always test under default DISABLE=1 that codex paths unaffected.
 const BUILTINS = ['/undo','/redo','/share','/help','/init','/compact','/login','/logout','/models','/agents','/skills','/mcp','/config','/clear','/exit'];
 
+function buildStaticSlashCommands() {
+  return BUILTINS.map((token) => {
+    const base = token.slice(1);
+    const title = token === "/mcp" ? "MCP" : base.replace(/^\w/, (c) => c.toUpperCase());
+    return { token, title, description: "" };
+  });
+}
+
 let _createOpencodeClient = null;
 
 async function getSdkClient() {
@@ -355,12 +363,11 @@ async function createOpenCodeClient({
     }
     const seen = new Set();
     const out = [];
-    for (const token of BUILTINS) {
-      if (!seen.has(token)) {
+    for (const builtin of buildStaticSlashCommands()) {
+      const token = readString(builtin.token);
+      if (token && !seen.has(token)) {
         seen.add(token);
-        const base = token.slice(1);
-        const title = token === "/mcp" ? "MCP" : base.replace(/^\w/, (c) => c.toUpperCase());
-        out.push({ token, title, description: "" });
+        out.push(builtin);
       }
     }
     for (const c of derived) {
@@ -1099,6 +1106,8 @@ function resolveProviderAuthPayload(response) {
 }
 
 module.exports = {
+  BUILTINS,
+  buildStaticSlashCommands,
   createOpenCodeClient,
   dispatchEvent,
   normalizeSessionMessagesResponse,

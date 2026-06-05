@@ -46,6 +46,8 @@ struct TurnComposerHostView: View {
     var isDesktopHandoffLoading: Bool = false
     var onContinueOnDesktop: (() -> Void)?
 
+    @State private var isShowingAllBridgeSlashCommands = false
+
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
         let runtimeState = TurnComposerRuntimeState.resolve(
@@ -348,6 +350,10 @@ struct TurnComposerHostView: View {
             onRetryBridgeSlashCommands: {
                 viewModel.retryBridgeSlashCommandsLoad(codex: codex, thread: thread)
             },
+            onSeeAllBridgeSlashCommands: {
+                guard slashSource == .bridgeCommands else { return }
+                isShowingAllBridgeSlashCommands = true
+            },
             onRemoveMentionedFile: { mentionID in
                 viewModel.removeMentionedFile(id: mentionID)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
@@ -390,6 +396,116 @@ struct TurnComposerHostView: View {
             isDesktopHandoffLoading: isDesktopHandoffLoading,
             onContinueOnDesktop: onContinueOnDesktop
         )
+        .sheet(isPresented: $isShowingAllBridgeSlashCommands) {
+            if slashSource == .bridgeCommands {
+                BridgeSlashCommandsFullListSheet(
+                    sections: viewModel.groupedBridgeSlashCommandSections(
+                        matching: "",
+                        allowsForkCommand: allowsForkCommand,
+                        modelProvider: modelProvider,
+                        thread: thread
+                    ),
+                    supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+                    onSelect: { command in
+                        isShowingAllBridgeSlashCommands = false
+                        viewModel.onSelectBridgeSlashCommand(command)
+                        viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
+                    },
+                    onDismiss: {
+                        isShowingAllBridgeSlashCommands = false
+                    }
+                )
+            }
         }
+        }
+    }
+}
+
+private struct BridgeSlashCommandsFullListSheet: View {
+    let sections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
+    let supportsSlashCommands: Bool
+    let onSelect: (BridgeSlashCommand) -> Void
+    let onDismiss: () -> Void
+
+    private var commandCount: Int {
+        sections.reduce(0) { $0 + $1.commands.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if commandCount == 0 {
+                    ContentUnavailableView(
+                        "No commands",
+                        systemImage: "slash.circle",
+                        description: Text("No slash commands are available for this project.")
+                    )
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections, id: \.section) { group in
+                                Text(group.section.displayTitle)
+                                    .font(AppFont.caption(weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 4)
+
+                                ForEach(group.commands) { command in
+                                    Button {
+                                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                                        onSelect(command)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 8) {
+                                                RuntimeProviderLogoView(
+                                                    provider: command.resolvedProviderID(for: group.section),
+                                                    size: 14
+                                                )
+                                                Text(command.token)
+                                                    .font(AppFont.subheadline(weight: .semibold))
+                                                    .foregroundStyle(Color.indigo)
+                                                Spacer(minLength: 8)
+                                                Text(command.title)
+                                                    .font(AppFont.footnote())
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+                                            if let description = SlashCommandAutocompletePanel.descriptionLabel(from: command.description) {
+                                                Text(description)
+                                                    .font(AppFont.caption2())
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(2)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .capabilityGreyOut(
+                                        isEnabled: supportsSlashCommands,
+                                        reason: supportsSlashCommands
+                                            ? nil
+                                            : ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.bottom, 12)
+                    }
+                }
+            }
+            .navigationTitle("Commands")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: onDismiss)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

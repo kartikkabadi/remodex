@@ -16,6 +16,8 @@ if (process.env.REMODEX_TEST !== "1") {
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { buildStaticSlashCommands } = require("../src/opencode-client");
+const { createOpenCodeProvider } = require("../src/opencode-provider");
 const { createRuntimeProviderRouter } = require("../src/runtime-provider-router");
 const { handleDesktopRequest } = require("../src/desktop-handler");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
@@ -330,18 +332,60 @@ test("command/list returns OpenCode slash commands when provider is registered",
   assert.equal(response.result.commands[0].token, "/build");
 });
 
-// opencode-regression.test.js for DISABLE=1 command paths parity
-test("command/list under default DISABLE=1 (via test-env) has no opencode provider (codex command paths unaffected)", async () => {
-  // no providers passed => buildProviders sees REMODEX_DISABLE_OPENCODE=1 default from test-env.js, returns []
-  const { request } = createTestRouter({});
+test("command/list returns >= 15 static builtins when OpenCode server cannot start", async () => {
+  const provider = createOpenCodeProvider({
+    sendApplicationMessage: () => {},
+    env: { REMODEX_ENABLE_OPENCODE: "1" },
+    serverFactory: () => ({
+      get baseUrl() {
+        return "";
+      },
+      get isRunning() {
+        return false;
+      },
+      start: async () => {
+        throw new Error("OpenCode server unavailable in test");
+      },
+      stop: async () => {},
+    }),
+  });
+  const { request } = createTestRouter({ providers: [provider] });
   const response = await request({
-    id: "cmd-disable-parity",
+    id: "cmd-degraded-builtins",
     method: "command/list",
     params: { directory: "/tmp/repo" },
   });
 
-  assert.equal(response.id, "cmd-disable-parity");
-  assert.deepEqual(response.result.commands, []);
+  assert.equal(response.id, "cmd-degraded-builtins");
+  assert.equal(response.result.commands.length, buildStaticSlashCommands().length);
+  const tokens = response.result.commands.map((command) => command.token);
+  assert.ok(tokens.includes("/undo"), "includes /undo builtin");
+  assert.ok(tokens.includes("/compact"), "includes /compact builtin");
+  assert.deepEqual(tokens.slice(0, buildStaticSlashCommands().length), buildStaticSlashCommands().map((c) => c.token));
+});
+
+// opencode-regression.test.js for DISABLE=1 command paths parity
+test("command/list under default DISABLE=1 (via test-env) has no opencode provider (codex command paths unaffected)", async () => {
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  process.env.REMODEX_DISABLE_OPENCODE = "1";
+  try {
+    // no providers passed => resolveProviders sees REMODEX_DISABLE_OPENCODE=1, returns []
+    const { request } = createTestRouter({});
+    const response = await request({
+      id: "cmd-disable-parity",
+      method: "command/list",
+      params: { directory: "/tmp/repo" },
+    });
+
+    assert.equal(response.id, "cmd-disable-parity");
+    assert.deepEqual(response.result.commands, []);
+  } finally {
+    if (previousDisable === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+    }
+  }
 });
 
 test("skills/list omits OpenCode skills when provider is absent", async () => {

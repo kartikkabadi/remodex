@@ -2791,9 +2791,15 @@ final class TurnViewModel {
                 guard generation == self.bridgeSlashCommandsFetchGeneration else { return }
                 guard self.bridgeSlashCommandsDirectory == directory else { return }
 
-                self.bridgeSlashCommands = commands
+                if commands.isEmpty {
+                    // Empty success is degraded — use minimal fallback and allow retry/refetch.
+                    self.bridgeSlashCommands = TurnComposerSlashCommand.minimalFallbackSlashCommands()
+                    self.didLoadBridgeSlashCommandsSuccessfully = false
+                } else {
+                    self.bridgeSlashCommands = commands
+                    self.didLoadBridgeSlashCommandsSuccessfully = true
+                }
                 self.isLoadingBridgeSlashCommands = false
-                self.didLoadBridgeSlashCommandsSuccessfully = true
                 self.bridgeSlashCommandsLoadError = nil
             } catch {
                 guard !Task.isCancelled else { return }

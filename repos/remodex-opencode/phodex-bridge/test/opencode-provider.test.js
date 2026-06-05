@@ -6,7 +6,11 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createOpenCodeClient, dispatchEvent } = require("../src/opencode-client");
+const {
+  buildStaticSlashCommands,
+  createOpenCodeClient,
+  dispatchEvent,
+} = require("../src/opencode-client");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
 const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
@@ -139,6 +143,51 @@ test("provider has expected API surface", () => {
   assert.equal(typeof provider.handleRequest, "function");
   assert.equal(typeof provider.shutdown, "function");
   assert.equal(typeof provider.getHandoffContext, "function");
+});
+
+test("listCommands returns static builtins when server factory throws on start", async () => {
+  const provider = makeProvider({
+    serverFactory: () => ({
+      get baseUrl() {
+        return "";
+      },
+      get isRunning() {
+        return false;
+      },
+      start: async () => {
+        throw new Error("server start failed");
+      },
+      stop: async () => {},
+    }),
+  });
+
+  const commands = await provider.listCommands("/tmp/degraded-project");
+  assert.equal(commands.length, buildStaticSlashCommands().length);
+  const tokens = commands.map((command) => command.token);
+  assert.ok(tokens.includes("/undo"));
+  assert.ok(tokens.includes("/help"));
+  assert.deepEqual(
+    tokens.slice(0, buildStaticSlashCommands().length),
+    buildStaticSlashCommands().map((command) => command.token),
+  );
+});
+
+test("listCommands returns static builtins when client listCommands throws after start", async () => {
+  const provider = makeProvider({
+    clientFactory: async () => ({
+      ...fakeClient(),
+      listCommands: async () => {
+        throw new Error("command.list failed");
+      },
+    }),
+  });
+
+  const commands = await provider.listCommands("/tmp/client-throw-project");
+  assert.equal(commands.length, buildStaticSlashCommands().length);
+  assert.deepEqual(
+    commands.map((command) => command.token),
+    buildStaticSlashCommands().map((command) => command.token),
+  );
 });
 
 test("ownsThread returns false for unknown thread", () => {

@@ -150,6 +150,173 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testFetchSlashCommandsClearsInMemoryCacheOnEmptySuccess() async throws {
+        let service = makeService()
+        var requestCount = 0
+
+        service.requestTransportOverride = { _, _ in
+            requestCount += 1
+            if requestCount == 1 {
+                var commands: [JSONValue] = []
+                for index in 0..<CodexService.minimumPersistedSlashCommandCount {
+                    commands.append(
+                        .object([
+                            "token": .string("/cmd\(index)"),
+                            "title": .string("Cmd \(index)"),
+                            "description": .string(""),
+                        ])
+                    )
+                }
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object(["commands": .array(commands)]),
+                    includeJSONRPC: false
+                )
+            }
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["commands": .array([])]),
+                includeJSONRPC: false
+            )
+        }
+
+        let first = try await service.fetchSlashCommands(directory: "/tmp/mem-cache-clear")
+        XCTAssertEqual(first.count, CodexService.minimumPersistedSlashCommandCount)
+
+        let empty = try await service.fetchSlashCommands(directory: "/tmp/mem-cache-clear")
+        XCTAssertTrue(empty.isEmpty)
+
+        let third = try await service.fetchSlashCommands(directory: "/tmp/mem-cache-clear")
+        XCTAssertEqual(third.count, CodexService.minimumPersistedSlashCommandCount)
+        XCTAssertEqual(requestCount, 3)
+    }
+
+    func testLoadPersistedSlashCommandCacheRejectsShortCatalog() {
+        let service = makeService()
+        let cacheFile = persistedSlashCommandsCacheURL()
+        try? FileManager.default.removeItem(at: cacheFile)
+        defer { try? FileManager.default.removeItem(at: cacheFile) }
+
+        let staleEntry = SlashCommandCacheEntry(
+            commands: [BridgeSlashCommand(token: "/undo", title: "Undo", description: "")],
+            fetchedAt: Date(),
+            directory: "/tmp/stale-short"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let payload = ["/tmp/stale-short": staleEntry]
+        if let data = try? encoder.encode(payload) {
+            let directory = cacheFile.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? data.write(to: cacheFile, options: [.atomic])
+        }
+
+        service.loadPersistedSlashCommandCache()
+        XCTAssertNil(service.slashCommandCacheByDirectory["/tmp/stale-short"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheFile.path))
+    }
+
+    func testFetchSlashCommandsDoesNotPersistEmptySuccess() async throws {
+        let service = makeService()
+        let cacheFile = persistedSlashCommandsCacheURL()
+        try? FileManager.default.removeItem(at: cacheFile)
+        defer { try? FileManager.default.removeItem(at: cacheFile) }
+
+        service.requestTransportOverride = { _, _ in
+            RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["commands": .array([])]),
+                includeJSONRPC: false
+            )
+        }
+
+        let commands = try await service.fetchSlashCommands(directory: "/tmp/empty-success")
+        XCTAssertTrue(commands.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheFile.path))
+    }
+
+    func testInvalidateSlashCommandCacheClearsPersistedEntry() async throws {
+        let service = makeService()
+        let cacheFile = persistedSlashCommandsCacheURL()
+        try? FileManager.default.removeItem(at: cacheFile)
+        defer { try? FileManager.default.removeItem(at: cacheFile) }
+
+        service.requestTransportOverride = { _, _ in
+            RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "commands": .array([
+                        .object([
+                            "token": .string("/undo"),
+                            "title": .string("Undo"),
+                            "description": .string(""),
+                        ]),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        _ = try await service.fetchSlashCommands(directory: "/tmp/persist-clear")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheFile.path))
+
+        service.invalidateSlashCommandCache(directory: "/tmp/persist-clear")
+        if FileManager.default.fileExists(atPath: cacheFile.path) {
+            let data = try Data(contentsOf: cacheFile)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let entries = try decoder.decode([String: SlashCommandCacheEntry].self, from: data)
+            XCTAssertNil(entries["/tmp/persist-clear"])
+        }
+    }
+
+    func testEmptyBridgeSlashCommandSuccessUsesMinimalFallback() async {
+        let service = makeService()
+        service.requestTransportOverride = { _, _ in
+            RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["commands": .array([])]),
+                includeJSONRPC: false
+            )
+        }
+        service.upsertThread(CodexThread(
+            id: "thread-empty-success",
+            cwd: "/tmp/empty-bridge",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        ))
+
+        let viewModel = makeViewModel()
+        let thread = CodexThread(
+            id: "thread-empty-success",
+            cwd: "/tmp/empty-bridge",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode"
+        )
+
+        viewModel.onInputChangedForSlashCommandAutocomplete(
+            "/",
+            codex: service,
+            thread: thread,
+            supportsSlashCommands: true,
+            activeTurnID: nil
+        )
+
+        let loadFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                !viewModel.isLoadingBridgeSlashCommands
+            },
+            object: viewModel
+        )
+        await fulfillment(of: [loadFinished], timeout: 2.0)
+
+        XCTAssertFalse(viewModel.didLoadBridgeSlashCommandsSuccessfully)
+        XCTAssertEqual(
+            viewModel.bridgeSlashCommands.map(\.token),
+            TurnComposerSlashCommand.minimalFallbackSlashCommands().map(\.token)
+        )
+    }
+
     func testBridgeSlashCommandLoadFailureShowsRetryInsteadOfEmptyHint() async {
         let service = makeService()
         service.requestTransportOverride = { _, _ in
@@ -178,12 +345,13 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
             activeTurnID: nil
         )
 
-        for _ in 0..<50 {
-            if viewModel.bridgeSlashCommandsLoadError != nil || !viewModel.isLoadingBridgeSlashCommands {
-                break
-            }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
+        let failureReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                viewModel.bridgeSlashCommandsLoadError != nil || !viewModel.isLoadingBridgeSlashCommands
+            },
+            object: viewModel
+        )
+        await fulfillment(of: [failureReady], timeout: 2.0)
 
         XCTAssertEqual(viewModel.bridgeSlashCommandsLoadError, "Couldn't load commands. Tap to retry.")
         XCTAssertFalse(viewModel.didLoadBridgeSlashCommandsSuccessfully)
@@ -284,12 +452,13 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
 
         releaseFirstDirectory.fulfill()
 
-        for _ in 0..<100 {
-            if viewModel.bridgeSlashCommands.map(\.token) == ["/fresh"] {
-                break
-            }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        let freshLoaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                viewModel.bridgeSlashCommands.map(\.token) == ["/fresh"]
+            },
+            object: viewModel
+        )
+        await fulfillment(of: [freshLoaded], timeout: 2.0)
 
         XCTAssertEqual(viewModel.bridgeSlashCommands.map(\.token), ["/fresh"])
         XCTAssertTrue(viewModel.didLoadBridgeSlashCommandsSuccessfully)
@@ -540,6 +709,11 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         XCTAssertEqual(grouped.map(\.section), [.ocBuiltin, .skillDerived])
         XCTAssertEqual(grouped[0].commands.map(\.token), ["/undo"])
         XCTAssertEqual(grouped[1].commands.map(\.token), ["/build"])
+    }
+
+    private func persistedSlashCommandsCacheURL() -> URL {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        return home.appendingPathComponent(".remodex/slash-commands-cache.json")
     }
 
     private func makeService() -> CodexService {

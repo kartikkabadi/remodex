@@ -17,6 +17,8 @@ extension SlashCommandCacheEntry: Codable {}
 extension CodexService {
     static let slashCommandCacheTTL: TimeInterval = 60
     static let persistedSlashCommandsCacheTTL: TimeInterval = 24 * 60 * 60
+    /// Minimum catalog size for persisted / in-memory slash caches (matches bridge static builtins count).
+    static let minimumPersistedSlashCommandCount = 15
 
     // Loads slash commands for a project directory, using a short-lived per-directory cache on success only.
     // Persisted long-term cache (~/.remodex/slash-commands-cache.json, 24h TTL) is written on successful
@@ -40,12 +42,18 @@ extension CodexService {
         do {
             let response = try await sendRequest(method: "command/list", params: .object(paramsObject))
             let commands = decodeSlashCommands(from: response.result) ?? []
-            slashCommandCacheByDirectory[cacheKey] = SlashCommandCacheEntry(
-                commands: commands,
-                fetchedAt: Date(),
-                directory: cacheKey
-            )
-            savePersistedSlashCommandCache()
+            // Do not cache or persist empty success — bridge may be degraded; avoids 24h stale 1-command cache.
+            if !commands.isEmpty {
+                slashCommandCacheByDirectory[cacheKey] = SlashCommandCacheEntry(
+                    commands: commands,
+                    fetchedAt: Date(),
+                    directory: cacheKey
+                )
+                savePersistedSlashCommandCache()
+            } else {
+                slashCommandCacheByDirectory.removeValue(forKey: cacheKey)
+                removePersistedSlashCommandEntry(for: cacheKey)
+            }
             return commands
         } catch {
             print("[CodexService] command/list failed for \(cacheKey): \(error.localizedDescription)")
@@ -65,12 +73,14 @@ extension CodexService {
 
     func invalidateSlashCommandCache() {
         slashCommandCacheByDirectory.removeAll()
+        removePersistedSlashCommandCacheFile()
     }
 
     func invalidateSlashCommandCache(directory: String?) {
         let normalizedDirectory = Self.normalizedSlashCommandDirectory(directory)
         let cacheKey = normalizedDirectory ?? "__global__"
         slashCommandCacheByDirectory.removeValue(forKey: cacheKey)
+        removePersistedSlashCommandEntry(for: cacheKey)
     }
 
     // Parses `result.commands` so tests can validate decoding without transport wiring.
@@ -104,10 +114,19 @@ extension CodexService {
         decoder.dateDecodingStrategy = .iso8601
         guard let entries = try? decoder.decode([String: SlashCommandCacheEntry].self, from: data) else { return }
         let now = Date()
+        var rejectedKeys: [String] = []
         for (key, entry) in entries {
-            if now.timeIntervalSince(entry.fetchedAt) < Self.persistedSlashCommandsCacheTTL {
-                slashCommandCacheByDirectory[key] = entry
+            guard now.timeIntervalSince(entry.fetchedAt) < Self.persistedSlashCommandsCacheTTL else {
+                continue
             }
+            guard isPersistedSlashCommandCatalogValid(entry.commands) else {
+                rejectedKeys.append(key)
+                continue
+            }
+            slashCommandCacheByDirectory[key] = entry
+        }
+        for key in rejectedKeys {
+            removePersistedSlashCommandEntry(for: key)
         }
     }
 
@@ -116,6 +135,7 @@ extension CodexService {
         let now = Date()
         let toSave = slashCommandCacheByDirectory.filter { _, entry in
             now.timeIntervalSince(entry.fetchedAt) < Self.persistedSlashCommandsCacheTTL
+                && isPersistedSlashCommandCatalogValid(entry.commands)
         }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -133,10 +153,18 @@ extension CodexService {
         decoder.dateDecodingStrategy = .iso8601
         guard let entries = try? decoder.decode([String: SlashCommandCacheEntry].self, from: data) else { return nil }
         guard let entry = entries[cacheKey] else { return nil }
-        if Date().timeIntervalSince(entry.fetchedAt) < Self.persistedSlashCommandsCacheTTL {
-            return entry
+        guard Date().timeIntervalSince(entry.fetchedAt) < Self.persistedSlashCommandsCacheTTL else {
+            return nil
         }
-        return nil
+        guard isPersistedSlashCommandCatalogValid(entry.commands) else {
+            removePersistedSlashCommandEntry(for: cacheKey)
+            return nil
+        }
+        return entry
+    }
+
+    private func isPersistedSlashCommandCatalogValid(_ commands: [BridgeSlashCommand]) -> Bool {
+        commands.count >= Self.minimumPersistedSlashCommandCount
     }
 
     private func persistedSlashCommandsCacheURL() -> URL {
@@ -144,5 +172,33 @@ extension CodexService {
         let home = URL(fileURLWithPath: NSHomeDirectory())
         let dir = home.appendingPathComponent(".remodex", isDirectory: true)
         return dir.appendingPathComponent("slash-commands-cache.json")
+    }
+
+    private func removePersistedSlashCommandCacheFile() {
+        let url = persistedSlashCommandsCacheURL()
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private func removePersistedSlashCommandEntry(for cacheKey: String) {
+        let url = persistedSlashCommandsCacheURL()
+        guard let data = try? Data(contentsOf: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard var entries = try? decoder.decode([String: SlashCommandCacheEntry].self, from: data) else {
+            removePersistedSlashCommandCacheFile()
+            return
+        }
+        guard entries.removeValue(forKey: cacheKey) != nil else { return }
+        if entries.isEmpty {
+            removePersistedSlashCommandCacheFile()
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let updated = try? encoder.encode(entries) else { return }
+        let directory = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? updated.write(to: url, options: [.atomic])
     }
 }
