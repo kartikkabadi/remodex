@@ -141,6 +141,8 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 
 **Fetch failure:** Show “Couldn't load commands. Tap to retry.” with a Retry control; do not show the empty-project hint until a successful fetch returns zero commands.
 
+**OpenCode V2 panel (RP-CMD-2, post Theme B):** When `usesBridgeSlashCommands`, `SlashCommandAutocompletePanel` groups `BridgeSlashCommand` rows into sections (Codex / OpenCode / Agents / Skills), 60pt rows, up to 12 visible, `RuntimeProviderLogoView` badges, `Commands (N)` header, and **See all** affordance. Codex enum threads keep the flat six-command list (50pt / 6 visible). Optional decode fields on `BridgeSlashCommand`: `source`, `agent`, `provider`, `section` (tolerant; heuristics when absent).
+
 ### Other Controls
 
 | Control | Codex Threads | OpenCode Threads |

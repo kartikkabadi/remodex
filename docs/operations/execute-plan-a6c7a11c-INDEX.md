@@ -19,7 +19,7 @@
 
 ## Resume in one sentence
 
-**Phase 0 tidy → Theme A → Theme B (B1 then B2, PR-10 mandatory) → Theme C → Theme D → owner device final bar.**
+**Themes A–C merged on `main`; finish Theme D (PR-1 + PR-16) → owner device final bar (O0–O17).**
 
 Details and gates: integration plan file above.
 
@@ -35,4 +35,4 @@ Details and gates: integration plan file above.
 
 ---
 
-*Last updated: 2026-06-06 (MERGE-A / Theme A on `main`)*
+*Last updated: 2026-06-06 (Themes A–C on `main`; Theme D in progress)*
