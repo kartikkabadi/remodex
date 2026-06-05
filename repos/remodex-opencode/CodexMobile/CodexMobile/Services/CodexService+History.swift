@@ -1364,11 +1364,29 @@ extension CodexService {
             shouldReconcilePendingUserHistoryMessage(merged[index], with: message)
         }
 
-        guard matchingIndices.count == 1 else {
+        return preferredPendingUserHistoryMergeIndex(
+            in: merged,
+            matchingIndices: matchingIndices,
+            incoming: message
+        )
+    }
+
+    nonisolated static func preferredPendingUserHistoryMergeIndex(
+        in merged: [CodexMessage],
+        matchingIndices: [Int],
+        incoming: CodexMessage
+    ) -> Int? {
+        guard !matchingIndices.isEmpty else {
             return nil
         }
+        if matchingIndices.count == 1 {
+            return matchingIndices[0]
+        }
 
-        return matchingIndices[0]
+        return matchingIndices.min(by: { lhs, rhs in
+            abs(incoming.createdAt.timeIntervalSince(merged[lhs].createdAt))
+                < abs(incoming.createdAt.timeIntervalSince(merged[rhs].createdAt))
+        })
     }
 
     func normalizedItemType(_ rawType: String) -> String {

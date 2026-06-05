@@ -1327,6 +1327,20 @@ extension CodexService {
         return message.id
     }
 
+    // Phone-native optimistic rows already own this prompt; turn/started will confirm them.
+    func hasMatchingPendingUserMessage(threadId: String, text: String) -> Bool {
+        let normalizedIncomingText = Self.normalizedMessageText(text)
+        guard !normalizedIncomingText.isEmpty else {
+            return false
+        }
+
+        return messagesByThread[threadId]?.contains(where: { candidate in
+            candidate.role == .user
+                && candidate.deliveryState == .pending
+                && Self.normalizedMessageText(candidate.text) == normalizedIncomingText
+        }) ?? false
+    }
+
     // Upserts a confirmed user row mirrored from a desktop-origin rollout so
     // reopened threads can display the remote prompt immediately without
     // disturbing the phone-native pending-send path.
@@ -2358,21 +2372,7 @@ extension CodexService {
     }
 
     private func commandExecutionPreviewKey(from text: String) -> String? {
-        let tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard tokens.count >= 2 else {
-            return nil
-        }
-        let phase = tokens[0].lowercased()
-        guard phase == "running"
-            || phase == "completed"
-            || phase == "failed"
-            || phase == "stopped" else {
-            return nil
-        }
-        let command = tokens.dropFirst().joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return command.isEmpty ? nil : command
+        TurnTimelineReducer.commandExecutionPreviewKey(from: text)
     }
 
     // Uses normalized visible lines so live/history tool rows can rebind without

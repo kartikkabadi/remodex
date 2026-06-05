@@ -89,6 +89,10 @@ extension CodexService {
         ])
         guard let text else { return }
 
+        if hasMatchingPendingUserMessage(threadId: threadId, text: text) {
+            return
+        }
+
         markMirroredRunningCatchupNeeded(for: threadId)
         appendConfirmedMirroredUserMessage(
             threadId: threadId,

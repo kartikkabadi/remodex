@@ -969,6 +969,52 @@ test("prompt resolves without turn/completed still completes via getMessages", a
   assert.equal(completed, true);
 });
 
+test("hydrate after streamed assistant text does not emit duplicate delta", async () => {
+  const streamedText = "Hey back from OpenCode";
+  let deltas = 0;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        deltas += 1;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler) => {
+        handler("item/agentMessage/delta", { delta: streamedText });
+        return () => {};
+      },
+      getMessages: async () => ({
+        data: [
+          {
+            info: {
+              id: "msg-assistant",
+              role: "assistant",
+              time: { created: Date.now(), completed: Date.now() },
+            },
+            parts: [{ id: "part-text", type: "text", text: streamedText }],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(deltas, 1, "hydrate must not re-emit delta when assistant text already streamed");
+});
+
 test("poll hydration completes via getMessages info/parts snapshots", async () => {
   let completed = false;
   let deltas = 0;

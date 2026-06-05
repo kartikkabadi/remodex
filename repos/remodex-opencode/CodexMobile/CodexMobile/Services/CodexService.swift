@@ -36,6 +36,12 @@ struct CodexThreadResumeRequestSignature: Equatable, Sendable {
     let modelIdentifier: String?
 }
 
+struct OutgoingSendDedupeSnapshot: Equatable, Sendable {
+    let threadId: String
+    let normalizedBody: String
+    let sentAt: Date
+}
+
 struct CodexThreadHistoryPaginationState: Codable, Equatable, Sendable {
     var olderCursor: JSONValue?
     var exhaustedOlderCursor: JSONValue?
@@ -501,6 +507,8 @@ final class CodexService {
     var pendingComposerActionByThreadID: [String: CodexPendingThreadComposerAction] = [:]
     // In-memory identity directory for subagents, keyed by thread id and agent id.
     var subagentIdentityVersion: Int = 0
+    // Suppresses accidental double-tap / duplicate turn/start within a short window.
+    @ObservationIgnored var lastOutgoingSendDedupeSnapshot: OutgoingSendDedupeSnapshot?
 
     // Relay session persistence
     var relaySessionId: String?

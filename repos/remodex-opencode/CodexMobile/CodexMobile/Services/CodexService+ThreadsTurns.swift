@@ -297,6 +297,20 @@ extension CodexService {
         }
 
         let initialThreadId = try await resolveThreadID(threadId)
+        let normalizedOutgoingBody = normalizedOutgoingSendBody(
+            trimmedInput: trimmedInput,
+            skillMentions: skillMentions,
+            mentionMentions: mentionMentions,
+            attachments: attachments
+        )
+        if shouldDebounceDuplicateOutgoingSend(
+            threadId: initialThreadId,
+            normalizedBody: normalizedOutgoingBody
+        ) {
+            debugSyncLog("ios_send_debounced thread=\(initialThreadId) body=\(normalizedOutgoingBody)")
+            return
+        }
+        recordOutgoingSendAttempt(threadId: initialThreadId, normalizedBody: normalizedOutgoingBody)
         let effectiveCollaborationMode = collaborationModeForOutgoingTurn(
             threadId: initialThreadId,
             requestedMode: collaborationMode,
@@ -3159,5 +3173,58 @@ extension CodexService {
         }
 
         return normalized.isEmpty ? "/" : normalized
+    }
+
+    private static let outgoingSendDebounceInterval: TimeInterval = 0.3
+
+    private func normalizedOutgoingSendBody(
+        trimmedInput: String,
+        skillMentions: [CodexTurnSkillMention],
+        mentionMentions: [CodexTurnMention],
+        attachments: [CodexImageAttachment]
+    ) -> String {
+        var parts: [String] = [trimmedInput]
+        if !attachments.isEmpty {
+            parts.append("__attachments:\(attachments.count)__")
+        }
+        let skillNames = skillMentions
+            .compactMap { mention -> String? in
+                let rawName = mention.name ?? mention.id
+                let normalized = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return normalized.isEmpty ? nil : normalized.lowercased()
+            }
+            .sorted()
+        if !skillNames.isEmpty {
+            parts.append("__skills:\(skillNames.joined(separator: "|"))__")
+        }
+        let pluginNames = mentionMentions
+            .map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .sorted()
+        if !pluginNames.isEmpty {
+            parts.append("__mentions:\(pluginNames.joined(separator: "|"))__")
+        }
+        return parts
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shouldDebounceDuplicateOutgoingSend(threadId: String, normalizedBody: String) -> Bool {
+        guard !normalizedBody.isEmpty,
+              let snapshot = lastOutgoingSendDedupeSnapshot,
+              snapshot.threadId == threadId,
+              snapshot.normalizedBody == normalizedBody else {
+            return false
+        }
+        return Date().timeIntervalSince(snapshot.sentAt) < Self.outgoingSendDebounceInterval
+    }
+
+    private func recordOutgoingSendAttempt(threadId: String, normalizedBody: String) {
+        lastOutgoingSendDedupeSnapshot = OutgoingSendDedupeSnapshot(
+            threadId: threadId,
+            normalizedBody: normalizedBody,
+            sentAt: Date()
+        )
     }
 }
