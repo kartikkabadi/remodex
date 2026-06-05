@@ -486,11 +486,8 @@ private struct BridgeSlashCommandsFullListSheet: View {
                                     }
                                     .buttonStyle(.plain)
                                     .capabilityGreyOut(
-                                        isEnabled: supportsSlashCommands && supportsSlashCommandExecute,
-                                        reason: bridgeSlashRowDisabledReason(
-                                            supportsSlashCommands: supportsSlashCommands,
-                                            supportsSlashCommandExecute: supportsSlashCommandExecute
-                                        )
+                                        isEnabled: bridgeSlashRowIsEnabled(command: command),
+                                        reason: bridgeSlashRowDisabledReason(command: command)
                                     )
                                 }
                             }
@@ -510,14 +507,19 @@ private struct BridgeSlashCommandsFullListSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func bridgeSlashRowDisabledReason(
-        supportsSlashCommands: Bool,
-        supportsSlashCommandExecute: Bool
-    ) -> String? {
+    private func bridgeSlashRowIsEnabled(command: BridgeSlashCommand) -> Bool {
+        guard supportsSlashCommands else { return false }
+        if command.requiresArguments {
+            return true
+        }
+        return supportsSlashCommandExecute
+    }
+
+    private func bridgeSlashRowDisabledReason(command: BridgeSlashCommand) -> String? {
         if !supportsSlashCommands {
             return ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
         }
-        if !supportsSlashCommandExecute {
+        if !command.requiresArguments, !supportsSlashCommandExecute {
             return ComposerCapabilityCopy.capabilityReason(for: .slashCommandExecute)
         }
         return nil
