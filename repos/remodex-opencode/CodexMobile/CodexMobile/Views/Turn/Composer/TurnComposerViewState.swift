@@ -10,6 +10,7 @@ struct TurnComposerAutocompleteState {
     let availableSlashCommands: [TurnComposerSlashCommandItem]
     let groupedBridgeSlashSections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
     let supportsSlashCommands: Bool
+    let supportsSlashCommandExecute: Bool
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool
     let showsBridgeSlashCommandsEmptyHint: Bool

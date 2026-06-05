@@ -135,7 +135,24 @@ Slash UI visibility is **capability-driven** (`supportsSlashCommands`). Which co
 
 **Cache (iOS):** `CodexService.fetchSlashCommands(directory:)` caches successful responses per normalized directory for ~60s. Failures are not cached. Invalidate on relay disconnect (`clearHydrationCaches` → `invalidateSlashCommandCache`) and when `thread.gitWorkingDirectory` changes (ViewModel cancels in-flight fetch, bumps a generation token, and refetches for the new directory).
 
-**Selection:** Codex commands keep existing behaviors (review targets, fork destinations, compact RPC, etc.). OpenCode bridge commands insert `token` into the draft only; send path includes the `/token` text in `turn/start`.
+**Selection (RP-CMD, PR5a):** Single entry point `TurnViewModel.onSelectSlashCommandItem(item, hostContext:)`. `TurnComposerHostView` is a thin wrapper (no Codex `switch` in the host).
+
+| Tap source | Behavior |
+|------------|----------|
+| OpenCode zero-arg (`requiresArguments == false`) | `sendBridgeSlashCommand` → bridge `command/execute` when `supportsSlashCommandExecute` |
+| OpenCode requires arguments | `SlashCommandArgumentsSheet` stub (PR5b production sheet) — no draft prefill |
+| OpenCode full sheet (“See all”) | Same routing as inline (`onSelectSlashCommandItem`, not prefill) |
+| Codex `.compact` | `compactThread` RPC — not `turn/start` with `/compact` |
+| Codex `.status` / `.feedback` | Host callbacks via ViewModel (`onShowStatus`, `onOpenFeedbackMail`) |
+| Codex multi-step | `.codeReview`, `.fork`, `.subagents` — unchanged panel/destination arms |
+
+**Execute idempotency:** iOS sends `clientCommandId` (UUID) per tap; bridge dedupes `threadId + commandToken + clientCommandId` within 5s. UI debounces duplicate tap on the same command within 300ms and guards in-flight execute per thread+token.
+
+**Catalog drift:** On `command_not_allowed`, iOS invalidates persisted slash cache for `directory` and refetches `command/list` before surfacing the error.
+
+**Grey-out:** When `supportsSlashCommands` is true but `supportsSlashCommandExecute` is false, slash rows stay visible but disabled (no prefill fallback). Commands with `requiresArguments == true` remain tappable to open the arguments sheet stub.
+
+**`BridgeSlashCommand` decode:** includes `requiresArguments` (defaults `false` when omitted; static bridge builtins set `false` explicitly).
 
 **Empty OpenCode list:** After a successful fetch with zero commands, show inline hint “No commands for this project” (no `reasonCode` until bridge adds one).
 

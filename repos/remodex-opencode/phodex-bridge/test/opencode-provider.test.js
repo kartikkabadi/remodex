@@ -219,6 +219,59 @@ test("commandExecute forwards /skills to session.command command skills", async 
   assert.equal(sdkCommandCalls[0].arguments, "");
 });
 
+test("commandExecute dedupes duplicate clientCommandId within 5s", async () => {
+  const sdkCommandCalls = [];
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_dedupe123" }),
+            command: async (body) => {
+              sdkCommandCalls.push(body);
+              return { info: {}, parts: [] };
+            },
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: "/tmp/dedupe-project" },
+  });
+
+  const sharedParams = {
+    threadId: start.thread.id,
+    command: "/skills",
+    arguments: "",
+    directory: "/tmp/dedupe-project",
+    clientCommandId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+
+  const first = await provider.commandExecute({
+    id: 2,
+    method: "command/execute",
+    params: sharedParams,
+  });
+  const second = await provider.commandExecute({
+    id: 3,
+    method: "command/execute",
+    params: sharedParams,
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.deduped, true);
+  assert.equal(sdkCommandCalls.length, 1);
+});
+
 test("commandExecute rejects commands not in allowlist", async () => {
   const provider = makeProvider({
     clientFactory: async () => ({

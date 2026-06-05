@@ -11,6 +11,7 @@ struct SlashCommandAutocompletePanel: View {
     let availableCommands: [TurnComposerSlashCommandItem]
     let groupedBridgeSlashSections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
     let supportsSlashCommands: Bool
+    let supportsSlashCommandExecute: Bool
     let usesBridgeSlashCommands: Bool
     let isLoadingBridgeSlashCommands: Bool
     let showsBridgeSlashCommandsEmptyHint: Bool
@@ -229,7 +230,7 @@ struct SlashCommandAutocompletePanel: View {
 
     private func bridgeCommandRow(_ command: BridgeSlashCommand, section: SlashCommandSection) -> some View {
         let item = TurnComposerSlashCommandItem.bridge(command)
-        let isEnabled = supportsSlashCommands
+        let isEnabled = bridgeSlashRowIsEnabled(command: command)
         return Button {
             HapticFeedback.shared.triggerImpactFeedback(style: .light)
             onSelectCommand(item)
@@ -272,8 +273,26 @@ struct SlashCommandAutocompletePanel: View {
         .buttonStyle(AutocompleteRowButtonStyle())
         .capabilityGreyOut(
             isEnabled: isEnabled,
-            reason: isEnabled ? nil : ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+            reason: bridgeSlashRowDisabledReason(command: command)
         )
+    }
+
+    private func bridgeSlashRowIsEnabled(command: BridgeSlashCommand) -> Bool {
+        guard supportsSlashCommands else { return false }
+        if command.requiresArguments {
+            return true
+        }
+        return supportsSlashCommandExecute
+    }
+
+    private func bridgeSlashRowDisabledReason(command: BridgeSlashCommand) -> String? {
+        if !supportsSlashCommands {
+            return ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+        }
+        if !command.requiresArguments, !supportsSlashCommandExecute {
+            return ComposerCapabilityCopy.capabilityReason(for: .slashCommandExecute)
+        }
+        return nil
     }
 
     private func codexCommandRow(_ item: TurnComposerSlashCommandItem) -> some View {

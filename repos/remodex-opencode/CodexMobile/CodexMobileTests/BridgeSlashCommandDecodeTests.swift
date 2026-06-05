@@ -698,6 +698,289 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
         )
     }
 
+    func testDecodeSlashCommandsParsesRequiresArguments() {
+        let service = makeService()
+        let result: JSONValue = .object([
+            "commands": .array([
+                .object([
+                    "token": .string("/skills"),
+                    "title": .string("Skills"),
+                    "description": .string(""),
+                    "requiresArguments": .bool(false),
+                ]),
+                .object([
+                    "token": .string("/plan"),
+                    "title": .string("Plan"),
+                    "description": .string("Needs input"),
+                    "requiresArguments": .bool(true),
+                ]),
+            ]),
+        ])
+
+        let commands = try XCTUnwrap(service.decodeSlashCommands(from: result))
+        XCTAssertEqual(commands[0].requiresArguments, false)
+        XCTAssertEqual(commands[1].requiresArguments, true)
+    }
+
+    func testDecodeSlashCommandsRequiresArgumentsDefaultsFalseWhenMissing() throws {
+        let payload = """
+        {"commands":[{"token":"/clear","title":"Clear","description":""}]}
+        """
+        let data = try XCTUnwrap(payload.data(using: .utf8))
+        let decoded = try JSONDecoder().decode([String: [BridgeSlashCommand]].self, from: data)
+        XCTAssertEqual(decoded["commands"]?.first?.requiresArguments, false)
+    }
+
+    func testExecuteBridgeSlashCommandSendsClientCommandId() async throws {
+        let service = makeService()
+        var capturedMethod: String?
+        var capturedClientCommandId: String?
+        var capturedCommand: String?
+
+        service.requestTransportOverride = { method, params in
+            capturedMethod = method
+            capturedCommand = params?.objectValue?["command"]?.stringValue
+            capturedClientCommandId = params?.objectValue?["clientCommandId"]?.stringValue
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "ok": .bool(true),
+                    "sessionId": .string("ses_test"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let clientCommandId = UUID()
+        let result = try await service.executeBridgeSlashCommand(
+            threadId: "thread-exec",
+            command: "/skills",
+            directory: "/tmp/exec",
+            clientCommandId: clientCommandId
+        )
+
+        XCTAssertEqual(capturedMethod, "command/execute")
+        XCTAssertEqual(capturedCommand, "/skills")
+        XCTAssertEqual(capturedClientCommandId, clientCommandId.uuidString)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.sessionId, "ses_test")
+    }
+
+    func testOnSelectBridgeSlashZeroArgExecutesWithoutPrefill() async throws {
+        let service = makeOpenCodeSlashExecuteService()
+        var executeCallCount = 0
+        service.requestTransportOverride = { method, _ in
+            if method == "command/execute" {
+                executeCallCount += 1
+            }
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "ok": .bool(true),
+                    "sessionId": .string("ses_skills"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let viewModel = makeViewModel()
+        viewModel.input = "/skills"
+        let thread = CodexThread(
+            id: "thread-slash-exec",
+            cwd: "/tmp/slash-exec",
+            model: "openai/gpt-5.5",
+            modelProvider: "opencode"
+        )
+        service.upsertThread(thread)
+        let hostContext = TurnSlashHostContext(
+            codex: service,
+            thread: thread,
+            availableForkDestinations: [],
+            onShowStatus: {},
+            onOpenFeedbackMail: {}
+        )
+
+        viewModel.onSelectSlashCommandItem(
+            .bridge(BridgeSlashCommand(token: "/skills", title: "Skills", description: "")),
+            hostContext: hostContext
+        )
+
+        XCTAssertEqual(viewModel.input.trimmingCharacters(in: .whitespacesAndNewlines), "")
+
+        let executeFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in executeCallCount > 0 },
+            object: nil
+        )
+        await fulfillment(of: [executeFinished], timeout: 2.0)
+        XCTAssertEqual(executeCallCount, 1)
+    }
+
+    func testOnSelectBridgeSlashDoubleTapDebouncesToSingleExecute() async throws {
+        let service = makeOpenCodeSlashExecuteService()
+        var executeCallCount = 0
+        service.requestTransportOverride = { method, _ in
+            if method == "command/execute" {
+                executeCallCount += 1
+            }
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "ok": .bool(true),
+                    "sessionId": .string("ses_clear"),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let viewModel = makeViewModel()
+        let thread = CodexThread(
+            id: "thread-debounce",
+            cwd: "/tmp/debounce",
+            model: "openai/gpt-5.5",
+            modelProvider: "opencode"
+        )
+        service.upsertThread(thread)
+        let hostContext = TurnSlashHostContext(
+            codex: service,
+            thread: thread,
+            availableForkDestinations: [],
+            onShowStatus: {},
+            onOpenFeedbackMail: {}
+        )
+        let item = TurnComposerSlashCommandItem.bridge(
+            BridgeSlashCommand(token: "/clear", title: "Clear", description: "")
+        )
+
+        viewModel.onSelectSlashCommandItem(item, hostContext: hostContext)
+        viewModel.onSelectSlashCommandItem(item, hostContext: hostContext)
+
+        let executeFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in executeCallCount > 0 },
+            object: nil
+        )
+        await fulfillment(of: [executeFinished], timeout: 2.0)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(executeCallCount, 1)
+    }
+
+    func testOnSelectCodexCompactInvokesCompactThreadRPC() async throws {
+        let service = makeService()
+        var capturedMethods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            capturedMethods.append(method)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([:]),
+                includeJSONRPC: false
+            )
+        }
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "codex",
+                label: "Codex",
+                enabled: true,
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: false,
+                capabilities: .defaultCodex,
+                agents: []
+            ),
+        ]
+        service.availableModels = [
+            CodexModelOption(
+                id: "gpt-5.5",
+                model: "gpt-5.5",
+                modelProvider: "codex",
+                displayName: "GPT-5.5",
+                description: "",
+                capabilities: .defaultCodex
+            ),
+        ]
+        service.upsertThread(CodexThread(id: "thread-codex-compact", modelProvider: "codex"))
+
+        let viewModel = makeViewModel()
+        let thread = CodexThread(id: "thread-codex-compact", modelProvider: "codex")
+        let hostContext = TurnSlashHostContext(
+            codex: service,
+            thread: thread,
+            availableForkDestinations: [],
+            onShowStatus: {},
+            onOpenFeedbackMail: {}
+        )
+
+        viewModel.onSelectSlashCommandItem(.codex(.compact), hostContext: hostContext)
+
+        let rpcFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in capturedMethods.contains("thread/compact/start") },
+            object: nil
+        )
+        await fulfillment(of: [rpcFinished], timeout: 2.0)
+        XCTAssertTrue(capturedMethods.contains("thread/compact/start"))
+        XCTAssertFalse(capturedMethods.contains("turn/start"))
+    }
+
+    func testCommandNotAllowedInvalidatesSlashCacheAndRefetches() async throws {
+        let service = makeOpenCodeSlashExecuteService()
+        var listCallCount = 0
+        service.requestTransportOverride = { method, _ in
+            if method == "command/list" {
+                listCallCount += 1
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "commands": .array([
+                            .object([
+                                "token": .string("/skills"),
+                                "title": .string("Skills"),
+                                "description": .string(""),
+                            ]),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            }
+            if method == "command/execute" {
+                throw CodexServiceError.rpcError(
+                    RPCError(
+                        code: -32000,
+                        message: "Slash command not allowed",
+                        data: .object(["errorCode": .string("command_not_allowed")])
+                    )
+                )
+            }
+            return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+        }
+
+        let viewModel = makeViewModel()
+        let thread = CodexThread(
+            id: "thread-not-allowed",
+            cwd: "/tmp/not-allowed",
+            model: "openai/gpt-5.5",
+            modelProvider: "opencode"
+        )
+        service.upsertThread(thread)
+        _ = try await service.fetchSlashCommands(directory: thread.gitWorkingDirectory)
+
+        let hostContext = TurnSlashHostContext(
+            codex: service,
+            thread: thread,
+            availableForkDestinations: [],
+            onShowStatus: {},
+            onOpenFeedbackMail: {}
+        )
+        viewModel.onSelectSlashCommandItem(
+            .bridge(BridgeSlashCommand(token: "/skills", title: "Skills", description: "")),
+            hostContext: hostContext
+        )
+
+        let refetchFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in listCallCount >= 2 },
+            object: nil
+        )
+        await fulfillment(of: [refetchFinished], timeout: 2.0)
+        XCTAssertGreaterThanOrEqual(listCallCount, 2)
+    }
+
     func testGroupedSectionsOmitsEmpty() {
         let grouped = BridgeSlashCommand.groupedSections(
             commands: [
@@ -714,6 +997,33 @@ final class BridgeSlashCommandDecodeTests: XCTestCase {
     private func persistedSlashCommandsCacheURL() -> URL {
         let home = URL(fileURLWithPath: NSHomeDirectory())
         return home.appendingPathComponent(".remodex/slash-commands-cache.json")
+    }
+
+    private func makeOpenCodeSlashExecuteService() -> CodexService {
+        let service = makeService()
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "opencode",
+                label: "OpenCode",
+                enabled: true,
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: true,
+                capabilities: .defaultOpenCode,
+                agents: []
+            ),
+        ]
+        service.availableModels = [
+            CodexModelOption(
+                id: "openai/gpt-5.5",
+                model: "openai/gpt-5.5",
+                modelProvider: "opencode",
+                displayName: "GPT-5.5",
+                description: "",
+                capabilities: .defaultOpenCode
+            ),
+        ]
+        return service
     }
 
     private func makeService() -> CodexService {

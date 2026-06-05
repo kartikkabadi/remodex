@@ -97,7 +97,7 @@ extension CodexService {
         CodexModelOption.normalizedProvider(modelProvider) == "opencode"
     }
 
-    private static func normalizedSlashCommandDirectory(_ directory: String?) -> String? {
+    static func normalizedSlashCommandDirectory(_ directory: String?) -> String? {
         let trimmed = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }

@@ -137,6 +137,27 @@ function createOpenCodeProvider({
   const eventUnsubscribers = new Map();
   const completedTurnIds = new Set();
   const invalidSessionThreadIds = new Set();
+  const COMMAND_EXECUTE_DEDUPE_TTL_MS = 5000;
+  /** @type {Map<string, number>} */
+  const commandExecuteDedupeByKey = new Map();
+
+  function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
+    const tid = readString(threadId);
+    const token = readString(allowlistToken);
+    const cid = readString(clientCommandId);
+    if (!tid || !token || !cid) {
+      return "";
+    }
+    return `${tid}\0${token}\0${cid}`;
+  }
+
+  function pruneCommandExecuteDedupe(now = Date.now()) {
+    for (const [key, seenAt] of commandExecuteDedupeByKey.entries()) {
+      if (now - seenAt >= COMMAND_EXECUTE_DEDUPE_TTL_MS) {
+        commandExecuteDedupeByKey.delete(key);
+      }
+    }
+  }
 
   function removeOrphanOpenCodeThread(threadId, reason = "opencode_ownership_orphan_removed") {
     const removedOwnership = ownership.removeOwnership(threadId);
@@ -1767,8 +1788,29 @@ function createOpenCodeProvider({
         ok: false,
         errorCode: readString(error?.errorCode) || "command_execute_failed",
         threadId,
+        clientCommandId: readString(params.clientCommandId),
       });
       throw error;
+    }
+
+    const clientCommandId = readString(params.clientCommandId);
+    const dedupeKey = commandExecuteDedupeKey(thread.id, allowlistToken, clientCommandId);
+    if (dedupeKey) {
+      pruneCommandExecuteDedupe();
+      const seenAt = commandExecuteDedupeByKey.get(dedupeKey);
+      if (seenAt && Date.now() - seenAt < COMMAND_EXECUTE_DEDUPE_TTL_MS) {
+        logCommandExecute({
+          commandToken,
+          commandSdk,
+          ok: true,
+          threadId: thread.id,
+          sessionId: thread.sessionId,
+          clientCommandId,
+          deduped: true,
+        });
+        return { ok: true, sessionId: thread.sessionId, deduped: true };
+      }
+      commandExecuteDedupeByKey.set(dedupeKey, Date.now());
     }
 
     const directory =
@@ -1849,6 +1891,7 @@ function createOpenCodeProvider({
         threadId: thread.id,
         sessionId: thread.sessionId,
         directory,
+        clientCommandId,
       });
       return { ok: true, sessionId: thread.sessionId };
     } catch (error) {
@@ -1886,19 +1929,24 @@ function createOpenCodeProvider({
     threadId = null,
     sessionId = null,
     directory = null,
+    clientCommandId = null,
+    deduped = false,
   } = {}) {
-    console.log(
-      JSON.stringify({
-        event: "opencode_command_execute",
-        commandToken: readString(commandToken) || null,
-        commandSdk: readString(commandSdk) || null,
-        ok: ok === true,
-        errorCode: readString(errorCode) || null,
-        threadId: readString(threadId) || null,
-        sessionId: readString(sessionId) || null,
-        directory: readString(directory) || null,
-      }),
-    );
+    const payload = {
+      event: deduped === true ? "opencode_command_execute_deduped" : "opencode_command_execute",
+      commandToken: readString(commandToken) || null,
+      commandSdk: readString(commandSdk) || null,
+      ok: ok === true,
+      errorCode: readString(errorCode) || null,
+      threadId: readString(threadId) || null,
+      sessionId: readString(sessionId) || null,
+      directory: readString(directory) || null,
+      clientCommandId: readString(clientCommandId) || null,
+    };
+    if (deduped === true) {
+      payload.deduped = true;
+    }
+    console.log(JSON.stringify(payload));
   }
 
   function rememberThreadProject(thread, source) {

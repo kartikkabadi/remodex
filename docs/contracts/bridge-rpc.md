@@ -398,16 +398,22 @@ Static CLI builtins from `buildStaticSlashCommands()` include **`requiresArgumen
   "threadId": "opencode-thread-1717000000-a1b2c3",
   "command": "/skills",
   "arguments": "",
+  "clientCommandId": "550e8400-e29b-41d4-a716-446655440000",
   "directory": "/path/to/project",
   "cwd": "/path/to/project"
 }
 ```
 
-`thread_id` and `id` are accepted aliases for `threadId`. `command` may include a leading `/`; the bridge strips it for OpenCode SDK `session.command` (`command: "skills"`). `arguments` is optional (defaults to `""`). `directory` / `cwd` scope allowlist discovery; when omitted, the owned thread's `cwd` is used.
+`thread_id` and `id` are accepted aliases for `threadId`. `command` may include a leading `/`; the bridge strips it for OpenCode SDK `session.command` (`command: "skills"`). `arguments` is optional (defaults to `""`). `clientCommandId` is optional (iOS UUID per tap); when present, the bridge drops duplicate executes for the same `threadId + commandToken + clientCommandId` within **5s** and logs `opencode_command_execute_deduped`. `directory` / `cwd` scope allowlist discovery; when omitted, the owned thread's `cwd` is used.
 
 **Result (success):**
 ```json
-{ "ok": true, "sessionId": "ses_abc123" }
+{ "ok": true, "sessionId": "ses_abc123", "deduped": false }
+```
+
+Duplicate within dedupe window:
+```json
+{ "ok": true, "sessionId": "ses_abc123", "deduped": true }
 ```
 
 **Result (OpenCode unavailable — provider not registered or disabled):**

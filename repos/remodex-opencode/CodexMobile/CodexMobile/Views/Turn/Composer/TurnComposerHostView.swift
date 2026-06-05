@@ -48,6 +48,19 @@ struct TurnComposerHostView: View {
 
     @State private var isShowingAllBridgeSlashCommands = false
 
+    private var slashHostContext: TurnSlashHostContext {
+        TurnSlashHostContext(
+            codex: codex,
+            thread: thread,
+            availableForkDestinations: TurnComposerForkDestination.availableDestinations(
+                canForkLocally: canForkLocally,
+                canCreateWorktree: showsGitControls && !isWorktreeProject && isGitBranchSelectorEnabled
+            ),
+            onShowStatus: onShowStatus,
+            onOpenFeedbackMail: onOpenFeedbackMail
+        )
+    }
+
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
         let runtimeState = TurnComposerRuntimeState.resolve(
@@ -95,6 +108,7 @@ struct TurnComposerHostView: View {
             ),
             groupedBridgeSlashSections: groupedBridgeSlashSections,
             supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+            supportsSlashCommandExecute: runtimeState.capabilities.supportsSlashCommandExecute,
             usesBridgeSlashCommands: slashSource == .bridgeCommands,
             isLoadingBridgeSlashCommands: viewModel.isLoadingBridgeSlashCommands,
             showsBridgeSlashCommandsEmptyHint: viewModel.showsBridgeSlashCommandsEmptyHint,
@@ -304,33 +318,7 @@ struct TurnComposerHostView: View {
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },
             onSelectSlashCommand: { item in
-                switch item {
-                case .bridge:
-                    viewModel.onSelectSlashCommandItem(item)
-                case .codex(let command):
-                    switch command {
-                    case .codeReview:
-                        viewModel.onSelectSlashCommand(command)
-                    case .compact:
-                        viewModel.onSelectSlashCommand(command)
-                        Task {
-                            try? await codex.compactThread(thread.id)
-                        }
-                    case .feedback:
-                        viewModel.onSelectSlashCommand(command)
-                        onOpenFeedbackMail()
-                    case .fork:
-                        viewModel.onSelectSlashCommand(
-                            command,
-                            availableForkDestinations: availableForkDestinations
-                        )
-                    case .status:
-                        viewModel.onSelectSlashCommand(command)
-                        onShowStatus()
-                    case .subagents:
-                        viewModel.onSelectSlashCommand(command)
-                    }
-                }
+                viewModel.onSelectSlashCommandItem(item, hostContext: slashHostContext)
                 viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
             },
             onSelectCodeReviewTarget: { target in
@@ -406,15 +394,26 @@ struct TurnComposerHostView: View {
                         thread: thread
                     ),
                     supportsSlashCommands: runtimeState.capabilities.supportsSlashCommands,
+                    supportsSlashCommandExecute: runtimeState.capabilities.supportsSlashCommandExecute,
                     onSelect: { command in
                         isShowingAllBridgeSlashCommands = false
-                        viewModel.onSelectBridgeSlashCommand(command)
+                        viewModel.onSelectSlashCommandItem(
+                            .bridge(command),
+                            hostContext: slashHostContext
+                        )
                         viewModel.saveLocalDraft(codex: codex, threadID: thread.id)
                     },
                     onDismiss: {
                         isShowingAllBridgeSlashCommands = false
                     }
                 )
+            }
+        }
+        .sheet(isPresented: $viewModel.isShowingSlashCommandArgumentsSheet) {
+            if let command = viewModel.pendingSlashCommandArguments {
+                SlashCommandArgumentsSheet(command: command) {
+                    viewModel.dismissSlashCommandArgumentsSheet()
+                }
             }
         }
         }
@@ -424,6 +423,7 @@ struct TurnComposerHostView: View {
 private struct BridgeSlashCommandsFullListSheet: View {
     let sections: [(section: SlashCommandSection, commands: [BridgeSlashCommand])]
     let supportsSlashCommands: Bool
+    let supportsSlashCommandExecute: Bool
     let onSelect: (BridgeSlashCommand) -> Void
     let onDismiss: () -> Void
 
@@ -486,10 +486,11 @@ private struct BridgeSlashCommandsFullListSheet: View {
                                     }
                                     .buttonStyle(.plain)
                                     .capabilityGreyOut(
-                                        isEnabled: supportsSlashCommands,
-                                        reason: supportsSlashCommands
-                                            ? nil
-                                            : ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+                                        isEnabled: supportsSlashCommands && supportsSlashCommandExecute,
+                                        reason: bridgeSlashRowDisabledReason(
+                                            supportsSlashCommands: supportsSlashCommands,
+                                            supportsSlashCommandExecute: supportsSlashCommandExecute
+                                        )
                                     )
                                 }
                             }
@@ -507,5 +508,18 @@ private struct BridgeSlashCommandsFullListSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func bridgeSlashRowDisabledReason(
+        supportsSlashCommands: Bool,
+        supportsSlashCommandExecute: Bool
+    ) -> String? {
+        if !supportsSlashCommands {
+            return ComposerCapabilityCopy.capabilityReason(for: .slashCommands)
+        }
+        if !supportsSlashCommandExecute {
+            return ComposerCapabilityCopy.capabilityReason(for: .slashCommandExecute)
+        }
+        return nil
     }
 }

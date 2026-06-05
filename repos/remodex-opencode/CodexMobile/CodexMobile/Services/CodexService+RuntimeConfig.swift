@@ -784,6 +784,21 @@ extension CodexService {
         return CodexModelOption.splitSelectionKey(selectedModelId).provider
     }
 
+    func runtimeCapabilitiesForTurn(threadId: String? = nil) -> ProviderCapabilities {
+        if let capabilities = selectedModelOption(threadId: threadId)?.capabilities {
+            return capabilities
+        }
+        let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        if let runtime = availableRuntimes.first(where: {
+            CodexModelOption.normalizedProvider($0.id) == provider
+        }) {
+            return runtime.capabilities
+        }
+        return provider == "opencode"
+            ? ProviderCapabilities.defaultOpenCode
+            : ProviderCapabilities.defaultCodex
+    }
+
     // Thread list ownership wins over global composer selection on turn/start wire params.
     func enforcedThreadOwnershipModelProvider(for threadId: String?) -> String? {
         guard let normalizedThreadID = normalizedInterruptIdentifier(threadId),

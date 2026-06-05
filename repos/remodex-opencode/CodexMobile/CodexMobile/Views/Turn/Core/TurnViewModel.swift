@@ -235,7 +235,13 @@ final class TurnViewModel {
     var isLoadingBridgeSlashCommands = false
     var didLoadBridgeSlashCommandsSuccessfully = false
     var bridgeSlashCommandsLoadError: String?
+    var pendingSlashCommandArguments: BridgeSlashCommand?
+    var isShowingSlashCommandArgumentsSheet = false
     @ObservationIgnored private var bridgeSlashCommandsDirectory: String?
+    @ObservationIgnored private var inFlightBridgeSlashExecuteKeys: Set<String> = []
+    @ObservationIgnored private var lastBridgeSlashExecuteSignature: String?
+    @ObservationIgnored private var lastBridgeSlashExecuteAt: Date?
+    private static let bridgeSlashExecuteDebounceInterval: TimeInterval = 0.3
     @ObservationIgnored private var bridgeSlashCommandsFetchGeneration: UInt64 = 0
     @ObservationIgnored private var bridgeSlashCommandsFetchTask: Task<Void, Never>?
     // MARK: - Git state
@@ -1194,34 +1200,168 @@ final class TurnViewModel {
         loadBridgeSlashCommandsIfNeeded(codex: codex, thread: thread)
     }
 
-    // Inserts an OpenCode bridge slash token into the draft and dismisses the picker.
-    func onSelectBridgeSlashCommand(_ command: BridgeSlashCommand) {
-        let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty else {
-            resetSlashCommandState(clearPendingSelection: true)
-            return
-        }
+    /// Single entry point for slash tap routing (PR5a): execute, arguments sheet, or Codex handlers.
+    func onSelectSlashCommandItem(
+        _ item: TurnComposerSlashCommandItem,
+        hostContext: TurnSlashHostContext
+    ) {
+        removeTrailingSlashCommandTokenFromInputIfNeeded()
 
-        let replacement = trimmedToken + " "
-        if let token = Self.trailingSlashCommandToken(in: input) {
-            var updated = input
-            updated.replaceSubrange(token.tokenRange, with: replacement)
-            input = updated
-        } else {
-            input = replacement
+        switch item {
+        case .bridge(let command):
+            resetSlashCommandState(clearPendingSelection: true)
+            handleBridgeSlashCommandSelection(command, hostContext: hostContext)
+        case .codex(let command):
+            sendCodexSlashCommand(command, hostContext: hostContext)
         }
+    }
+
+    func dismissSlashPickerAndClearTrailingToken() {
+        removeTrailingSlashCommandTokenFromInputIfNeeded()
         resetSlashCommandState(clearPendingSelection: true)
     }
 
-    func onSelectSlashCommandItem(
-        _ item: TurnComposerSlashCommandItem,
-        availableForkDestinations: [TurnComposerForkDestination] = [.local]
+    private func handleBridgeSlashCommandSelection(
+        _ command: BridgeSlashCommand,
+        hostContext: TurnSlashHostContext
     ) {
-        switch item {
-        case .bridge(let command):
-            onSelectBridgeSlashCommand(command)
-        case .codex(let command):
-            onSelectSlashCommand(command, availableForkDestinations: availableForkDestinations)
+        let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { return }
+
+        if command.requiresArguments {
+            pendingSlashCommandArguments = command
+            isShowingSlashCommandArgumentsSheet = true
+            return
+        }
+
+        guard hostContext.codex.runtimeCapabilitiesForTurn(threadId: hostContext.thread.id)
+            .supportsSlashCommandExecute else {
+            return
+        }
+
+        sendBridgeSlashCommand(command, hostContext: hostContext)
+    }
+
+    func sendBridgeSlashCommand(_ command: BridgeSlashCommand, hostContext: TurnSlashHostContext) {
+        let trimmedToken = command.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { return }
+
+        let threadId = hostContext.thread.id
+        let executeKey = Self.bridgeSlashExecuteKey(threadId: threadId, commandToken: trimmedToken)
+        if inFlightBridgeSlashExecuteKeys.contains(executeKey) {
+            return
+        }
+        if shouldDebounceBridgeSlashExecute(threadId: threadId, commandToken: trimmedToken) {
+            return
+        }
+
+        inFlightBridgeSlashExecuteKeys.insert(executeKey)
+        let clientCommandId = UUID()
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.inFlightBridgeSlashExecuteKeys.remove(executeKey) }
+
+            do {
+                let result = try await hostContext.codex.executeBridgeSlashCommand(
+                    threadId: threadId,
+                    command: trimmedToken,
+                    directory: hostContext.thread.gitWorkingDirectory,
+                    clientCommandId: clientCommandId
+                )
+                if result.ok {
+                    hostContext.codex.markThreadAsRunning(threadId)
+                    hostContext.codex.lastErrorMessage = nil
+                    return
+                }
+
+                if result.errorCode == "command_not_allowed" {
+                    hostContext.codex.invalidateSlashCommandCache(
+                        directory: hostContext.thread.gitWorkingDirectory
+                    )
+                    self.loadBridgeSlashCommandsIfNeeded(
+                        codex: hostContext.codex,
+                        thread: hostContext.thread
+                    )
+                }
+                hostContext.codex.lastErrorMessage = Self.userFacingSlashExecuteError(
+                    errorCode: result.errorCode,
+                    commandToken: trimmedToken
+                )
+            } catch {
+                let errorCode = CodexService.bridgeSlashCommandExecuteErrorCode(from: error)
+                if errorCode == "command_not_allowed" {
+                    hostContext.codex.invalidateSlashCommandCache(
+                        directory: hostContext.thread.gitWorkingDirectory
+                    )
+                    self.loadBridgeSlashCommandsIfNeeded(
+                        codex: hostContext.codex,
+                        thread: hostContext.thread
+                    )
+                }
+                hostContext.codex.lastErrorMessage = hostContext.codex.userFacingTurnErrorMessageForFooter(from: error)
+                    ?? Self.userFacingSlashExecuteError(errorCode: errorCode, commandToken: trimmedToken)
+            }
+        }
+    }
+
+    func sendCodexSlashCommand(
+        _ command: TurnComposerSlashCommand,
+        hostContext: TurnSlashHostContext
+    ) {
+        switch command {
+        case .codeReview:
+            armCodeReviewSelection(command: command, target: nil)
+        case .compact:
+            resetSlashCommandState(clearPendingSelection: true)
+            Task {
+                try? await hostContext.codex.compactThread(hostContext.thread.id)
+            }
+        case .feedback:
+            resetSlashCommandState(clearPendingSelection: true)
+            hostContext.onOpenFeedbackMail()
+        case .fork:
+            slashCommandPanelState = .forkDestinations(hostContext.availableForkDestinations)
+        case .status:
+            resetSlashCommandState(clearPendingSelection: true)
+            hostContext.onShowStatus()
+        case .subagents:
+            armSubagentsSelection()
+        }
+    }
+
+    func dismissSlashCommandArgumentsSheet() {
+        isShowingSlashCommandArgumentsSheet = false
+        pendingSlashCommandArguments = nil
+    }
+
+    private func shouldDebounceBridgeSlashExecute(threadId: String, commandToken: String) -> Bool {
+        let signature = Self.bridgeSlashExecuteKey(threadId: threadId, commandToken: commandToken)
+        if lastBridgeSlashExecuteSignature == signature,
+           let lastBridgeSlashExecuteAt,
+           Date().timeIntervalSince(lastBridgeSlashExecuteAt) < Self.bridgeSlashExecuteDebounceInterval {
+            return true
+        }
+        lastBridgeSlashExecuteSignature = signature
+        lastBridgeSlashExecuteAt = Date()
+        return false
+    }
+
+    private static func bridgeSlashExecuteKey(threadId: String, commandToken: String) -> String {
+        let normalizedToken = commandToken.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return "\(threadId):\(normalizedToken)"
+    }
+
+    private static func userFacingSlashExecuteError(errorCode: String?, commandToken: String) -> String {
+        switch errorCode {
+        case "command_not_allowed":
+            return "\(commandToken) is not available for this project."
+        case "opencode_unavailable":
+            return "OpenCode is not available to run \(commandToken)."
+        case "thread_not_found":
+            return "This thread could not be found on the Mac."
+        default:
+            return "Could not run \(commandToken)."
         }
     }
 

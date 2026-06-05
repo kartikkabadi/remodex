@@ -70,6 +70,7 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
     let token: String
     let title: String
     let description: String
+    let requiresArguments: Bool
     let source: String?
     let agent: String?
     let provider: String?
@@ -79,6 +80,7 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         token: String,
         title: String,
         description: String,
+        requiresArguments: Bool = false,
         source: String? = nil,
         agent: String? = nil,
         provider: String? = nil,
@@ -87,10 +89,46 @@ struct BridgeSlashCommand: Codable, Equatable, Identifiable, Sendable {
         self.token = token
         self.title = title
         self.description = description
+        self.requiresArguments = requiresArguments
         self.source = source
         self.agent = agent
         self.provider = provider
         self.section = section
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case token
+        case title
+        case description
+        case requiresArguments
+        case source
+        case agent
+        case provider
+        case section
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        token = try container.decode(String.self, forKey: .token)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        requiresArguments = (try? container.decodeIfPresent(Bool.self, forKey: .requiresArguments)) ?? false
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        section = try container.decodeIfPresent(String.self, forKey: .section)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(token, forKey: .token)
+        try container.encode(title, forKey: .title)
+        try container.encode(description, forKey: .description)
+        try container.encode(requiresArguments, forKey: .requiresArguments)
+        try container.encodeIfPresent(source, forKey: .source)
+        try container.encodeIfPresent(agent, forKey: .agent)
+        try container.encodeIfPresent(provider, forKey: .provider)
+        try container.encodeIfPresent(section, forKey: .section)
     }
 
     var id: String { token }

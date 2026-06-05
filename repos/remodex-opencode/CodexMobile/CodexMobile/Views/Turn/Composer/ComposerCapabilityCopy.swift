@@ -11,6 +11,7 @@ enum ComposerCapability {
     case planMode
     case fastMode
     case slashCommands
+    case slashCommandExecute
     case reasoningEffort
     case agentSelection
     case skillAutocomplete
@@ -32,6 +33,8 @@ enum ComposerCapabilityCopy {
             return "Fast mode not supported by this model"
         case .slashCommands:
             return "Slash commands not supported by this runtime"
+        case .slashCommandExecute:
+            return "Slash command execution not supported by this runtime"
         case .reasoningEffort:
             return "This model does not support reasoning effort levels"
         case .agentSelection:
