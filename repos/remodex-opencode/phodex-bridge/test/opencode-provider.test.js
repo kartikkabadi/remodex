@@ -847,12 +847,14 @@ test("listThreads respects SDK validation cap per call", async () => {
   const provider = makeProvider({
     ownershipStore,
     sessionStore,
+    env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_LIST_THREADS_VALIDATE_CAP: "5" },
     clientFactory: async () => ({
       ...fakeClient(),
       getSession: async () => {
         getSessionCalls += 1;
         return {};
       },
+      getMessages: async () => [{ role: "assistant", text: "activity" }],
     }),
   });
   await provider.warmup();
@@ -865,6 +867,50 @@ test("listThreads respects SDK validation cap per call", async () => {
   const list = await provider.listThreads();
   assert.equal(getSessionCalls, 5);
   assert.equal(list.data.length, 5);
+});
+
+test("listThreads omits ownership stub with valid session but no activity", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-ghost", "ses_empty", { title: "OpenCode chat" });
+  ownershipStore.setOwnership("opencode-thread-ghost", "opencode");
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => ({}),
+      getMessages: async () => [],
+    }),
+  });
+  await provider.warmup();
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-thread-ghost"),
+    undefined,
+  );
+});
+
+test("restoreSessions on startup does not call getMessages for store entries", async () => {
+  let getMessagesCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-lazy", "ses_lazy", { title: "Lazy store" });
+  ownershipStore.setOwnership("opencode-thread-lazy", "opencode");
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getMessages: async () => {
+        getMessagesCalls += 1;
+        return [];
+      },
+    }),
+  });
+  await provider.warmup();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getMessagesCalls, 0);
 });
 
 test("turn/failed from subscribe completes turn and clears activeTurns", async () => {
@@ -1067,7 +1113,7 @@ test("thread/start then list before turn lists in-memory thread without session 
   assert.equal(sessionStore.get(start.thread.id), null);
 });
 
-test("startup prune removes session_without_ownership when env flag set", async () => {
+test("startup prune removes session_without_ownership on default startup", async () => {
   const fs = fakeSessionStoreFs();
   const ownershipStore = createThreadOwnershipStore({
     storagePath: "/tmp/opencode-prune-ownership.json",
@@ -1083,10 +1129,10 @@ test("startup prune removes session_without_ownership when env flag set", async 
     sessionStore,
     env: {
       REMODEX_ENABLE_OPENCODE: "1",
-      REMODEX_PRUNE_OPENCODE_OWNERSHIP: "1",
     },
   });
   await provider.warmup();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sessionStore.get("opencode-thread-session-only"), null);
 });
 
@@ -1119,6 +1165,7 @@ test("startup prune removes invalid session and ownership when env flag set", as
     }),
   });
   await provider.warmup();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sessionStore.get("opencode-thread-stale-startup"), null);
   assert.equal(ownershipStore.ownsThread("opencode-thread-stale-startup", "opencode"), false);
 });

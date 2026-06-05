@@ -53,9 +53,32 @@ const ERROR_CODES = {
 const HEALTH_RESTART_WINDOW_MS = 5 * 60 * 1000;
 const HEALTH_MAX_RESTARTS = 3;
 const HEALTH_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
-const LIST_THREADS_SESSION_VALIDATE_CAP = 5;
+const LIST_THREADS_SESSION_VALIDATE_CAP = 20;
 const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
+const OPENCODE_PRUNE_OPS_HINT =
+  "node phodex-bridge/scripts/prune-opencode-ownership.js --apply";
+
+function resolveListThreadsValidateCap(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_LIST_THREADS_VALIDATE_CAP);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return boundedPositiveInteger(fromEnv, LIST_THREADS_SESSION_VALIDATE_CAP);
+  }
+  return LIST_THREADS_SESSION_VALIDATE_CAP;
+}
+
+function maybeLogOpenCodePruneOpsHint({ materializationBlocked = 0, prunedCount = 0 } = {}) {
+  if (materializationBlocked > 50 || prunedCount > 50) {
+    console.log(
+      JSON.stringify({
+        event: "opencode_prune_ops_hint",
+        hint: `Run: ${OPENCODE_PRUNE_OPS_HINT}`,
+        materialization_blocked: materializationBlocked,
+        pruned_count: prunedCount,
+      }),
+    );
+  }
+}
 
 function resolveOpenCodeTurnWatchdogMs(env = process.env) {
   const fromEnv = Number(env?.REMODEX_OPENCODE_TURN_WATCHDOG_MS);
@@ -202,6 +225,7 @@ function createOpenCodeProvider({
       }
     }
 
+    const prunedCount = ownershipWithoutSession + sessionWithoutOwnership;
     console.log(
       JSON.stringify({
         event: "opencode_storage_mismatch",
@@ -210,6 +234,30 @@ function createOpenCodeProvider({
         sdk_validations: sdkValidations,
       }),
     );
+    maybeLogOpenCodePruneOpsHint({ prunedCount });
+    return { ownershipWithoutSession, sessionWithoutOwnership, sdkValidations, prunedCount };
+  }
+
+  function scheduleStartupPrune() {
+    const fullPass = readString(env.REMODEX_PRUNE_OPENCODE_OWNERSHIP) === "1";
+    const maxSessionValidations = fullPass
+      ? Number.MAX_SAFE_INTEGER
+      : STARTUP_PRUNE_SESSION_VALIDATE_CAP;
+    const run = () => {
+      if (!healthy || !client) {
+        return Promise.resolve();
+      }
+      return pruneOpenCodeStorageMismatch({ maxSessionValidations }).catch((error) => {
+        console.warn(
+          `${logPrefix} OpenCode startup prune failed: ${(error && error.message) || error}`,
+        );
+      });
+    };
+    if (fullPass) {
+      return run();
+    }
+    setImmediate(run);
+    return Promise.resolve();
   }
 
   async function ensureStarted() {
@@ -222,9 +270,7 @@ function createOpenCodeProvider({
       healthy = true;
       await refreshAuthConfigured({ forceInventory: true });
       await restoreSessions();
-      if (readString(env.REMODEX_PRUNE_OPENCODE_OWNERSHIP) === "1") {
-        await pruneOpenCodeStorageMismatch();
-      }
+      await scheduleStartupPrune();
       return;
     }
 
@@ -292,9 +338,7 @@ function createOpenCodeProvider({
     healthy = true;
     await refreshAuthConfigured({ forceInventory: true });
     await restoreSessions();
-    if (readString(env.REMODEX_PRUNE_OPENCODE_OWNERSHIP) === "1") {
-      await pruneOpenCodeStorageMismatch();
-    }
+    await scheduleStartupPrune();
 
     resetIdleTimer();
   }
@@ -411,6 +455,7 @@ function createOpenCodeProvider({
       hasProjectCwd: Boolean(readString(storeEntry?.cwd)),
       turns: [],
       sessionId,
+      userStartedInProcess: false,
     };
 
     try {
@@ -435,6 +480,42 @@ function createOpenCodeProvider({
       return existing;
     }
     return rehydrateThreadIfNeeded(normalizedThreadId);
+  }
+
+  async function ensureThreadSession(thread) {
+    if (readString(thread?.sessionId)) {
+      return thread;
+    }
+    return rehydrateThreadIfNeeded(thread.id);
+  }
+
+  function markUserStartedInProcess(thread) {
+    if (!thread) {
+      return;
+    }
+    thread.userStartedInProcess = true;
+  }
+
+  function threadHasActiveTurn(threadId) {
+    const normalizedThreadId = readThreadId({ threadId });
+    for (const active of activeTurns.values()) {
+      if (active.thread.id === normalizedThreadId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async function validateThreadHasActivity(threadId, sessionId) {
+    if (threadHasActiveTurn(threadId)) {
+      return true;
+    }
+    try {
+      const messages = normalizeSessionMessagesResponse(await client.getMessages(sessionId));
+      return Array.isArray(messages) && messages.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   function ownsThread(threadId) {
@@ -617,14 +698,98 @@ function createOpenCodeProvider({
     let removedOrphanOwnership = 0;
     let removedOrphanSession = 0;
     let sdkValidations = 0;
-    const sdkCap = LIST_THREADS_SESSION_VALIDATE_CAP;
-
-    const localThreads = Array.from(threads.values())
-      .filter((thread) => includeArchived || !thread.archived)
-      .map((thread) => publicThread(thread));
-
-    const ownedStubs = [];
+    let userStartedIncluded = 0;
+    let activityValidated = 0;
+    let materializationBlocked = 0;
+    let validationErrors = 0;
+    let prunedInvalid = 0;
+    let rehydrateSkipped = 0;
+    const sdkCap = resolveListThreadsValidateCap(env);
     const canValidateSessions = healthy && client;
+
+    const localThreads = [];
+    const ownedStubs = [];
+
+    const consumeSdkValidationBudget = () => {
+      if (sdkValidations >= sdkCap) {
+        return false;
+      }
+      sdkValidations += 1;
+      return true;
+    };
+
+    async function includeInMemoryThread(thread) {
+      if (!includeArchived && thread.archived) {
+        return false;
+      }
+      if (thread.userStartedInProcess === true) {
+        userStartedIncluded += 1;
+        return true;
+      }
+      if (threadHasActiveTurn(thread.id)) {
+        return true;
+      }
+      const sessionId = readString(thread.sessionId);
+      if (!sessionId) {
+        materializationBlocked += 1;
+        console.log(
+          JSON.stringify({
+            event: "materialization_blocked",
+            threadId: thread.id,
+            reason: "in_memory_no_session",
+          }),
+        );
+        return false;
+      }
+      if (!canValidateSessions) {
+        materializationBlocked += 1;
+        return false;
+      }
+      if (!consumeSdkValidationBudget()) {
+        materializationBlocked += 1;
+        return false;
+      }
+      try {
+        const valid = await validateOwnedThreadSession(sessionId);
+        if (!valid) {
+          prunedInvalid += 1;
+          invalidSessionThreadIds.add(thread.id);
+          removeOrphanOpenCodeThread(thread.id);
+          return false;
+        }
+        const hasActivity = await validateThreadHasActivity(thread.id, sessionId);
+        if (!hasActivity) {
+          materializationBlocked += 1;
+          console.log(
+            JSON.stringify({
+              event: "materialization_blocked",
+              threadId: thread.id,
+              reason: "no_activity",
+            }),
+          );
+          return false;
+        }
+        activityValidated += 1;
+        return true;
+      } catch (error) {
+        validationErrors += 1;
+        console.log(
+          JSON.stringify({
+            event: "opencode_list_threads_validation_error",
+            threadId: thread.id,
+            message: readString(error?.message) || "OpenCode session validation failed",
+          }),
+        );
+        materializationBlocked += 1;
+        return false;
+      }
+    }
+
+    for (const thread of threads.values()) {
+      if (await includeInMemoryThread(thread)) {
+        localThreads.push(publicThread(thread));
+      }
+    }
 
     try {
       const ownedThreads = ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID);
@@ -632,9 +797,6 @@ function createOpenCodeProvider({
         const threadId = entry.threadId;
         const live = threads.get(threadId);
         if (live) {
-          if (!includeArchived && live.archived) {
-            continue;
-          }
           continue;
         }
 
@@ -662,52 +824,73 @@ function createOpenCodeProvider({
           continue;
         }
 
-        let includeStub = false;
-        if (canValidateSessions && sdkValidations < sdkCap) {
-          sdkValidations += 1;
-          try {
-            const valid = await validateOwnedThreadSession(sessionId);
-            if (!valid) {
-              invalidSessionThreadIds.add(threadId);
-              const removed = removeOrphanOpenCodeThread(threadId);
-              if (removed.removedOwnership) {
-                removedOrphanOwnership += 1;
-              }
-              if (removed.removedSession) {
-                removedOrphanSession += 1;
-              }
-              continue;
-            }
-            includeStub = true;
-          } catch (error) {
-            console.log(
-              JSON.stringify({
-                event: "opencode_list_threads_validation_error",
-                threadId,
-                message: readString(error?.message) || "OpenCode session validation failed",
-              }),
-            );
-            continue;
-          }
-        } else if (includeFullRehydrate && canValidateSessions) {
+        if (threadHasActiveTurn(threadId)) {
+          ownedStubs.push(ownershipStubFromStore(threadId, storeEntry));
+          continue;
+        }
+
+        if (includeFullRehydrate && canValidateSessions) {
           try {
             const thread = await rehydrateThreadIfNeeded(threadId);
-            ownedStubs.push(publicThread(thread));
+            if (await includeInMemoryThread(thread)) {
+              ownedStubs.push(publicThread(thread));
+            }
           } catch {
             // Skip rows that cannot be rehydrated.
           }
           continue;
-        } else {
-          for (const active of activeTurns.values()) {
-            if (active.thread.id === threadId) {
-              includeStub = true;
-              break;
-            }
-          }
         }
 
-        if (includeStub) {
+        rehydrateSkipped += 1;
+
+        if (!canValidateSessions) {
+          materializationBlocked += 1;
+          continue;
+        }
+
+        if (!consumeSdkValidationBudget()) {
+          materializationBlocked += 1;
+          continue;
+        }
+
+        try {
+          const valid = await validateOwnedThreadSession(sessionId);
+          if (!valid) {
+            invalidSessionThreadIds.add(threadId);
+            prunedInvalid += 1;
+            const removed = removeOrphanOpenCodeThread(threadId);
+            if (removed.removedOwnership) {
+              removedOrphanOwnership += 1;
+            }
+            if (removed.removedSession) {
+              removedOrphanSession += 1;
+            }
+            continue;
+          }
+          const hasActivity = await validateThreadHasActivity(threadId, sessionId);
+          if (!hasActivity) {
+            materializationBlocked += 1;
+            console.log(
+              JSON.stringify({
+                event: "materialization_blocked",
+                threadId,
+                reason: "no_activity",
+              }),
+            );
+            continue;
+          }
+          activityValidated += 1;
           ownedStubs.push(ownershipStubFromStore(threadId, storeEntry));
+        } catch (error) {
+          validationErrors += 1;
+          materializationBlocked += 1;
+          console.log(
+            JSON.stringify({
+              event: "opencode_list_threads_validation_error",
+              threadId,
+              message: readString(error?.message) || "OpenCode session validation failed",
+            }),
+          );
         }
       }
     } catch {
@@ -719,12 +902,20 @@ function createOpenCodeProvider({
         event: "opencode_list_threads_filtered",
         ownership: ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length,
         listed: localThreads.length + ownedStubs.length,
+        local_memory: localThreads.length,
         removed_orphan_ownership: removedOrphanOwnership,
         removed_orphan_session: removedOrphanSession,
         sdk_validations: sdkValidations,
         sdk_validations_cap: sdkCap,
+        user_started_included: userStartedIncluded,
+        activity_validated: activityValidated,
+        rehydrate_skipped: rehydrateSkipped,
+        pruned_invalid: prunedInvalid,
+        validation_errors: validationErrors,
+        materialization_blocked: materializationBlocked,
       }),
     );
+    maybeLogOpenCodePruneOpsHint({ materializationBlocked });
 
     const seen = new Set();
     const data = [...localThreads, ...ownedStubs]
@@ -804,6 +995,7 @@ function createOpenCodeProvider({
       hasProjectCwd: Boolean(requestedCwd),
       turns: [],
       sessionId: resolvedSessionId || "",
+      userStartedInProcess: true,
     };
     threads.set(threadId, thread);
     assertOwnershipPersisted(
@@ -821,7 +1013,7 @@ function createOpenCodeProvider({
   async function threadRead(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = await requireThread(threadId);
+    const thread = await ensureThreadSession(await requireThread(threadId));
 
     rememberThreadProject(thread, "opencode-thread-read");
     const responseThread = { ...publicThread(thread) };
@@ -834,7 +1026,7 @@ function createOpenCodeProvider({
   async function threadTurnsList(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = await requireThread(threadId);
+    const thread = await ensureThreadSession(await requireThread(threadId));
 
     const limit = boundedPositiveInteger(params.limit, 50);
     const sortDirection = resolvedParam(params, 'sortDirection', 'sort_direction') || "desc";
@@ -862,6 +1054,7 @@ function createOpenCodeProvider({
     const params = request.params || {};
     const threadId = readThreadId(params);
     const thread = await requireThread(threadId);
+    markUserStartedInProcess(thread);
 
     for (const [, active] of activeTurns) {
       if (active.thread.id === threadId) throw activeTurnError(threadId);
@@ -1512,22 +1705,36 @@ function createOpenCodeProvider({
       const sessionId =
         typeof entry === "string" ? entry : readString(entry?.sessionId);
       const thread = threads.get(threadId);
-      if (thread) {
-        if (sessionId) {
-          thread.sessionId = sessionId;
-        }
+      if (!thread) {
         continue;
       }
-      try {
-        await rehydrateThreadIfNeeded(threadId);
-      } catch (error) {
-        console.warn(
-          `${logPrefix} OpenCode session rehydrate skipped for ${threadId}: ${
-            (error && error.message) || error
-          }`,
-        );
+      if (sessionId) {
+        thread.sessionId = sessionId;
+      }
+      const storeEntry = sessions.getEntry(threadId);
+      if (storeEntry) {
+        if (readString(storeEntry.cwd)) {
+          thread.cwd = readString(storeEntry.cwd);
+        }
+        if (readString(storeEntry.title)) {
+          thread.title = readString(storeEntry.title);
+        }
+        if (readString(storeEntry.model)) {
+          thread.model = normalizeOpenCodeModel(storeEntry.model);
+        }
+        if (readString(storeEntry.agent)) {
+          thread.agent = readString(storeEntry.agent);
+        }
       }
     }
+  }
+
+  // Stub for future command/execute RPC — call ensureThreadSession + markUserStartedInProcess on success.
+  async function commandExecute(request) {
+    const params = request.params || {};
+    const thread = await ensureThreadSession(await requireThread(readThreadId(params)));
+    markUserStartedInProcess(thread);
+    throw unsupportedMethodError("command/execute");
   }
 
   function rememberThreadProject(thread, source) {
