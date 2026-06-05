@@ -247,10 +247,17 @@ extension CodexService {
                 continue
             }
             merged[localThread.id] = localThread
-            if isThreadPinned(localThread.id), !serverThreadIDs.contains(localThread.id) {
+            if isThreadPinned(localThread.id),
+               !serverThreadIDs.contains(localThread.id),
+               !isOpenCodeBareStubThread(localThread) {
                 snapshotOnlyPinnedIDs.insert(localThread.id)
             }
         }
+
+        pruneStaleOpenCodeLocalThreads(
+            merged: &merged,
+            serverThreadIDs: serverThreadIDs
+        )
 
         snapshotOnlyPinnedIDs.formUnion(injectPinnedSnapshotThreads(
             into: &merged,
@@ -281,6 +288,71 @@ extension CodexService {
             Task { @MainActor [weak self] in
                 _ = await self?.routePendingNotificationOpenIfPossible(refreshIfNeeded: false)
             }
+        }
+    }
+
+    // Drops OpenCode title-only ghosts omitted by paginated thread/list while keeping real local chats.
+    private func pruneStaleOpenCodeLocalThreads(
+        merged: inout [String: CodexThread],
+        serverThreadIDs: Set<String>
+    ) {
+        for thread in merged.values where shouldPruneStaleOpenCodeLocalThread(thread, serverThreadIDs: serverThreadIDs) {
+            merged.removeValue(forKey: thread.id)
+            removeEphemeralOpenCodeGhostThreadState(for: thread.id)
+        }
+    }
+
+    private func shouldPruneStaleOpenCodeLocalThread(
+        _ thread: CodexThread,
+        serverThreadIDs: Set<String>
+    ) -> Bool {
+        guard CodexModelOption.normalizedProvider(thread.modelProvider) == "opencode" else {
+            return false
+        }
+        guard !serverThreadIDs.contains(thread.id) else {
+            return false
+        }
+        guard isOpenCodeBareStubThread(thread) else {
+            return false
+        }
+        guard messagesByThread[thread.id]?.isEmpty ?? true else {
+            return false
+        }
+        guard thread.id != activeThreadId else {
+            return false
+        }
+        guard !isThreadPinned(thread.id) else {
+            return false
+        }
+        guard !threadHasActiveOrRunningTurn(thread.id) else {
+            return false
+        }
+        return true
+    }
+
+    private func removeEphemeralOpenCodeGhostThreadState(for threadId: String) {
+        clearRunningState(for: threadId)
+        removeThreadTimelineState(for: threadId)
+        clearOutcomeBadge(for: threadId)
+        messagesByThread.removeValue(forKey: threadId)
+        hydratedThreadIDs.remove(threadId)
+        loadingThreadIDs.remove(threadId)
+        resumedThreadIDs.remove(threadId)
+        streamingSystemMessageByItemID = streamingSystemMessageByItemID.filter { key, _ in
+            !key.hasPrefix("\(threadId)|item:")
+        }
+
+        if let turnId = activeTurnID(for: threadId) {
+            setActiveTurnID(nil, for: threadId)
+            threadIdByTurnID.removeValue(forKey: turnId)
+            if activeTurnId == turnId {
+                activeTurnId = nil
+            }
+        }
+        threadIdByTurnID = threadIdByTurnID.filter { $0.value != threadId }
+
+        if activeThreadId == threadId {
+            activeThreadId = nil
         }
     }
 

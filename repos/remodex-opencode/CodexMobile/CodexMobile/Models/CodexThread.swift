@@ -253,6 +253,7 @@ struct CodexThread: Identifiable, Codable, Hashable, Sendable {
 extension CodexThread {
     // --- UI helpers -----------------------------------------------------------
     static let defaultDisplayTitle = "New Thread"
+    static let openCodePlaceholderChatTitle = "OpenCode chat"
     static let noProjectDisplayName = "No Project"
     private static let noProjectGroupKey = "__no_project__"
 

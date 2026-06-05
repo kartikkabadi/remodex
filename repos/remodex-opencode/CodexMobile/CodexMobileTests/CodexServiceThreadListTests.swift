@@ -264,6 +264,70 @@ final class CodexServiceThreadListTests: XCTestCase {
         )
     }
 
+    func testReconcileKeepsOpenCodeThreadWithMessagesWhenServerOmits() {
+        let service = makeService()
+        let ghostID = "opencode-local-with-messages"
+        service.threads = [
+            CodexThread(
+                id: ghostID,
+                title: CodexThread.openCodePlaceholderChatTitle,
+                name: CodexThread.openCodePlaceholderChatTitle,
+                modelProvider: "opencode",
+                cwd: nil
+            ),
+        ]
+        service.messagesByThread[ghostID] = [
+            CodexMessage(
+                threadId: ghostID,
+                role: .user,
+                text: "hello",
+                deliveryState: .confirmed
+            ),
+        ]
+
+        service.reconcileLocalThreadsWithServer([])
+
+        XCTAssertEqual(service.thread(for: ghostID)?.displayTitle, CodexThread.openCodePlaceholderChatTitle)
+        XCTAssertEqual(service.messagesByThread[ghostID]?.count, 1)
+    }
+
+    func testReconcilePrunesBareOpenCodeStubWhenServerOmits() {
+        let service = makeService()
+        let ghostID = "opencode-bare-stub"
+        service.threads = [
+            CodexThread(
+                id: ghostID,
+                title: CodexThread.openCodePlaceholderChatTitle,
+                name: CodexThread.openCodePlaceholderChatTitle,
+                modelProvider: "opencode",
+                cwd: nil
+            ),
+        ]
+        service.messagesByThread[ghostID] = []
+
+        service.reconcileLocalThreadsWithServer([])
+
+        XCTAssertNil(service.thread(for: ghostID))
+        XCTAssertNil(service.messagesByThread[ghostID])
+    }
+
+    func testUpsertThreadSkipsBareOpenCodeServerStubWithoutLocalThread() {
+        let service = makeService()
+
+        service.upsertThread(
+            CodexThread(
+                id: "opencode-server-stub",
+                title: CodexThread.openCodePlaceholderChatTitle,
+                name: CodexThread.openCodePlaceholderChatTitle,
+                modelProvider: "opencode",
+                cwd: nil
+            ),
+            treatAsServerState: true
+        )
+
+        XCTAssertNil(service.thread(for: "opencode-server-stub"))
+    }
+
     func testUserRenameSurvivesStaleThreadListRefreshForPinnedThread() {
         let service = makeService()
         service.threads = [
