@@ -193,8 +193,32 @@ async function createOpenCodeClient({
     return sessionId;
   }
 
-  async function getSession(sessionId) {
-    return withTimeout(client.session.get({ sessionID: sessionId }), REQUEST_TIMEOUT_MS);
+  async function getSession(sessionId, { directory } = {}) {
+    return withTimeout(
+      client.session.get({
+        sessionID: sessionId,
+        directory: readString(directory) || undefined,
+      }),
+      REQUEST_TIMEOUT_MS,
+    );
+  }
+
+  async function listProjects({ directory } = {}) {
+    if (typeof client.project?.list !== "function") {
+      return [];
+    }
+    try {
+      const response = await withTimeout(
+        client.project.list({
+          directory: readString(directory) || process.cwd(),
+        }),
+        REQUEST_TIMEOUT_MS,
+      );
+      return resolveProjectList(response);
+    } catch (error) {
+      console.warn(`${logPrefix} OpenCode project.list() failed: ${error.message}`);
+      return [];
+    }
   }
 
   async function prompt({ sessionID, prompt, parts, cwd, model, agent, variant, threadId, turnId, skills }) {
@@ -514,6 +538,7 @@ async function createOpenCodeClient({
     listAgents,
     createSession,
     getSession,
+    listProjects,
     prompt,
     abort,
     getMessages,
@@ -830,13 +855,22 @@ function dispatchEvent(event, handler) {
       break;
 
     case "session.error": {
-      const errMsg = readString(
-        event.error?.message || event.message || event.properties?.error?.message,
-      );
+      const properties = readOpenCodeEventProperties(event);
+      const errObject = properties.error && typeof properties.error === "object" ? properties.error : event.error;
+      const errMsg = readString(errObject?.message || event.message || properties.message);
       handler("turn/failed", {
-        turnId: readString(event.turnID || event.turnId),
-        sessionId: readString(event.sessionID || event.sessionId),
+        turnId: readString(properties.turnID || properties.turnId || event.turnID || event.turnId),
+        sessionId: readString(properties.sessionID || properties.sessionId || event.sessionID || event.sessionId),
         message: errMsg || "OpenCode session error",
+        error: errObject || properties,
+      });
+      handler("runtime/auth/error", {
+        threadId: readString(properties.threadId || properties.thread_id),
+        turnId: readString(properties.turnID || properties.turnId || event.turnID || event.turnId),
+        sessionId: readString(properties.sessionID || properties.sessionId || event.sessionID || event.sessionId),
+        message: errMsg || "OpenCode session error",
+        error: errObject || properties,
+        source: "session.error",
       });
       break;
     }
@@ -1013,6 +1047,39 @@ function resolveAgentsList(response) {
   if (response && Array.isArray(response.data)) return response.data;
   if (response && Array.isArray(response.agents)) return response.agents;
   return [];
+}
+
+function resolveProjectList(response) {
+  if (Array.isArray(response)) {
+    return response.map(mapOpenCodeProjectRow).filter(Boolean);
+  }
+  if (Array.isArray(response?.data)) {
+    return response.data.map(mapOpenCodeProjectRow).filter(Boolean);
+  }
+  if (Array.isArray(response?.projects)) {
+    return response.projects.map(mapOpenCodeProjectRow).filter(Boolean);
+  }
+  return [];
+}
+
+function mapOpenCodeProjectRow(project) {
+  if (!project || typeof project !== "object") {
+    return null;
+  }
+  const path = readString(project.path || project.directory || project.cwd || project.worktree);
+  const id = readString(project.id || project.projectID || project.projectId);
+  const name = readString(project.name || project.title || project.label) || path;
+  if (!path && !id) {
+    return null;
+  }
+  return {
+    id: id || path,
+    name,
+    path: path || null,
+    directory: path || null,
+    cwd: path || null,
+    source: "opencode",
+  };
 }
 
 function resolveProviderListPayload(response) {
