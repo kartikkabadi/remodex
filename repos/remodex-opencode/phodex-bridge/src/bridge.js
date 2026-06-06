@@ -29,6 +29,8 @@ const { handleDesktopRequest } = require("./desktop-handler");
 const { readDaemonConfig, writeDaemonConfig, writePairingSession } = require("./daemon-state");
 const { handleGitRequest } = require("./git-handler");
 const { handleThreadContextRequest } = require("./thread-context-handler");
+const { handleOpenCodeProjectDiscoverRequest } = require("./opencode-project-discover-handler");
+const { handleOpenCodeSessionUsageRequest } = require("./opencode-session-usage-handler");
 const { handleWorkspaceRequest } = require("./workspace-handler");
 const { handleProjectRequest } = require("./project-handler");
 const { handlePetRequest } = require("./pet-handler");
@@ -575,10 +577,29 @@ function startBridge({
     if (voiceHandler.handleVoiceRequest(rawMessage, sendApplicationResponse)) {
       return;
     }
-    if (handleThreadContextRequest(rawMessage, sendApplicationResponse)) {
+    if (handleThreadContextRequest(rawMessage, sendApplicationResponse, {
+      ownershipStore,
+      opencodeProvider: runtimeProviderRouter.providers.find((provider) => provider.id === "opencode"),
+    })) {
+      return;
+    }
+    if (
+      handleOpenCodeSessionUsageRequest(rawMessage, sendApplicationResponse, {
+        ownershipStore,
+        opencodeProvider: runtimeProviderRouter.providers.find((provider) => provider.id === "opencode"),
+      })
+    ) {
       return;
     }
     if (handleWorkspaceRequest(rawMessage, sendApplicationResponse)) {
+      return;
+    }
+    if (
+      handleOpenCodeProjectDiscoverRequest(rawMessage, sendApplicationResponse, {
+        projectRegistry,
+        opencodeProvider: runtimeProviderRouter.providers.find((provider) => provider.id === "opencode"),
+      })
+    ) {
       return;
     }
     if (handleProjectRequest(rawMessage, sendApplicationResponse, { projectRegistry })) {

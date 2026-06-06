@@ -279,6 +279,9 @@ extension CodexService {
         case "thread/tokenUsage/updated":
             handleThreadTokenUsageUpdated(paramsObject)
 
+        case "runtime/auth/error":
+            handleRuntimeAuthError(paramsObject)
+
         case "account/updated":
             handleGPTAccountUpdated(paramsObject)
 
@@ -767,6 +770,24 @@ extension CodexService {
 
         guard let usage = extractContextWindowUsage(from: usageObject) else { return }
         contextWindowUsageByThread[threadId] = usage
+    }
+
+    private func handleRuntimeAuthError(_ paramsObject: IncomingParamsObject?) {
+        let message = firstNonEmptyString([
+            firstStringValue(in: paramsObject, keys: ["message"]),
+            firstStringValue(in: envelopeEventObject(from: paramsObject), keys: ["message"]),
+        ]) ?? "OpenCode provider authentication failed on your Mac."
+
+        lastModelListOpenCodeMeta = OpenCodeModelListMeta(
+            reasonCode: "provider_auth_error",
+            connectedProviderIds: nil,
+            fetchedAt: nil,
+            stale: nil,
+            modelCountBeforeCap: nil,
+            modelCountAfterCap: nil
+        )
+        modelsErrorMessage = message
+        debugSyncLog("runtime/auth/error: \(message)")
     }
 
     private func handleThreadStatusChanged(_ paramsObject: IncomingParamsObject?) {
