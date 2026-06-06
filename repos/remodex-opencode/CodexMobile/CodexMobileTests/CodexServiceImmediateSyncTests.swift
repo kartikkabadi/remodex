@@ -254,6 +254,38 @@ final class CodexServiceImmediateSyncTests: XCTestCase {
         XCTAssertFalse(firstTask === secondTask)
     }
 
+    func testTurnFailedCancelsDeferredSyncAndClearsPerTurnFingerprint() async {
+        let service = makeService()
+        let threadID = "thread-failed-\(UUID().uuidString)"
+        let turnID = "turn-failed-\(UUID().uuidString)"
+
+        service.isConnected = true
+        service.isInitialized = true
+        service.threads = [CodexThread(id: threadID, title: threadID)]
+        service.recordAssistantCompletion(
+            threadId: threadID,
+            turnId: turnID,
+            text: "Partial answer before failure.",
+            itemId: "item-failed"
+        )
+        XCTAssertNotNil(service.assistantCompletionFingerprintByTurn[turnID])
+
+        service.requestDeferredSync(threadId: threadID, delayNanoseconds: 500_000_000)
+        XCTAssertNotNil(service.deferredSyncTasks[threadID])
+
+        service.handleNotification(
+            method: "turn/failed",
+            params: .object([
+                "threadId": .string(threadID),
+                "turnId": .string(turnID),
+                "message": .string("Provider error"),
+            ])
+        )
+
+        XCTAssertNil(service.deferredSyncTasks[threadID])
+        XCTAssertNil(service.assistantCompletionFingerprintByTurn[turnID])
+    }
+
     func testTurnCompletedCancelsDeferredSync() async {
         let service = makeService()
         let threadID = "thread-cancel-\(UUID().uuidString)"
@@ -310,6 +342,28 @@ final class CodexServiceImmediateSyncTests: XCTestCase {
         )
 
         XCTAssertNil(service.deferredSyncTasks[threadID])
+    }
+
+    func testMacContextSwitchClearsDeferredSyncAndPerTurnFingerprints() {
+        let service = makeService()
+        let threadID = "thread-mac-\(UUID().uuidString)"
+        let turnID = "turn-mac-\(UUID().uuidString)"
+
+        service.recordAssistantCompletion(
+            threadId: threadID,
+            turnId: turnID,
+            text: "Answer from prior Mac context.",
+            itemId: "item-mac"
+        )
+        service.requestDeferredSync(threadId: threadID, delayNanoseconds: 500_000_000)
+
+        XCTAssertNotNil(service.assistantCompletionFingerprintByTurn[turnID])
+        XCTAssertNotNil(service.deferredSyncTasks[threadID])
+
+        service.clearInMemoryMacScopedState()
+
+        XCTAssertTrue(service.assistantCompletionFingerprintByTurn.isEmpty)
+        XCTAssertTrue(service.deferredSyncTasks.isEmpty)
     }
 
     func testDesktopMirroredTurnStartedStillRequestsImmediateSync() async {

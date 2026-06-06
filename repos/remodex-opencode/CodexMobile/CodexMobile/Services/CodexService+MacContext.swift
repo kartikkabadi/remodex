@@ -67,6 +67,9 @@ extension CodexService {
             latestAssistantOutputByThread.removeAll()
             latestRepoAffectingMessageSignalByThread.removeAll()
             assistantCompletionFingerprintByThread.removeAll()
+            assistantCompletionFingerprintByTurn.removeAll()
+            deferredSyncTasks.values.forEach { $0.cancel() }
+            deferredSyncTasks.removeAll()
             recentActivityLineByThread.removeAll()
             contextWindowUsageByThread.removeAll()
             removeAllThreadTimelineState()
@@ -249,6 +252,9 @@ extension CodexService {
             queuedTurnDraftsByThread.removeAll()
             queuePauseStateByThread.removeAll()
             assistantCompletionFingerprintByThread.removeAll()
+            assistantCompletionFingerprintByTurn.removeAll()
+            deferredSyncTasks.values.forEach { $0.cancel() }
+            deferredSyncTasks.removeAll()
             recentActivityLineByThread.removeAll()
             contextWindowUsageByThread.removeAll()
             aiChangeSetsByID.removeAll()
