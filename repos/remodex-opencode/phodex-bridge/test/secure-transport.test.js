@@ -21,7 +21,10 @@ const {
   HANDSHAKE_MODE_QR_BOOTSTRAP,
   HANDSHAKE_MODE_TRUSTED_RECONNECT,
   MAX_BRIDGE_OUTBOUND_MESSAGES,
+  OUTBOUND_PRIORITY,
+  classifyOutboundPriority,
   createBridgeSecureTransport,
+  extractTurnPinKey,
   nonceForDirection,
 } = require("../src/secure-transport");
 
@@ -787,6 +790,269 @@ test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (b
   }
 });
 
+test("classifyOutboundPriority maps lifecycle, stream, notify, and rpc tiers", () => {
+  assert.equal(
+    classifyOutboundPriority({ method: "turn/started", params: {} }),
+    OUTBOUND_PRIORITY.LIFECYCLE
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "turn/completed", params: {} }),
+    OUTBOUND_PRIORITY.LIFECYCLE
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "item/agentMessage/delta", params: {} }),
+    OUTBOUND_PRIORITY.STREAM
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "item/completed", params: {} }),
+    OUTBOUND_PRIORITY.STREAM
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "thread/status", params: {} }),
+    OUTBOUND_PRIORITY.NOTIFY
+  );
+  assert.equal(
+    classifyOutboundPriority({ id: "rpc-1", result: { ok: true } }),
+    OUTBOUND_PRIORITY.RPC_RESPONSE
+  );
+});
+
+test("extractTurnPinKey parses flat and nested thread/turn ids", () => {
+  assert.deepEqual(
+    extractTurnPinKey({
+      method: "turn/started",
+      params: { threadId: "thread-flat", turnId: "turn-flat" },
+    }),
+    { threadId: "thread-flat", turnId: "turn-flat" }
+  );
+  assert.deepEqual(
+    extractTurnPinKey({
+      method: "item/completed",
+      params: {
+        item: {
+          threadId: "thread-nested",
+          turnId: "turn-nested",
+        },
+      },
+    }),
+    { threadId: "thread-nested", turnId: "turn-nested" }
+  );
+  assert.deepEqual(
+    extractTurnPinKey({
+      method: "turn/completed",
+      params: {
+        item: {
+          thread: { id: "thread-deep" },
+          turn: { id: "turn-deep" },
+        },
+      },
+    }),
+    { threadId: "thread-deep", turnId: "turn-deep" }
+  );
+  assert.equal(extractTurnPinKey({ method: "thread/list", params: {} }), null);
+});
+
+test("priority trim drops rpc responses before lifecycle and stream under cap pressure", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "4";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-rpc",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-rpc",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-rpc": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-rpc",
+      macDeviceId: "mac-priority-rpc",
+      phoneDeviceId: "phone-priority-rpc",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ id: "rpc-1", result: { ok: true } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ id: "rpc-2", result: { ok: true } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "turn/started", params: { threadId: "thread-1", turnId: "turn-1" } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread-1", turnId: "turn-1", delta: "hello" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-1", turnId: "turn-1", status: "completed" },
+      }),
+      () => false
+    );
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
+    assert.equal(trimLogs.length, 1);
+    assert.equal(trimLogs[0].lowestPriorityDropped, OUTBOUND_PRIORITY.RPC_RESPONSE);
+    assert.equal(trimLogs[0].priority, OUTBOUND_PRIORITY.RPC_RESPONSE);
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-rpc",
+      macDeviceId: "mac-priority-rpc",
+      phoneDeviceId: "phone-priority-rpc",
+    });
+    assert.deepEqual(
+      replayedPayloads.map((payload) => JSON.parse(payload.payloadText)),
+      [
+        { id: "rpc-2", result: { ok: true } },
+        { method: "turn/started", params: { threadId: "thread-1", turnId: "turn-1" } },
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread-1", turnId: "turn-1", delta: "hello" },
+        },
+        {
+          method: "turn/completed",
+          params: { threadId: "thread-1", turnId: "turn-1", status: "completed" },
+        },
+      ]
+    );
+  } finally {
+    structuredLogs.restore();
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("priority trim retains pinned item/completed and turn/completed pair per turn", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "4";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-pin",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-pin",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-pin": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-pin",
+      macDeviceId: "mac-priority-pin",
+      phoneDeviceId: "phone-priority-pin",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "thread/status", params: { status: "running" } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/completed",
+        params: {
+          threadId: "thread-pin",
+          turnId: "turn-pin",
+          message: "final answer",
+        },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-pin", turnId: "turn-pin", status: "completed" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ id: "rpc-pin", result: { ok: true } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "thread/status", params: { status: "idle" } }),
+      () => false
+    );
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-pin",
+      macDeviceId: "mac-priority-pin",
+      phoneDeviceId: "phone-priority-pin",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "item/completed"),
+      "expected pinned item/completed to survive cap pressure"
+    );
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "turn/completed"),
+      "expected pinned turn/completed to survive cap pressure"
+    );
+    assert.ok(
+      !replayedObjects.some((payload) => payload.id === "rpc-pin"),
+      "expected rpc response to be dropped before pinned lifecycle pair"
+    );
+  } finally {
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
 test("outbound buffer drain on reconnect", () => {
   const macIdentity = createOkpKeyPair("ed25519");
   const phoneIdentity = createOkpKeyPair("ed25519");
@@ -852,6 +1118,53 @@ test("outbound buffer drain on reconnect", () => {
     // no structured here
   }
 });
+
+function restoreEnvValue(name, previousValue) {
+  if (previousValue === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = previousValue;
+}
+
+function replayBufferedPayloads({
+  secureTransport,
+  serverHello,
+  transcriptBytes,
+  phoneEphemeral,
+  sessionId,
+  macDeviceId,
+  phoneDeviceId,
+}) {
+  const replayWireMessages = [];
+  secureTransport.bindLiveSendWireMessage((message) => {
+    replayWireMessages.push(message);
+    return true;
+  });
+  secureTransport.handleIncomingWireMessage(
+    JSON.stringify({
+      kind: "resumeState",
+      sessionId,
+      keyEpoch: serverHello.keyEpoch,
+      lastAppliedBridgeOutboundSeq: 0,
+    }),
+    {
+      sendControlMessage() {},
+      onApplicationMessage() {},
+    }
+  );
+
+  const macToPhoneKey = deriveMacToPhoneKey({
+    sessionId,
+    macDeviceId,
+    phoneDeviceId,
+    phoneEphemeral,
+    serverHello,
+    transcriptBytes,
+  });
+
+  return replayWireMessages.map((message) => decryptEnvelope(JSON.parse(message), macToPhoneKey));
+}
 
 function captureStructuredLogs() {
   const entries = [];

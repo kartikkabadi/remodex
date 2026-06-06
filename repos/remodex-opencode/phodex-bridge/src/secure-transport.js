@@ -32,6 +32,13 @@ const SECURE_SENDER_IPHONE = "iphone";
 const MAX_PAIRING_AGE_MS = 5 * 60 * 1000;
 const MAX_BRIDGE_OUTBOUND_MESSAGES = 100;
 const MAX_BRIDGE_OUTBOUND_BYTES = 10 * 1024 * 1024;
+const LIFECYCLE_STREAM_BYTE_RESERVE_RATIO = 0.3;
+const OUTBOUND_PRIORITY = {
+  LIFECYCLE: 0,
+  STREAM: 1,
+  NOTIFY: 2,
+  RPC_RESPONSE: 3,
+};
 
 function createBridgeSecureTransport({
   sessionId,
@@ -110,11 +117,15 @@ function createBridgeSecureTransport({
       return;
     }
 
+    const parsedPayload = safeParseJSON(normalizedPayload) || {};
     const bufferEntry = {
       queuedAt: Date.now(),
       raw: normalizedPayload,
       bridgeOutboundSeq: nextBridgeOutboundSeq,
       sizeBytes: Buffer.byteLength(normalizedPayload, "utf8"),
+      priority: classifyOutboundPriority(parsedPayload),
+      method: normalizeNonEmptyString(parsedPayload.method) || null,
+      turnPinKey: extractTurnPinKey(parsedPayload),
     };
     nextBridgeOutboundSeq += 1;
     outboundBuffer.push(bufferEntry);
@@ -493,10 +504,23 @@ function createBridgeSecureTransport({
   }
 
   function trimOutboundBuffer() {
+    const messageCap = readOutboundMessageCap();
+    const priorityEnabled = readEnvFlag("REMODEX_BRIDGE_PRIORITY_OUTBOUND", true);
+    const legacyTrim = readEnvFlag("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", false);
+
+    if (legacyTrim || !priorityEnabled) {
+      trimOutboundBufferLegacy(messageCap);
+      return;
+    }
+
+    trimOutboundBufferPriority(messageCap);
+  }
+
+  function trimOutboundBufferLegacy(messageCap) {
     let removeCount = 0;
     let removedBytes = 0;
     while (
-      (outboundBuffer.length - removeCount) > MAX_BRIDGE_OUTBOUND_MESSAGES
+      (outboundBuffer.length - removeCount) > messageCap
       || (outboundBufferBytes - removedBytes) > MAX_BRIDGE_OUTBOUND_BYTES
     ) {
       const entry = outboundBuffer[removeCount];
@@ -507,21 +531,57 @@ function createBridgeSecureTransport({
       removeCount += 1;
     }
     if (removeCount > 0) {
-      const firstSeq = outboundBuffer[0]?.bridgeOutboundSeq ?? null;
-      const lastSeq = outboundBuffer[removeCount - 1]?.bridgeOutboundSeq ?? null;
-      console.log(
-        JSON.stringify({
-          event: "bridge_outbound_dropped",
-          droppedCount: removeCount,
-          droppedBytes: removedBytes,
-          firstSeq,
-          lastSeq,
-          reason: "overflow",
-        })
-      );
+      const droppedEntries = outboundBuffer.slice(0, removeCount);
+      logOutboundDropped(droppedEntries, removedBytes, "overflow");
       outboundBuffer.splice(0, removeCount);
       outboundBufferBytes = Math.max(0, outboundBufferBytes - removedBytes);
     }
+  }
+
+  function trimOutboundBufferPriority(messageCap) {
+    const droppedEntries = [];
+
+    while (
+      outboundBuffer.length > messageCap
+      || outboundBufferBytes > MAX_BRIDGE_OUTBOUND_BYTES
+    ) {
+      const pinnedIndices = computePinnedEntryIndices(outboundBuffer);
+      const dropIndex = selectPriorityDropIndex(outboundBuffer, pinnedIndices);
+      if (dropIndex < 0) {
+        break;
+      }
+
+      const [entry] = outboundBuffer.splice(dropIndex, 1);
+      outboundBufferBytes = Math.max(0, outboundBufferBytes - entry.sizeBytes);
+      droppedEntries.push(entry);
+    }
+
+    if (droppedEntries.length > 0) {
+      const droppedBytes = droppedEntries.reduce((total, entry) => total + entry.sizeBytes, 0);
+      logOutboundDropped(droppedEntries, droppedBytes, "overflow");
+    }
+  }
+
+  function logOutboundDropped(droppedEntries, droppedBytes, reason) {
+    const firstEntry = droppedEntries[0] ?? null;
+    const lastEntry = droppedEntries[droppedEntries.length - 1] ?? null;
+    console.log(
+      JSON.stringify({
+        event: "bridge_outbound_dropped",
+        droppedCount: droppedEntries.length,
+        droppedBytes,
+        firstSeq: firstEntry?.bridgeOutboundSeq ?? null,
+        lastSeq: lastEntry?.bridgeOutboundSeq ?? null,
+        reason,
+        priority: firstEntry?.priority ?? null,
+        method: firstEntry?.method ?? null,
+        bridgeOutboundSeq: firstEntry?.bridgeOutboundSeq ?? null,
+        lowestPriorityDropped: droppedEntries.reduce(
+          (maxPriority, entry) => Math.max(maxPriority, entry.priority ?? OUTBOUND_PRIORITY.NOTIFY),
+          OUTBOUND_PRIORITY.LIFECYCLE
+        ),
+      })
+    );
   }
 
   // Starts each fresh QR bootstrap with a clean catch-up window for the single trusted phone.
@@ -772,6 +832,198 @@ function safeParseJSON(value) {
   }
 }
 
+function readEnvFlag(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return defaultValue;
+  }
+  return value === "1" || value.toLowerCase() === "true";
+}
+
+function readOutboundMessageCap() {
+  const raw = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  if (!raw) {
+    return MAX_BRIDGE_OUTBOUND_MESSAGES;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return MAX_BRIDGE_OUTBOUND_MESSAGES;
+  }
+  return Math.floor(parsed);
+}
+
+function readString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function classifyOutboundPriority(payload) {
+  if (!payload || typeof payload !== "object") {
+    return OUTBOUND_PRIORITY.NOTIFY;
+  }
+
+  if (payload.id != null && (payload.result !== undefined || payload.error !== undefined)) {
+    return OUTBOUND_PRIORITY.RPC_RESPONSE;
+  }
+
+  const method = normalizeNonEmptyString(payload.method);
+  if (!method) {
+    return OUTBOUND_PRIORITY.NOTIFY;
+  }
+
+  switch (method) {
+  case "turn/started":
+  case "turn/completed":
+  case "turn/failed":
+    return OUTBOUND_PRIORITY.LIFECYCLE;
+  case "item/completed":
+  case "item/agentMessage/delta":
+    return OUTBOUND_PRIORITY.STREAM;
+  default:
+    return OUTBOUND_PRIORITY.NOTIFY;
+  }
+}
+
+function extractTurnPinKey(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const method = normalizeNonEmptyString(payload.method);
+  if (!method) {
+    return null;
+  }
+
+  const pinMethods = new Set([
+    "turn/started",
+    "turn/completed",
+    "turn/failed",
+    "item/completed",
+    "item/agentMessage/delta",
+  ]);
+  if (!pinMethods.has(method)) {
+    return null;
+  }
+
+  const params = payload.params && typeof payload.params === "object" ? payload.params : {};
+  const threadId = readString(params.threadId)
+    || readString(params.item?.threadId)
+    || readString(params.item?.thread?.id);
+  const turnId = readString(params.turnId)
+    || readString(params.item?.turnId)
+    || readString(params.item?.turn?.id);
+  if (!threadId || !turnId) {
+    return null;
+  }
+
+  return { threadId, turnId };
+}
+
+function turnPinKeyString(pinKey) {
+  return `${pinKey.threadId}\0${pinKey.turnId}`;
+}
+
+function computePinnedEntryIndices(entries) {
+  const pinnedIndices = new Set();
+  const latestItemCompletedByTurn = new Map();
+  const latestTurnCompletedByTurn = new Map();
+
+  entries.forEach((entry, index) => {
+    if (!entry.turnPinKey) {
+      return;
+    }
+
+    const key = turnPinKeyString(entry.turnPinKey);
+    if (entry.method === "item/completed") {
+      const existing = latestItemCompletedByTurn.get(key);
+      if (!existing || entry.bridgeOutboundSeq > existing.entry.bridgeOutboundSeq) {
+        latestItemCompletedByTurn.set(key, { index, entry });
+      }
+    }
+    if (entry.method === "turn/completed") {
+      const existing = latestTurnCompletedByTurn.get(key);
+      if (!existing || entry.bridgeOutboundSeq > existing.entry.bridgeOutboundSeq) {
+        latestTurnCompletedByTurn.set(key, { index, entry });
+      }
+    }
+  });
+
+  for (const { index } of latestItemCompletedByTurn.values()) {
+    pinnedIndices.add(index);
+  }
+  for (const { index } of latestTurnCompletedByTurn.values()) {
+    pinnedIndices.add(index);
+  }
+
+  return pinnedIndices;
+}
+
+function sumEntryBytesByPriority(entries, maxPriorityInclusive) {
+  return entries.reduce((total, entry) => {
+    if ((entry.priority ?? OUTBOUND_PRIORITY.NOTIFY) <= maxPriorityInclusive) {
+      return total + entry.sizeBytes;
+    }
+    return total;
+  }, 0);
+}
+
+function selectPriorityDropIndex(entries, pinnedIndices) {
+  const lifecycleStreamBytes = sumEntryBytesByPriority(entries, OUTBOUND_PRIORITY.STREAM);
+  const totalBytes = entries.reduce((total, entry) => total + entry.sizeBytes, 0);
+  const nonLifecycleStreamBytes = totalBytes - lifecycleStreamBytes;
+  const maxNonLifecycleStreamBytes = Math.floor(
+    MAX_BRIDGE_OUTBOUND_BYTES * (1 - LIFECYCLE_STREAM_BYTE_RESERVE_RATIO)
+  );
+  const protectLifecycleStream = nonLifecycleStreamBytes > maxNonLifecycleStreamBytes;
+
+  const candidateIndices = [];
+  entries.forEach((entry, index) => {
+    if (pinnedIndices.has(index)) {
+      return;
+    }
+    if (
+      protectLifecycleStream
+      && (entry.priority ?? OUTBOUND_PRIORITY.NOTIFY) <= OUTBOUND_PRIORITY.STREAM
+    ) {
+      return;
+    }
+    candidateIndices.push(index);
+  });
+
+  if (candidateIndices.length === 0) {
+    entries.forEach((entry, index) => {
+      if (pinnedIndices.has(index)) {
+        return;
+      }
+      candidateIndices.push(index);
+    });
+  }
+
+  if (candidateIndices.length === 0) {
+    return -1;
+  }
+
+  let selectedIndex = candidateIndices[0];
+  for (const index of candidateIndices.slice(1)) {
+    const candidate = entries[index];
+    const selected = entries[selectedIndex];
+    const candidatePriority = candidate.priority ?? OUTBOUND_PRIORITY.NOTIFY;
+    const selectedPriority = selected.priority ?? OUTBOUND_PRIORITY.NOTIFY;
+    if (candidatePriority > selectedPriority) {
+      selectedIndex = index;
+      continue;
+    }
+    if (
+      candidatePriority === selectedPriority
+      && candidate.bridgeOutboundSeq < selected.bridgeOutboundSeq
+    ) {
+      selectedIndex = index;
+    }
+  }
+
+  return selectedIndex;
+}
+
 function base64ToBuffer(value) {
   try {
     return Buffer.from(value, "base64");
@@ -794,8 +1046,11 @@ module.exports = {
   HANDSHAKE_MODE_TRUSTED_RECONNECT,
   MAX_BRIDGE_OUTBOUND_BYTES,
   MAX_BRIDGE_OUTBOUND_MESSAGES,
+  OUTBOUND_PRIORITY,
   PAIRING_QR_VERSION,
   SECURE_PROTOCOL_VERSION,
+  classifyOutboundPriority,
   createBridgeSecureTransport,
+  extractTurnPinKey,
   nonceForDirection,
 };
