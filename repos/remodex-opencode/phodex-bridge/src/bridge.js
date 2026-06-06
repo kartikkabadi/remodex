@@ -660,6 +660,7 @@ function startBridge({
       "turn/started",
       "item/agentMessage/delta",
       "turn/completed",
+      "runtime/catalog/updated",
     ]);
     let parsed = null;
     try {

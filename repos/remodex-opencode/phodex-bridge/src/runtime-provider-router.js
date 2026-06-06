@@ -4,6 +4,8 @@
 // Exports: createRuntimeProviderRouter plus merge helpers used by tests
 // Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store, ./opencode-provider-inventory (for logo catalog RP-BRAND-1)
 
+const { createHash } = require("crypto");
+
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeProvider } = require("./opencode-provider");
 const {
@@ -126,6 +128,7 @@ function createRuntimeProviderRouter({
           ),
           listProviderModelsForModelList(runtimeProviders, logPrefix, {
             force: forceProviders,
+            sendRuntimeMessage,
           }),
         ]);
         const { models: providerModels, opencodeMeta } = providerListResult;
@@ -167,7 +170,7 @@ function createRuntimeProviderRouter({
     }
 
     if (method === "runtime/catalog") {
-      respondAsync(parsed, async () => buildRuntimeCatalog(runtimeProviders, process.env));
+      respondAsync(parsed, async () => buildRuntimeCatalog(runtimeProviders, process.env, sendRuntimeMessage));
       return true;
     }
 
@@ -287,6 +290,85 @@ const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
   START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
 const RUNTIME_CATALOG_AGENT_BUDGET_MS = 2_000;
 let lastOpenCodeCatalogAgents = [];
+let lastEmittedCatalogFingerprint = null;
+
+function shortHash(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 8);
+}
+
+function computeCatalogFingerprint(runtimeStatus) {
+  const inventory = runtimeStatus?.providerInventory ?? [];
+  return [
+    runtimeStatus?.providerInventoryPartial ? "partial:1" : "partial:0",
+    runtimeStatus?.authDiscoveryReasonCode ?? "unknown",
+    ...inventory
+      .map((provider) => `${provider.id}:${provider.authenticated ? 1 : 0}:${provider.connected ? 1 : 0}`)
+      .sort(),
+  ].join("|");
+}
+
+function computeCatalogRevision(runtimeStatus) {
+  return `fp:${shortHash(computeCatalogFingerprint(runtimeStatus))}`;
+}
+
+function countAuthenticated(inventory) {
+  if (!Array.isArray(inventory)) {
+    return 0;
+  }
+  return inventory.filter((provider) => provider?.authenticated === true).length;
+}
+
+function isCatalogWarmInventoryEnabled(env = process.env) {
+  const raw = readString(env?.REMODEX_CATALOG_WARM_INVENTORY);
+  if (!raw) {
+    return true;
+  }
+  const normalized = raw.toLowerCase();
+  return normalized !== "0" && normalized !== "false";
+}
+
+function shouldWarmProviderInventory(runtimeStatus, env = process.env) {
+  if (!isCatalogWarmInventoryEnabled(env)) {
+    return false;
+  }
+  const inventory = runtimeStatus?.providerInventory ?? [];
+  if (!Array.isArray(inventory) || inventory.length === 0) {
+    return true;
+  }
+  if (runtimeStatus?.providerInventoryPartial === true) {
+    return true;
+  }
+  if (readString(runtimeStatus?.authDiscoveryReasonCode) !== "ok") {
+    return true;
+  }
+  return false;
+}
+
+function maybeEmitCatalogUpdated(runtimeStatus, sendRuntimeMessage) {
+  if (typeof sendRuntimeMessage !== "function") {
+    return false;
+  }
+  const fingerprint = computeCatalogFingerprint(runtimeStatus);
+  if (fingerprint === lastEmittedCatalogFingerprint) {
+    return false;
+  }
+  lastEmittedCatalogFingerprint = fingerprint;
+  const catalogRevision = computeCatalogRevision(runtimeStatus);
+  sendRuntimeMessage(
+    JSON.stringify({
+      method: "runtime/catalog/updated",
+      params: {
+        catalogRevision,
+        providerInventoryPartial: runtimeStatus?.providerInventoryPartial ?? false,
+      },
+    }),
+  );
+  return true;
+}
+
+function resetCatalogPushState() {
+  lastEmittedCatalogFingerprint = null;
+}
 
 function readModelListBudgetMs(env, key, fallbackMs) {
   const numeric = Number(readString(env?.[key]));
@@ -395,6 +477,12 @@ async function listProviderModelsForModelList(
     if (opencodeProvider && typeof opencodeProvider.getLastModelListMeta === "function") {
       opencodeMeta = opencodeProvider.getLastModelListMeta();
     }
+  }
+
+  const opencodeProvider = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
+  if (opencodeProvider && typeof opencodeProvider.getRuntimeStatus === "function") {
+    const runtimeStatus = opencodeProvider.getRuntimeStatus(env);
+    maybeEmitCatalogUpdated(runtimeStatus, options.sendRuntimeMessage);
   }
 
   return { models, opencodeMeta };
@@ -876,7 +964,7 @@ function catalogOpenCodeSnapshotForModelList(providers, env) {
   };
 }
 
-async function buildCatalogOpenCodeRuntime(providers, env) {
+async function buildCatalogOpenCodeRuntime(providers, env, sendRuntimeMessage = null) {
   if (isOpenCodeRuntimeDisabled(env)) {
     return null;
   }
@@ -888,7 +976,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
   let reasonCode = null;
 
   const serverAvailability = readOpenCodeCatalogAvailability(opencodeProvider);
-  const runtimeStatus =
+  let runtimeStatus =
     typeof opencodeProvider?.getRuntimeStatus === "function"
       ? opencodeProvider.getRuntimeStatus(env)
       : buildOpenCodeRuntimeStatus({
@@ -898,12 +986,40 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
             || readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "true",
         });
 
+  const inventoryBefore = Array.isArray(runtimeStatus?.providerInventory)
+    ? runtimeStatus.providerInventory
+    : [];
+  if (opencodeProvider?.listModels && shouldWarmProviderInventory(runtimeStatus, env)) {
+    const warmResult = await withModelListBudget(
+      opencodeProvider.listModels({ refreshProviders: true }),
+      opencodeModelListBudgetMs(env),
+      null,
+    );
+    runtimeStatus =
+      typeof opencodeProvider.getRuntimeStatus === "function"
+        ? opencodeProvider.getRuntimeStatus(env)
+        : runtimeStatus;
+    const inventoryAfter = Array.isArray(runtimeStatus?.providerInventory)
+      ? runtimeStatus.providerInventory
+      : [];
+    console.log(
+      JSON.stringify({
+        event: "runtime_catalog_warm_inventory",
+        authenticatedBefore: countAuthenticated(inventoryBefore),
+        authenticatedAfter: countAuthenticated(inventoryAfter),
+        timedOut: warmResult === null,
+      }),
+    );
+  }
+
   const providersForLogos = Array.isArray(runtimeStatus?.providerInventory)
     ? runtimeStatus.providerInventory
     : [];
   const logoProviders = buildProviderLogoCatalog(providersForLogos);
+  const catalogRevision = computeCatalogRevision(runtimeStatus);
 
   if (serverAvailability?.unavailableReason) {
+    maybeEmitCatalogUpdated(runtimeStatus, sendRuntimeMessage);
     return {
       id: OPENCODE_PROVIDER_ID,
       label: "OpenCode",
@@ -918,6 +1034,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
         enabled: false,
         lastError: serverAvailability.unavailableReason,
         version: readString(serverAvailability.version) || runtimeStatus.version,
+        catalogRevision,
         providers: logoProviders,
       },
     };
@@ -973,6 +1090,8 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
     reasonCode = "opencode_not_enabled";
   }
 
+  maybeEmitCatalogUpdated(runtimeStatus, sendRuntimeMessage);
+
   return {
     id: OPENCODE_PROVIDER_ID,
     label: "OpenCode",
@@ -993,6 +1112,7 @@ async function buildCatalogOpenCodeRuntime(providers, env) {
       providerInventory: runtimeStatus.providerInventory || null,
       authDiscoveryReasonCode: runtimeStatus.authDiscoveryReasonCode || null,
       providerInventoryPartial: runtimeStatus.providerInventoryPartial ?? null,
+      catalogRevision,
       providers: logoProviders,
     },
   };
@@ -1104,7 +1224,7 @@ function mergeSkillsBuckets(codexBuckets, opencodeBuckets) {
   return [...byCwd.values()];
 }
 
-async function buildRuntimeCatalog(providers, env) {
+async function buildRuntimeCatalog(providers, env, sendRuntimeMessage = null) {
   const runtimes = [
     {
       id: "codex",
@@ -1117,7 +1237,7 @@ async function buildRuntimeCatalog(providers, env) {
     },
   ];
 
-  const opencodeRuntime = await buildCatalogOpenCodeRuntime(providers, env);
+  const opencodeRuntime = await buildCatalogOpenCodeRuntime(providers, env, sendRuntimeMessage);
   if (opencodeRuntime) {
     runtimes.push(opencodeRuntime);
   }
@@ -1129,14 +1249,21 @@ module.exports = {
   buildCatalogOpenCodeRuntime,
   readOpenCodeCatalogAvailability,
   buildCatalogOpenCodePlaceholderModels,
+  computeCatalogFingerprint,
+  computeCatalogRevision,
+  countAuthenticated,
   CODEX_MODEL_LIST_BUDGET_MS,
   DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
   MODEL_LIST_PROVIDER_BUDGET_MS,
+  maybeEmitCatalogUpdated,
   opencodeModelListBudgetMs,
   createRuntimeProviderRouter,
   capOpenCodeModelsForMobileList,
   catalogOpenCodeSnapshotForModelList,
   listProviderModelsForModelList,
+  resetCatalogPushState,
+  shouldWarmProviderInventory,
+  shortHash,
   withModelListBudget,
   mergeModelListResult,
   mergeSkillsListResult,

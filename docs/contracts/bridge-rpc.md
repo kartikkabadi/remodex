@@ -243,6 +243,7 @@ All fields optional. Omit for first page.
 | `item/toolCallUpdate` | Tool result/error | `{ threadId, turnId, itemId, status: "completed"|"failed" }` |
 | `item/completed` | Assistant message final | `{ threadId, turnId, itemId, message, assistantPhase, item: { id, type, phase, text } }` |
 | `turn/completed` | Turn finished | `{ threadId, turnId, status: "completed"|"failed"|"stopped", turn: { id, status } }` |
+| `runtime/catalog/updated` | OpenCode provider inventory fingerprint changed | `{ catalogRevision: string, providerInventoryPartial?: boolean }` |
 
 **Routing behavior:** Router reads thread ownership. For OpenCode: creates session if first turn, calls `client.session.prompt()`, subscribes to `client.event.subscribe()`, maps SDK events to notification types above. For Codex: strips provider fields, forwards to app-server.
 
@@ -337,6 +338,14 @@ All fields optional. Omit for first page.
   ]
 }
 ```
+
+**OpenCode `opencode` block (nested under the `opencode` runtime row):** includes live provider inventory fields from `getRuntimeStatus()` plus:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `catalogRevision` | string | Fingerprint token `fp:…` derived from inventory auth/connection state; changes when provider inventory warms or auth discovery completes |
+
+Warm inventory before catalog snapshot is controlled by `REMODEX_CATALOG_WARM_INVENTORY` (default `1`). When the fingerprint changes, the bridge emits `runtime/catalog/updated` (see streamed events table).
 
 ### OpenCode runtime enablement
 
