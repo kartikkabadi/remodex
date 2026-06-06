@@ -57,27 +57,9 @@ function createOpenCodeAuthErrorNotifier({ sendApplicationMessage, logPrefix = "
     });
   }
 
-  function inspectSessionError(event = {}) {
-    const properties = event.properties && typeof event.properties === "object" ? event.properties : event;
-    return notifyAuthError({
-      threadId: readString(properties.threadId || properties.thread_id),
-      turnId: readString(properties.turnId || properties.turn_id || properties.turnID),
-      message: readString(properties.error?.message || properties.message || event.error?.message),
-      error: properties.error || event.error || properties,
-      providerID: readString(
-        properties.providerID ||
-          properties.providerId ||
-          properties.error?.providerID ||
-          properties.error?.providerId,
-      ),
-      source: "session_error",
-    });
-  }
-
   return {
     notifyAuthError,
     inspectTurnFailure,
-    inspectSessionError,
     _logPrefix: logPrefix,
   };
 }

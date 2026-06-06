@@ -786,7 +786,7 @@ extension CodexService {
             modelCountBeforeCap: nil,
             modelCountAfterCap: nil
         )
-        modelsErrorMessage = message
+        setModelsErrorMessage(message, forProvider: "opencode")
         debugSyncLog("runtime/auth/error: \(message)")
     }
 
