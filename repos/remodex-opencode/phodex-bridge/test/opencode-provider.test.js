@@ -1623,6 +1623,204 @@ function fakeSessionStoreFs() {
   };
 }
 
+const ASSISTANT_REPLY = "Hey back from OpenCode";
+
+function assistantMessagesSnapshot(text = ASSISTANT_REPLY, foreignPartId = "opencode-part-foreign-999") {
+  return {
+    data: [
+      {
+        info: {
+          id: "msg-assistant",
+          role: "assistant",
+          time: { created: Date.now(), completed: Date.now() },
+        },
+        parts: [{ id: foreignPartId, type: "text", text }],
+      },
+    ],
+  };
+}
+
+function collectItemCompleted(messages) {
+  return messages.filter((entry) => entry.method === "item/completed");
+}
+
+async function waitForItemCompleted(messages, { min = 1, timeoutMs = 2000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (collectItemCompleted(messages).length >= min) {
+      return collectItemCompleted(messages);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return collectItemCompleted(messages);
+}
+
+const itemCompletedIdempotencyScenarios = [
+  {
+    name: "sse foreign itemId then turn/completed",
+    foreignItemId: "opencode-part-foreign-999",
+    fireSseItemCompleted: true,
+    fireTurnCompleted: true,
+    promptResolves: true,
+    hangPrompt: false,
+  },
+  {
+    name: "sse foreign itemId hydrate and completeTurn",
+    foreignItemId: "opencode-part-foreign-abc",
+    fireSseItemCompleted: true,
+    fireTurnCompleted: true,
+    promptResolves: true,
+    hangPrompt: false,
+  },
+  {
+    name: "poll hydration after hung prompt",
+    foreignItemId: "opencode-part-foreign-poll",
+    fireSseItemCompleted: false,
+    fireTurnCompleted: false,
+    promptResolves: false,
+    hangPrompt: true,
+  },
+  {
+    name: "finally hydrate when prompt resolves without turn/completed",
+    foreignItemId: "opencode-part-foreign-finally",
+    fireSseItemCompleted: false,
+    fireTurnCompleted: false,
+    promptResolves: true,
+    hangPrompt: false,
+  },
+  {
+    name: "sse foreign itemId plus poll and finally",
+    foreignItemId: "opencode-part-foreign-all",
+    fireSseItemCompleted: true,
+    fireTurnCompleted: false,
+    promptResolves: true,
+    hangPrompt: false,
+  },
+];
+
+for (const scenario of itemCompletedIdempotencyScenarios) {
+  test(`item/completed idempotency: ${scenario.name}`, async () => {
+    const messages = [];
+    let subscribeHandler = null;
+    const provider = makeProvider({
+      send: (raw) => messages.push(JSON.parse(raw)),
+      env: {
+        REMODEX_ENABLE_OPENCODE: "1",
+        REMODEX_TEST: "1",
+        REMODEX_OPENCODE_TURN_WATCHDOG_MS: "500",
+      },
+      clientFactory: async () => ({
+        ...fakeClient(),
+        subscribeToEvents: (handler) => {
+          subscribeHandler = handler;
+          if (scenario.fireSseItemCompleted) {
+            setImmediate(() => {
+              handler("item/completed", {
+                itemId: scenario.foreignItemId,
+                message: ASSISTANT_REPLY,
+                assistantPhase: "final_answer",
+                item: {
+                  id: scenario.foreignItemId,
+                  type: "agentMessage",
+                  phase: "final",
+                  text: ASSISTANT_REPLY,
+                },
+              });
+            });
+          }
+          if (scenario.fireTurnCompleted) {
+            setImmediate(() => {
+              handler("turn/completed", { status: "completed" });
+            });
+          }
+          return () => {};
+        },
+        getMessages: async () => assistantMessagesSnapshot(ASSISTANT_REPLY, scenario.foreignItemId),
+        prompt: async () => {
+          if (scenario.hangPrompt) {
+            return new Promise(() => {});
+          }
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+    const turn = await provider.handleRequest({
+      id: 2,
+      method: "turn/start",
+      params: { threadId: start.thread.id, input: "hey" },
+    });
+
+    const bridgeItemId = `opencode-agent-${turn.turnId}`;
+    const completed = await waitForItemCompleted(messages, { min: 1, timeoutMs: 1500 });
+
+    assert.equal(completed.length, 1, `expected exactly one item/completed for ${scenario.name}`);
+    assert.equal(completed[0].params.itemId, bridgeItemId);
+    assert.equal(completed[0].params.item.id, bridgeItemId);
+    assert.equal(completed[0].params.message, ASSISTANT_REPLY);
+    assert.equal(completed[0].params.item.text, ASSISTANT_REPLY);
+    assert.equal(completed[0].params.threadId, start.thread.id);
+    assert.equal(completed[0].params.turnId, turn.turnId);
+    assert.notEqual(completed[0].params.itemId, scenario.foreignItemId);
+
+    if (scenario.fireSseItemCompleted && subscribeHandler) {
+      subscribeHandler("item/completed", {
+        itemId: scenario.foreignItemId,
+        message: ASSISTANT_REPLY,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(
+        collectItemCompleted(messages).length,
+        1,
+        "duplicate SSE item/completed must not emit again",
+      );
+    }
+  });
+}
+
+test("sse foreign itemId is normalized before hydrate and completeTurn paths run", async () => {
+  const messages = [];
+  const provider = makeProvider({
+    send: (raw) => messages.push(JSON.parse(raw)),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "500",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler) => {
+        setImmediate(() => {
+          handler("item/agentMessage/delta", { delta: "partial " });
+          handler("item/completed", {
+            itemId: "foreign-sse-part-id",
+            message: ASSISTANT_REPLY,
+            assistantPhase: "final_answer",
+          });
+          handler("turn/completed", { status: "completed" });
+        });
+        return () => {};
+      },
+      getMessages: async () => assistantMessagesSnapshot(ASSISTANT_REPLY, "foreign-sse-part-id"),
+      prompt: async () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const turn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+
+  const completed = await waitForItemCompleted(messages);
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].params.itemId, `opencode-agent-${turn.turnId}`);
+  assert.equal(completed[0].params.item.id, `opencode-agent-${turn.turnId}`);
+  assert.equal(messages.filter((entry) => entry.method === "turn/completed").length, 1);
+});
+
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({

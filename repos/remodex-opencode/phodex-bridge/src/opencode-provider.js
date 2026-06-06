@@ -1187,6 +1187,55 @@ function createOpenCodeProvider({
     return latest;
   }
 
+  function emitAssistantCompletedOnce(active, params, source) {
+    const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
+    if (!assistantItem) {
+      return false;
+    }
+    if (assistantItem.finalized === true) {
+      console.log(
+        JSON.stringify({
+          event: "opencode_item_completed_skipped",
+          threadId: active.thread.id,
+          turnId: active.turn.id,
+          source,
+          reason: "already_finalized",
+        }),
+      );
+      return false;
+    }
+
+    const text =
+      readString(params?.message) ||
+      readString(params?.item?.text) ||
+      readString(assistantItem.text) ||
+      "";
+    if (!text) {
+      return false;
+    }
+    assistantItem.text = text;
+
+    const canonicalParams = {
+      ...params,
+      threadId: active.thread.id,
+      turnId: active.turn.id,
+      itemId: assistantItem.id,
+      message: text,
+      item: {
+        ...(params?.item ?? {}),
+        id: assistantItem.id,
+        turnId: active.turn.id,
+        type: "agentMessage",
+        phase: "final",
+        text,
+      },
+    };
+
+    assistantItem.finalized = true;
+    emit("item/completed", canonicalParams);
+    return true;
+  }
+
   async function hydrateAssistantFromSessionMessages(active) {
     if (!client || !readString(active.sessionId) || active.completed) {
       return false;
@@ -1230,20 +1279,21 @@ function createOpenCodeProvider({
       });
     }
 
-    emit("item/completed", {
-      threadId: active.thread.id,
-      turnId: active.turn.id,
-      itemId: assistantItem.id,
-      message: text,
-      assistantPhase: "final_answer",
-      item: {
-        id: assistantItem.id,
-        turnId: active.turn.id,
-        type: "agentMessage",
-        phase: "final",
-        text,
+    emitAssistantCompletedOnce(
+      active,
+      {
+        message: text,
+        assistantPhase: "final_answer",
+        item: {
+          id: assistantItem.id,
+          turnId: active.turn.id,
+          type: "agentMessage",
+          phase: "final",
+          text,
+        },
       },
-    });
+      "hydrate",
+    );
 
     console.log(
       JSON.stringify({
@@ -1429,6 +1479,11 @@ function createOpenCodeProvider({
           return;
         }
 
+        if (method === "item/completed") {
+          emitAssistantCompletedOnce(active, enriched, "sse");
+          return;
+        }
+
         emit(method, enriched);
       });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
@@ -1534,20 +1589,21 @@ function createOpenCodeProvider({
 
     const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
     if (assistantItem && assistantItem.text) {
-      emit("item/completed", {
-        threadId: active.thread.id,
-        turnId,
-        itemId: assistantItem.id,
-        message: assistantItem.text,
-        assistantPhase: "final_answer",
-        item: {
-          id: assistantItem.id,
-          turnId,
-          type: "agentMessage",
-          phase: "final",
-          text: assistantItem.text,
+      emitAssistantCompletedOnce(
+        active,
+        {
+          message: assistantItem.text,
+          assistantPhase: "final_answer",
+          item: {
+            id: assistantItem.id,
+            turnId,
+            type: "agentMessage",
+            phase: "final",
+            text: assistantItem.text,
+          },
         },
-      });
+        "completeTurn",
+      );
     }
 
     const completionEvent = status === "failed" ? "opencode_turn_failed" : "opencode_turn_completed";
