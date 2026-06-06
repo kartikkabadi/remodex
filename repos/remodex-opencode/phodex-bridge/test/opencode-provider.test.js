@@ -1389,6 +1389,58 @@ test("poll hydration completes via getMessages info/parts snapshots", async () =
   assert.equal(completed, true);
 });
 
+test("poll hydration uses assistant after current user prompt", async () => {
+  const currentAnswer = "I am the assistant responding to the second turn.";
+  const deltas = [];
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        deltas.push(payload.params.delta);
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => ({
+        data: [
+          {
+            info: { id: "msg-user-1", role: "user" },
+            parts: [{ type: "text", text: "Hey" }],
+          },
+          {
+            info: { id: "msg-assistant-1", role: "assistant" },
+            parts: [{ type: "text", text: "Hey" }],
+          },
+          {
+            info: { id: "msg-user-2", role: "user" },
+            parts: [{ type: "text", text: "Who are you" }],
+          },
+          {
+            info: { id: "msg-assistant-2", role: "assistant" },
+            parts: [{ type: "text", text: currentAnswer }],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "Who are you" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.deepEqual(deltas, [currentAnswer]);
+});
+
 test("poll hydration keeps reasoning parts out of assistant text", async () => {
   let assistantDelta = "";
   const provider = makeProvider({

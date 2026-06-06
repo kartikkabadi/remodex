@@ -618,13 +618,13 @@ extension CodexService {
         flushPendingRuntimeOptionRefreshIfPossible(delayNanoseconds: 1_000_000_000)
     }
 
-    // Runs a queued runtime metadata refresh once thread hydration is no longer busy.
+    // Runs runtime metadata independently from chat hydration. Settings already uses this
+    // path directly; reopen should not require visiting Settings to populate runtimes.
     func flushPendingRuntimeOptionRefreshIfPossible(delayNanoseconds: UInt64 = 0) {
         guard pendingRuntimeOptionRefresh,
               runtimeOptionRefreshTask == nil,
               isConnected,
-              isInitialized,
-              !isLoadingThreads else {
+              isInitialized else {
             return
         }
 
@@ -649,10 +649,6 @@ extension CodexService {
                 }
             }
             guard self.isConnected, self.isInitialized else { return }
-            guard !self.isLoadingThreads else {
-                self.pendingRuntimeOptionRefresh = true
-                return
-            }
             await self.refreshRuntimeMetadataSequential()
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false

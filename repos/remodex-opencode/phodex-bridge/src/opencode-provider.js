@@ -745,6 +745,22 @@ function createOpenCodeProvider({
     let prunedInvalid = 0;
     let rehydrateSkipped = 0;
     const sdkCap = resolveListThreadsValidateCap(env);
+    const hasOwnedThreadState =
+      threads.size > 0 ||
+      ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length > 0 ||
+      sessions.entries().length > 0;
+    if ((!healthy || !client) && hasOwnedThreadState) {
+      try {
+        await ensureStarted();
+      } catch (error) {
+        console.log(
+          JSON.stringify({
+            event: "opencode_list_threads_wake_failed",
+            message: readString(error?.message) || "OpenCode could not start for thread/list",
+          }),
+        );
+      }
+    }
     const canValidateSessions = healthy && client;
 
     const localThreads = [];
@@ -1194,6 +1210,48 @@ function createOpenCodeProvider({
     return latest;
   }
 
+  function extractAssistantTextAfterCurrentPrompt(messages, prompt) {
+    if (!Array.isArray(messages)) {
+      return "";
+    }
+
+    const normalizedPrompt = readString(prompt).trim();
+    if (!normalizedPrompt) {
+      return extractLatestAssistantText(messages);
+    }
+
+    let latest = "";
+    let seenCurrentPrompt = false;
+    for (const message of messages) {
+      if (!seenCurrentPrompt && !isOpenCodeAssistantMessage(message)) {
+        const text = extractOpenCodeMessageText(message).trim();
+        if (text === normalizedPrompt) {
+          seenCurrentPrompt = true;
+          latest = "";
+        }
+        continue;
+      }
+
+      if (!seenCurrentPrompt) {
+        continue;
+      }
+
+      if (isOpenCodeAssistantMessage(message)) {
+        const text = extractOpenCodeMessageText(message);
+        if (text) {
+          latest = text;
+        }
+      } else {
+        const text = extractOpenCodeMessageText(message).trim();
+        if (text) {
+          latest = "";
+        }
+      }
+    }
+
+    return latest || extractLatestAssistantText(messages);
+  }
+
   function assistantAgentItem(active) {
     return active.turn.items.find((item) => item.type === "agentMessage");
   }
@@ -1283,7 +1341,8 @@ function createOpenCodeProvider({
       return false;
     }
 
-    const text = extractLatestAssistantText(messages);
+    const userItem = active.turn.items.find((item) => item.type === "userMessage");
+    const text = extractAssistantTextAfterCurrentPrompt(messages, userItem?.text);
     if (!text) {
       return false;
     }

@@ -220,3 +220,79 @@ test("idle timer stops server when no active turns", async () => {
     restoreTimers();
   }
 });
+
+test("listThreads wakes idle-stopped server before validating owned sessions", async () => {
+  installFakeTimers();
+  try {
+    let stopped = false;
+    let starts = 0;
+    let _running = false;
+    const server = {
+      get baseUrl() {
+        return _running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return _running;
+      },
+      start() {
+        starts += 1;
+        _running = true;
+        return Promise.resolve();
+      },
+      stop() {
+        _running = false;
+        stopped = true;
+        return Promise.resolve();
+      },
+    };
+    const ownershipStore = fakeOwnershipStore();
+    const sessionStore = {
+      get: (threadId) => (threadId === "opencode-thread-idle" ? "ses_idle" : null),
+      getEntry: (threadId) =>
+        threadId === "opencode-thread-idle"
+          ? {
+              sessionId: "ses_idle",
+              title: "Idle chat",
+              updatedAt: "2026-06-06T00:00:00.000Z",
+            }
+          : null,
+      set: () => {},
+      remove: () => {},
+      entries: () => [
+        [
+          "opencode-thread-idle",
+          {
+            sessionId: "ses_idle",
+            title: "Idle chat",
+            updatedAt: "2026-06-06T00:00:00.000Z",
+          },
+        ],
+      ],
+    };
+    ownershipStore.setOwnership("opencode-thread-idle", "opencode");
+
+    const provider = createOpenCodeProvider({
+      sendApplicationMessage: () => {},
+      serverFactory: () => server,
+      clientFactory: () => ({
+        ...fakeClient(),
+        getMessages: async () => [{ role: "user", text: "hello from prior chat" }],
+      }),
+      ownershipStore,
+      sessionStore,
+    });
+
+    await provider.listModels();
+    const idleTimeout = timeoutCalls.find((t) => t.ms === HEALTH_IDLE_SHUTDOWN_MS);
+    await idleTimeout.fn();
+    assert.equal(stopped, true);
+
+    const listed = await provider.listThreads();
+
+    assert.ok(starts >= 2, "thread/list should restart OpenCode after idle shutdown");
+    assert.equal(listed.data.length, 1);
+    assert.equal(listed.data[0].id, "opencode-thread-idle");
+  } finally {
+    restoreTimers();
+  }
+});

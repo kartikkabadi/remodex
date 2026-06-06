@@ -1273,7 +1273,15 @@ extension CodexService {
             return true
         }
 
+        if closedAssistantIdentityMismatches(localMessage, serverMessage) {
+            return false
+        }
+
         if localText.count > serverText.count, localText.hasPrefix(serverText) {
+            return false
+        }
+
+        if isSuspiciousClosedAssistantShortReplacement(localText: localText, serverText: serverText) {
             return false
         }
 
@@ -1282,6 +1290,45 @@ extension CodexService {
         }
 
         return true
+    }
+
+    // Reopen/history snapshots are allowed to fill gaps, not rewrite a stable
+    // assistant row into a different provider item.
+    nonisolated static func closedAssistantIdentityMismatches(
+        _ localMessage: CodexMessage,
+        _ serverMessage: CodexMessage
+    ) -> Bool {
+        let localItemId = normalizedHistoryIdentifier(localMessage.itemId)
+        let serverItemId = normalizedHistoryIdentifier(serverMessage.itemId)
+        if let localItemId, let serverItemId, localItemId != serverItemId,
+           hasStableAssistantIdentity(localItemId),
+           hasStableAssistantIdentity(serverItemId) {
+            return true
+        }
+
+        let localTurnId = normalizedHistoryIdentifier(localMessage.turnId)
+        let serverTurnId = normalizedHistoryIdentifier(serverMessage.turnId)
+        if let localTurnId, let serverTurnId, localTurnId != serverTurnId,
+           localTurnId.hasPrefix("opencode-turn-") || serverTurnId.hasPrefix("opencode-turn-") {
+            return true
+        }
+
+        return false
+    }
+
+    // Short OpenCode SDK snapshots like "Hey" are often the user prompt or a stale
+    // prior reply. They must not replace a longer local assistant answer on reopen.
+    nonisolated static func isSuspiciousClosedAssistantShortReplacement(
+        localText: String,
+        serverText: String
+    ) -> Bool {
+        guard localText.count >= 24 else {
+            return false
+        }
+        guard serverText.count <= 16 else {
+            return false
+        }
+        return !localText.hasPrefix(serverText)
     }
 
     // Rejects closed assistant replacements that look like multiple assistant rows

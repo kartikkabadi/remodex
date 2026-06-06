@@ -133,4 +133,87 @@ final class CodexServiceHistoryMergeTests: XCTestCase {
         XCTAssertEqual(index, 1)
         XCTAssertEqual(merged[index ?? -1].deliveryState, .confirmed)
     }
+
+    func testClosedAssistantHistoryDoesNotReplaceLongAnswerWithShortPromptText() throws {
+        let threadID = "thread-short-replay-\(UUID().uuidString)"
+        let turnID = "opencode-turn-\(UUID().uuidString)"
+        let existingAnswer = "Hey! I am Remodex, your iPad companion for controlling coding agents on your Mac."
+
+        let existing = [
+            CodexMessage(
+                id: "assistant-live",
+                threadId: threadID,
+                role: .assistant,
+                text: existingAnswer,
+                turnId: turnID,
+                itemId: "opencode-agent-\(turnID)",
+                isStreaming: false,
+                orderIndex: 0
+            ),
+        ]
+        let history = [
+            CodexMessage(
+                id: "assistant-history",
+                threadId: threadID,
+                role: .assistant,
+                text: "Hey",
+                turnId: turnID,
+                itemId: "opencode-agent-\(turnID)",
+                isStreaming: false,
+                orderIndex: 0
+            ),
+        ]
+
+        let merged = try CodexService.mergeHistoryMessages(
+            existing,
+            history,
+            activeThreadIDs: [],
+            runningThreadIDs: []
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first?.text, existingAnswer)
+    }
+
+    func testClosedAssistantHistoryWithMismatchedStableItemIdDoesNotReplaceLocalAnswer() throws {
+        let threadID = "thread-id-mismatch-\(UUID().uuidString)"
+        let turnID = "opencode-turn-\(UUID().uuidString)"
+        let existingAnswer = "I am MiniMax M3 running through OpenCode on your local Mac."
+
+        let existing = [
+            CodexMessage(
+                id: "assistant-live",
+                threadId: threadID,
+                role: .assistant,
+                text: existingAnswer,
+                turnId: turnID,
+                itemId: "opencode-agent-\(turnID)",
+                isStreaming: false,
+                orderIndex: 0
+            ),
+        ]
+        let history = [
+            CodexMessage(
+                id: "assistant-history",
+                threadId: threadID,
+                role: .assistant,
+                text: "Hey",
+                turnId: turnID,
+                itemId: "assistant-synthetic-other",
+                isStreaming: false,
+                orderIndex: 0
+            ),
+        ]
+
+        let merged = try CodexService.mergeHistoryMessages(
+            existing,
+            history,
+            activeThreadIDs: [],
+            runningThreadIDs: []
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first?.text, existingAnswer)
+        XCTAssertEqual(merged.first?.itemId, "opencode-agent-\(turnID)")
+    }
 }
