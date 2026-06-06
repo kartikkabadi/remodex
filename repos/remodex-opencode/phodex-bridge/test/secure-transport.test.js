@@ -20,6 +20,7 @@ const {
 const {
   HANDSHAKE_MODE_QR_BOOTSTRAP,
   HANDSHAKE_MODE_TRUSTED_RECONNECT,
+  MAX_BRIDGE_OUTBOUND_BYTES,
   MAX_BRIDGE_OUTBOUND_MESSAGES,
   OUTBOUND_PRIORITY,
   classifyOutboundPriority,
@@ -754,7 +755,7 @@ test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (b
 
   const structuredLogs = captureStructuredLogs();
   try {
-    finishHandshake({
+    const { serverHello, transcriptBytes } = finishHandshake({
       secureTransport,
       sessionId: "session-trim-drop",
       macDeviceId: "mac-trim-drop",
@@ -785,6 +786,46 @@ test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (b
     assert.equal(trimLogs[0].firstSeq, 1);
     assert.equal(trimLogs[0].lastSeq, 1);
     assert.equal(trimLogs[0].reason, "overflow");
+    assert.equal(trimLogs[0].method, "thread/status");
+    assert.equal(trimLogs[0].priority, OUTBOUND_PRIORITY.NOTIFY);
+
+    const replayWireMessages = [];
+    secureTransport.bindLiveSendWireMessage((message) => {
+      replayWireMessages.push(message);
+      return true;
+    });
+    secureTransport.handleIncomingWireMessage(
+      JSON.stringify({
+        kind: "resumeState",
+        sessionId: "session-trim-drop",
+        keyEpoch: serverHello.keyEpoch,
+        lastAppliedBridgeOutboundSeq: 0,
+      }),
+      {
+        sendControlMessage() {},
+        onApplicationMessage() {},
+      }
+    );
+
+    assert.equal(replayWireMessages.length, MAX_BRIDGE_OUTBOUND_MESSAGES);
+    const replayedPayloads = replayWireMessages.map((message) => {
+      const envelope = JSON.parse(message);
+      const macToPhoneKey = deriveMacToPhoneKey({
+        sessionId: "session-trim-drop",
+        macDeviceId: "mac-trim-drop",
+        phoneDeviceId: "phone-trim-drop",
+        phoneEphemeral,
+        serverHello,
+        transcriptBytes,
+      });
+      return JSON.parse(decryptEnvelope(envelope, macToPhoneKey).payloadText);
+    });
+    assert.ok(
+      replayedPayloads.some(
+        (payload) => payload.method === "turn/completed" && payload.params?.turnId === "turn-1"
+      ),
+      "expected turn/completed to survive overflow trim while oldest notify filler was dropped"
+    );
   } finally {
     structuredLogs.restore();
   }
@@ -797,6 +838,10 @@ test("classifyOutboundPriority maps lifecycle, stream, notify, and rpc tiers", (
   );
   assert.equal(
     classifyOutboundPriority({ method: "turn/completed", params: {} }),
+    OUTBOUND_PRIORITY.LIFECYCLE
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "turn/failed", params: {} }),
     OUTBOUND_PRIORITY.LIFECYCLE
   );
   assert.equal(
@@ -820,7 +865,7 @@ test("classifyOutboundPriority maps lifecycle, stream, notify, and rpc tiers", (
 test("extractTurnPinKey parses flat and nested thread/turn ids", () => {
   assert.deepEqual(
     extractTurnPinKey({
-      method: "turn/started",
+      method: "turn/completed",
       params: { threadId: "thread-flat", turnId: "turn-flat" },
     }),
     { threadId: "thread-flat", turnId: "turn-flat" }
@@ -850,6 +895,14 @@ test("extractTurnPinKey parses flat and nested thread/turn ids", () => {
     { threadId: "thread-deep", turnId: "turn-deep" }
   );
   assert.equal(extractTurnPinKey({ method: "thread/list", params: {} }), null);
+  assert.equal(
+    extractTurnPinKey({ method: "item/completed", params: { message: "no ids" } }),
+    null
+  );
+  assert.equal(
+    extractTurnPinKey({ method: "turn/failed", params: { threadId: "thread-1", turnId: "turn-1" } }),
+    null
+  );
 });
 
 test("priority trim drops rpc responses before lifecycle and stream under cap pressure", () => {
@@ -920,7 +973,7 @@ test("priority trim drops rpc responses before lifecycle and stream under cap pr
 
     const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
     assert.equal(trimLogs.length, 1);
-    assert.equal(trimLogs[0].lowestPriorityDropped, OUTBOUND_PRIORITY.RPC_RESPONSE);
+    assert.equal(trimLogs[0].highestPriorityTierDropped, OUTBOUND_PRIORITY.RPC_RESPONSE);
     assert.equal(trimLogs[0].priority, OUTBOUND_PRIORITY.RPC_RESPONSE);
 
     const replayedPayloads = replayBufferedPayloads({
@@ -1047,6 +1100,371 @@ test("priority trim retains pinned item/completed and turn/completed pair per tu
       "expected rpc response to be dropped before pinned lifecycle pair"
     );
   } finally {
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("priority trim sacrifices older turn completion pair under saturated pin pressure", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "2";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-multi-turn",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-multi-turn",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-multi-turn": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-multi-turn",
+      macDeviceId: "mac-priority-multi-turn",
+      phoneDeviceId: "phone-priority-multi-turn",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/completed",
+        params: { threadId: "thread-multi", turnId: "turn-a", message: "answer-a" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-multi", turnId: "turn-a", status: "completed" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/completed",
+        params: { threadId: "thread-multi", turnId: "turn-b", message: "answer-b" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-multi", turnId: "turn-b", status: "completed" },
+      }),
+      () => false
+    );
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-multi-turn",
+      macDeviceId: "mac-priority-multi-turn",
+      phoneDeviceId: "phone-priority-multi-turn",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+    assert.equal(replayedObjects.length, 2);
+    assert.ok(
+      replayedObjects.some(
+        (payload) => payload.method === "item/completed" && payload.params?.turnId === "turn-b"
+      ),
+      "expected newer turn item/completed to survive saturated pin pressure"
+    );
+    assert.ok(
+      replayedObjects.some(
+        (payload) => payload.method === "turn/completed" && payload.params?.turnId === "turn-b"
+      ),
+      "expected newer turn turn/completed to survive saturated pin pressure"
+    );
+    assert.ok(
+      !replayedObjects.some(
+        (payload) => payload.method === "item/completed" && payload.params?.turnId === "turn-a"
+      ),
+      "expected older turn item/completed to be evicted"
+    );
+    assert.ok(
+      !replayedObjects.some(
+        (payload) => payload.method === "turn/completed" && payload.params?.turnId === "turn-a"
+      ),
+      "expected older turn turn/completed to be evicted"
+    );
+  } finally {
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("priority trim reserves byte budget for lifecycle and stream under byte pressure", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "1000";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-byte-reserve",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-byte-reserve",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-byte-reserve": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-byte-reserve",
+      macDeviceId: "mac-priority-byte-reserve",
+      phoneDeviceId: "phone-priority-byte-reserve",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    const rpcPaddingBytes = Math.floor(MAX_BRIDGE_OUTBOUND_BYTES * 0.13);
+    for (let index = 0; index < 8; index += 1) {
+      secureTransport.queueOutboundApplicationMessage(
+        JSON.stringify({ id: `rpc-byte-${index}`, result: { padding: "x".repeat(rpcPaddingBytes) } }),
+        () => false
+      );
+    }
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread-byte", turnId: "turn-byte", delta: "stream" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-byte", turnId: "turn-byte", status: "completed" },
+      }),
+      () => false
+    );
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
+    assert.ok(trimLogs.length > 0, "expected rpc payloads to be dropped under byte pressure");
+    assert.ok(
+      trimLogs.every((entry) => entry.highestPriorityTierDropped === OUTBOUND_PRIORITY.RPC_RESPONSE),
+      "expected only rpc responses to be dropped while lifecycle/stream byte reserve is active"
+    );
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-byte-reserve",
+      macDeviceId: "mac-priority-byte-reserve",
+      phoneDeviceId: "phone-priority-byte-reserve",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "item/agentMessage/delta"),
+      "expected stream delta to survive byte reserve trim"
+    );
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "turn/completed"),
+      "expected turn/completed to survive byte reserve trim"
+    );
+    const replayedRpcCount = replayedObjects.filter((payload) => payload.id?.startsWith("rpc-byte-")).length;
+    assert.ok(
+      replayedRpcCount < 8,
+      "expected some large rpc payloads to be dropped before lifecycle/stream"
+    );
+  } finally {
+    structuredLogs.restore();
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("legacy fifo trim drops oldest entry when rollback env is enabled", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = String(MAX_BRIDGE_OUTBOUND_MESSAGES);
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "1";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-legacy-trim",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-legacy-trim",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-legacy-trim": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-legacy-trim",
+      macDeviceId: "mac-legacy-trim",
+      phoneDeviceId: "phone-legacy-trim",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    const fillerPayload = JSON.stringify({ method: "thread/status", params: { status: "running" } });
+    for (let index = 0; index < MAX_BRIDGE_OUTBOUND_MESSAGES; index += 1) {
+      secureTransport.queueOutboundApplicationMessage(fillerPayload, () => false);
+    }
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-legacy", turnId: "turn-legacy", status: "completed" },
+      }),
+      () => false
+    );
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
+    assert.equal(trimLogs.length, 1);
+    assert.equal(trimLogs[0].firstSeq, 1);
+    assert.equal(trimLogs[0].method, "thread/status");
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-legacy-trim",
+      macDeviceId: "mac-legacy-trim",
+      phoneDeviceId: "phone-legacy-trim",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+    assert.equal(replayedObjects.length, MAX_BRIDGE_OUTBOUND_MESSAGES);
+    assert.ok(
+      replayedObjects.some(
+        (payload) => payload.method === "turn/completed" && payload.params?.turnId === "turn-legacy"
+      ),
+      "expected turn/completed to survive legacy fifo trim"
+    );
+  } finally {
+    structuredLogs.restore();
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("priority outbound disabled delegates to legacy fifo trim", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = String(MAX_BRIDGE_OUTBOUND_MESSAGES);
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "0";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-off",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-off",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-off": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-off",
+      macDeviceId: "mac-priority-off",
+      phoneDeviceId: "phone-priority-off",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    const fillerPayload = JSON.stringify({ method: "thread/status", params: { status: "running" } });
+    for (let index = 0; index < MAX_BRIDGE_OUTBOUND_MESSAGES; index += 1) {
+      secureTransport.queueOutboundApplicationMessage(fillerPayload, () => false);
+    }
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-off", turnId: "turn-off", status: "completed" },
+      }),
+      () => false
+    );
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
+    assert.equal(trimLogs.length, 1);
+    assert.equal(trimLogs[0].firstSeq, 1);
+    assert.equal(trimLogs[0].method, "thread/status");
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-off",
+      macDeviceId: "mac-priority-off",
+      phoneDeviceId: "phone-priority-off",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+    assert.equal(replayedObjects.length, MAX_BRIDGE_OUTBOUND_MESSAGES);
+    assert.ok(replayedObjects.some((payload) => payload.method === "turn/completed"));
+  } finally {
+    structuredLogs.restore();
     restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
     restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
     restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);

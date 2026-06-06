@@ -576,7 +576,7 @@ function createBridgeSecureTransport({
         priority: firstEntry?.priority ?? null,
         method: firstEntry?.method ?? null,
         bridgeOutboundSeq: firstEntry?.bridgeOutboundSeq ?? null,
-        lowestPriorityDropped: droppedEntries.reduce(
+        highestPriorityTierDropped: droppedEntries.reduce(
           (maxPriority, entry) => Math.max(maxPriority, entry.priority ?? OUTBOUND_PRIORITY.NOTIFY),
           OUTBOUND_PRIORITY.LIFECYCLE
         ),
@@ -895,11 +895,8 @@ function extractTurnPinKey(payload) {
   }
 
   const pinMethods = new Set([
-    "turn/started",
-    "turn/completed",
-    "turn/failed",
     "item/completed",
-    "item/agentMessage/delta",
+    "turn/completed",
   ]);
   if (!pinMethods.has(method)) {
     return null;
@@ -1000,7 +997,7 @@ function selectPriorityDropIndex(entries, pinnedIndices) {
   }
 
   if (candidateIndices.length === 0) {
-    return -1;
+    return selectOldestPinnedTurnDropIndex(entries, pinnedIndices);
   }
 
   let selectedIndex = candidateIndices[0];
@@ -1022,6 +1019,63 @@ function selectPriorityDropIndex(entries, pinnedIndices) {
   }
 
   return selectedIndex;
+}
+
+function selectOldestPinnedTurnDropIndex(entries, pinnedIndices) {
+  const turnsByKey = new Map();
+
+  for (const index of pinnedIndices) {
+    const entry = entries[index];
+    if (!entry.turnPinKey) {
+      continue;
+    }
+
+    const key = turnPinKeyString(entry.turnPinKey);
+    const turnState = turnsByKey.get(key) ?? {
+      turnCompletedIndex: -1,
+      turnCompletedSeq: Infinity,
+      itemCompletedIndex: -1,
+      itemCompletedSeq: Infinity,
+    };
+
+    if (entry.method === "turn/completed") {
+      turnState.turnCompletedIndex = index;
+      turnState.turnCompletedSeq = entry.bridgeOutboundSeq;
+    }
+    if (entry.method === "item/completed") {
+      turnState.itemCompletedIndex = index;
+      turnState.itemCompletedSeq = entry.bridgeOutboundSeq;
+    }
+
+    turnsByKey.set(key, turnState);
+  }
+
+  let oldestTurn = null;
+  for (const turnState of turnsByKey.values()) {
+    const turnAge = turnState.turnCompletedSeq !== Infinity
+      ? turnState.turnCompletedSeq
+      : turnState.itemCompletedSeq;
+    if (
+      oldestTurn === null
+      || turnAge < oldestTurn.turnAge
+      || (
+        turnAge === oldestTurn.turnAge
+        && turnState.itemCompletedSeq < oldestTurn.itemCompletedSeq
+      )
+    ) {
+      oldestTurn = { ...turnState, turnAge };
+    }
+  }
+
+  if (!oldestTurn) {
+    return -1;
+  }
+
+  if (oldestTurn.turnCompletedIndex >= 0) {
+    return oldestTurn.turnCompletedIndex;
+  }
+
+  return oldestTurn.itemCompletedIndex;
 }
 
 function base64ToBuffer(value) {
