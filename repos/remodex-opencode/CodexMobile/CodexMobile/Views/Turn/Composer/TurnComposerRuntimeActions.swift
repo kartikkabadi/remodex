@@ -52,10 +52,7 @@ struct TurnComposerRuntimeActions {
                 Task { @MainActor in
                     codex.resetOpenCodeModelsRetry()
                     codex.modelsErrorMessage = nil
-                    await withTaskGroup(of: Void.self) { group in
-                        group.addTask { try? await codex.fetchRuntimeCatalog() }
-                        group.addTask { try? await codex.listModels(refreshProviders: true) }
-                    }
+                    await codex.refreshRuntimeMetadataSequential()
                 }
             }
         )

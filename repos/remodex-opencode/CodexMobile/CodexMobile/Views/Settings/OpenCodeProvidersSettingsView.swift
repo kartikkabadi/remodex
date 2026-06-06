@@ -44,8 +44,7 @@ struct OpenCodeProvidersSettingsView: View {
         .navigationTitle("OpenCode providers")
         .task {
             guard codex.isConnected, codex.isInitialized else { return }
-            try? await codex.fetchRuntimeCatalog()
-            try? await codex.listModels(refreshProviders: true)
+            await codex.refreshRuntimeMetadataSequential()
         }
     }
 

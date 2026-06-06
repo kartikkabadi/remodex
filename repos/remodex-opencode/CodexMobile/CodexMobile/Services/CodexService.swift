@@ -485,6 +485,9 @@ final class CodexService {
     @ObservationIgnored var pendingRuntimeOptionRefresh = false
     @ObservationIgnored var runtimeOptionRefreshTask: Task<Void, Never>?
     @ObservationIgnored var runtimeOptionRefreshToken: UUID?
+    // Tracks the last observed OpenCode catalog fingerprint for push-driven refresh dedupe.
+    @ObservationIgnored var lastOpenCodeCatalogRevision: String?
+    @ObservationIgnored var catalogRefetchDebounceTask: Task<Void, Never>?
     var modelsErrorMessage: String?
     var lastModelListOpenCodeMeta: OpenCodeModelListMeta?
     @ObservationIgnored var openCodeModelRetryCount = 0

@@ -560,6 +560,29 @@ extension CodexService {
         debugRuntimeLog(
             "runtime/catalog success runtimes=\(nextRuntimes.map(\.id).joined(separator: ","))"
         )
+        noteOpenCodeCatalogRevisionAfterFetch()
+    }
+
+    func refreshRuntimeMetadataSequential() async {
+        try? await listModels(refreshProviders: true)
+        try? await fetchRuntimeCatalog()
+    }
+
+    func noteOpenCodeCatalogRevisionAfterFetch() {
+        let revision = openCodeRuntimeDetails?.catalogRevision?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let revision, !revision.isEmpty else {
+            return
+        }
+        guard revision != lastOpenCodeCatalogRevision else {
+            return
+        }
+        if lastOpenCodeCatalogRevision != nil {
+            debugRuntimeLog(
+                "ios_catalog_revision_changed revision=\(revision) previous=\(lastOpenCodeCatalogRevision ?? "nil")"
+            )
+        }
+        lastOpenCodeCatalogRevision = revision
     }
 
     func supportsStructuredSkillInput(forThreadId threadId: String?) -> Bool {

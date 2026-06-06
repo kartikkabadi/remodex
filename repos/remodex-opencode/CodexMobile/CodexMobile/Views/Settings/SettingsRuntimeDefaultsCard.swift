@@ -98,10 +98,7 @@ struct SettingsRuntimeDefaultsCard: View {
         }
         .task {
             guard codex.isConnected, codex.isInitialized else { return }
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { try? await codex.fetchRuntimeCatalog() }
-                group.addTask { try? await codex.listModels(refreshProviders: true) }
-            }
+            await codex.refreshRuntimeMetadataSequential()
         }
     }
 

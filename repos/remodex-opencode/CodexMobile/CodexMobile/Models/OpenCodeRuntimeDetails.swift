@@ -55,5 +55,6 @@ struct OpenCodeRuntimeDetails: Codable, Hashable, Sendable {
     let providerDiscoveryReasonCode: String?
     let authDiscoveryReasonCode: String? = nil
     let providerInventoryPartial: Bool? = nil
+    let catalogRevision: String? = nil
     let providers: [OpenCodeCatalogProvider]? = nil
 }

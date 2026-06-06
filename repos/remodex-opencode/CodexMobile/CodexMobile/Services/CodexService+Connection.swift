@@ -160,6 +160,9 @@ extension CodexService {
         runtimeOptionRefreshTask?.cancel()
         runtimeOptionRefreshTask = nil
         runtimeOptionRefreshToken = nil
+        catalogRefetchDebounceTask?.cancel()
+        catalogRefetchDebounceTask = nil
+        lastOpenCodeCatalogRevision = nil
         clearPendingApprovals()
         finalizeAllStreamingState()
         messagePersistenceDebounceTask?.cancel()
@@ -650,10 +653,7 @@ extension CodexService {
                 self.pendingRuntimeOptionRefresh = true
                 return
             }
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { try? await self.fetchRuntimeCatalog() }
-                group.addTask { try? await self.listModels() }
-            }
+            await self.refreshRuntimeMetadataSequential()
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false
             }
@@ -690,6 +690,9 @@ extension CodexService {
         runtimeOptionRefreshTask?.cancel()
         runtimeOptionRefreshTask = nil
         runtimeOptionRefreshToken = nil
+        catalogRefetchDebounceTask?.cancel()
+        catalogRefetchDebounceTask = nil
+        lastOpenCodeCatalogRevision = nil
         modelsErrorMessage = nil
         assistantCompletionFingerprintByThread.removeAll()
         assistantCompletionFingerprintByTurn.removeAll()

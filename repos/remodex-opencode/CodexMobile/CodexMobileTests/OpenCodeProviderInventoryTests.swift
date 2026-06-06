@@ -55,6 +55,28 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
 
     // Catalog resolver stub tests (RP-BRAND-5): unit coverage for fallback + known ids.
     // Exercises CatalogLogoResolver + assetName via catalog.providers shape from BRAND-1.
+    func testDecodesOpenCodeRuntimeDetailsWithCatalogRevision() throws {
+        let json = """
+        {
+          "enabled": true,
+          "catalogRevision": "fp:1a2b3c4d",
+          "providerInventory": [
+            {
+              "id": "opencode",
+              "displayName": "OpenCode",
+              "connectedOnServe": true,
+              "authenticated": true,
+              "modelCount": 2
+            }
+          ]
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let details = try JSONDecoder().decode(OpenCodeRuntimeDetails.self, from: data)
+        XCTAssertEqual(details.catalogRevision, "fp:1a2b3c4d")
+        XCTAssertEqual(details.providerInventory?.count, 1)
+    }
+
     func testDecodesOpenCodeRuntimeDetailsWithCatalogProvidersForLogos() throws {
         let json = """
         {

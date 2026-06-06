@@ -309,6 +309,9 @@ extension CodexService {
         case "terminal/event":
             handleTerminalEvent(paramsObject)
 
+        case "runtime/catalog/updated":
+            handleRuntimeCatalogUpdated(paramsObject)
+
         default:
             if method.hasPrefix("codex/event/"),
                handleLegacyCodexNamedEvent(method: method, paramsObject: paramsObject) {
@@ -722,6 +725,33 @@ extension CodexService {
             notifyRunCompletionIfNeeded(threadId: threadId, turnId: resolvedTurnID, result: .failed)
         } else {
             finalizeAllStreamingState()
+        }
+    }
+
+    private func handleRuntimeCatalogUpdated(_ paramsObject: IncomingParamsObject?) {
+        let revision = paramsObject?["catalogRevision"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let revision, !revision.isEmpty else {
+            return
+        }
+        guard revision != lastOpenCodeCatalogRevision else {
+            return
+        }
+
+        debugRuntimeLog(
+            "ios_catalog_revision_changed revision=\(revision) previous=\(lastOpenCodeCatalogRevision ?? "nil")"
+        )
+        scheduleDebouncedCatalogRefetch()
+    }
+
+    private func scheduleDebouncedCatalogRefetch() {
+        catalogRefetchDebounceTask?.cancel()
+        catalogRefetchDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            defer { self.catalogRefetchDebounceTask = nil }
+            guard self.isConnected, self.isInitialized else { return }
+            await self.refreshRuntimeMetadataSequential()
         }
     }
 
