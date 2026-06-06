@@ -223,9 +223,14 @@ final class TurnViewModel {
     var isFileAutocompleteLoading = false
     var fileAutocompleteQuery = ""
     var skillAutocompleteItems: [CodexSkillMetadata] = []
+    var skillFullListItems: [CodexSkillMetadata] = []
     var isSkillAutocompleteVisible = false
     var isSkillAutocompleteLoading = false
     var skillAutocompleteQuery = ""
+
+    var skillTotalCount: Int {
+        skillFullListItems.count
+    }
     var pluginAutocompleteItems: [CodexPluginMetadata] = []
     var isPluginAutocompleteVisible = false
     var isPluginAutocompleteLoading = false
@@ -377,7 +382,7 @@ final class TurnViewModel {
     @ObservationIgnored var pendingGitBranchOperation: GitBranchUserOperation?
     @ObservationIgnored var pendingGitWorktreeOpenHandler: ((GitCreateWorktreeResult) -> Void)?
     @ObservationIgnored var pendingManagedGitWorktreeOpenHandler: ((GitCreateManagedWorktreeResult) -> Void)?
-    @ObservationIgnored private var cachedSkillSearchIndexByRoot: [String: [TurnSkillSearchIndexEntry]] = [:]
+    @ObservationIgnored private var cachedSkillSearchIndexByRoot: [String: TurnSkillSearchIndexCacheEntry] = [:]
     @ObservationIgnored private var cachedPluginSearchIndexByRoot: [String: [TurnPluginSearchIndexEntry]] = [:]
     @ObservationIgnored var unsupportedSkillsAutocompleteRoots: Set<String> = []
     @ObservationIgnored var unsupportedPluginsAutocompleteRoots: Set<String> = []
@@ -838,11 +843,15 @@ final class TurnViewModel {
         let hasCachedSkillIndex = cachedSkillSearchIndexByRoot[cacheKey] != nil
         let rootIsUnsupported = unsupportedSkillsAutocompleteRoots.contains(cacheKey)
         isSkillAutocompleteLoading = !hasCachedSkillIndex && !rootIsUnsupported
-        if let cachedIndex = cachedSkillSearchIndexByRoot[cacheKey] {
-            skillAutocompleteItems = filteredSkillAutocompleteItems(for: query, indexedSkills: cachedIndex)
+        if let cachedIndex = cachedSkillSearchIndexByRoot[cacheKey]?.indexedSkills {
+            applySkillAutocompleteResults(
+                for: query,
+                indexedSkills: cachedIndex
+            )
             isSkillAutocompleteVisible = !skillAutocompleteItems.isEmpty
         } else {
             skillAutocompleteItems = []
+            skillFullListItems = []
             isSkillAutocompleteVisible = isSkillAutocompleteLoading
         }
         skillAutocompleteDebounceTask?.cancel()
@@ -865,30 +874,37 @@ final class TurnViewModel {
                    cachedSkillSearchIndexByRoot[cacheKey] == nil {
                     guard self.skillAutocompleteQuery == expectedQuery else { return }
                     self.skillAutocompleteItems = []
+                    self.skillFullListItems = []
                     self.isSkillAutocompleteLoading = false
                     self.isSkillAutocompleteVisible = false
                     return
                 }
 
+                let listedSkills = try await codex.listSkills(
+                    cwds: normalizedRoot.map { [$0] },
+                    forceReload: false
+                )
+                guard !Task.isCancelled else { return }
+
+                let incomingSignature = Self.providersSignature(for: listedSkills)
                 let indexedSkills: [TurnSkillSearchIndexEntry]
-                if let cachedIndex = self.cachedSkillSearchIndexByRoot[cacheKey] {
-                    indexedSkills = cachedIndex
+                if let cachedEntry = self.cachedSkillSearchIndexByRoot[cacheKey],
+                   cachedEntry.providersSignature == incomingSignature {
+                    indexedSkills = cachedEntry.indexedSkills
                 } else {
-                    let listedSkills = try await codex.listSkills(
-                        cwds: normalizedRoot.map { [$0] },
-                        forceReload: false
-                    )
-                    guard !Task.isCancelled else { return }
                     indexedSkills = listedSkills
                         .filter { $0.enabled }
                         .map(TurnSkillSearchIndexEntry.init(skill:))
-                    self.cachedSkillSearchIndexByRoot[cacheKey] = indexedSkills
+                    self.cachedSkillSearchIndexByRoot[cacheKey] = TurnSkillSearchIndexCacheEntry(
+                        indexedSkills: indexedSkills,
+                        providersSignature: incomingSignature
+                    )
                 }
 
                 guard !Task.isCancelled else { return }
                 guard self.skillAutocompleteQuery == expectedQuery else { return }
 
-                self.skillAutocompleteItems = self.filteredSkillAutocompleteItems(
+                self.applySkillAutocompleteResults(
                     for: expectedQuery,
                     indexedSkills: indexedSkills
                 )
@@ -902,6 +918,7 @@ final class TurnViewModel {
                 }
 
                 self.skillAutocompleteItems = []
+                self.skillFullListItems = []
                 self.isSkillAutocompleteLoading = false
                 self.isSkillAutocompleteVisible = false
             }
@@ -1147,7 +1164,7 @@ final class TurnViewModel {
 
         let cacheKey = autocompleteCacheKey(forRoot: normalizedAutocompleteRoot(for: thread))
         let skillNames = Set(
-            (cachedSkillSearchIndexByRoot[cacheKey] ?? []).map { entry in
+            (cachedSkillSearchIndexByRoot[cacheKey]?.indexedSkills ?? []).map { entry in
                 entry.skill.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             }.filter { !$0.isEmpty }
         )
@@ -2667,16 +2684,33 @@ final class TurnViewModel {
             || message.contains("code -32601")
     }
 
+    private static func providersSignature(for skills: [CodexSkillMetadata]) -> String {
+        skills
+            .map { "\($0.name):\($0.providerIds.joined(separator: ","))" }
+            .sorted()
+            .joined(separator: "|")
+    }
+
+    private func applySkillAutocompleteResults(
+        for query: String,
+        indexedSkills: [TurnSkillSearchIndexEntry]
+    ) {
+        let fullList = filteredSkillFullListItems(for: query, indexedSkills: indexedSkills)
+        skillFullListItems = fullList
+        skillAutocompleteItems = Array(fullList.prefix(maxSkillAutocompleteItems))
+    }
+
     // Filters pre-indexed skills using a single normalized search blob to reduce per-keystroke work.
-    private func filteredSkillAutocompleteItems(
+    private func filteredSkillFullListItems(
         for query: String,
         indexedSkills: [TurnSkillSearchIndexEntry]
     ) -> [CodexSkillMetadata] {
         let needle = query.lowercased()
-        let filtered = indexedSkills.lazy
-            .filter { needle.isEmpty || $0.searchBlob.contains(needle) }
-            .map(\.skill)
-        return Array(filtered.prefix(maxSkillAutocompleteItems))
+        return Array(
+            indexedSkills.lazy
+                .filter { needle.isEmpty || $0.searchBlob.contains(needle) }
+                .map(\.skill)
+        )
     }
 
     private func filteredPluginAutocompleteItems(
@@ -2891,6 +2925,7 @@ final class TurnViewModel {
         skillAutocompleteDebounceTask?.cancel()
         skillAutocompleteDebounceTask = nil
         skillAutocompleteItems = []
+        skillFullListItems = []
         isSkillAutocompleteVisible = false
         isSkillAutocompleteLoading = false
         skillAutocompleteQuery = ""
@@ -3579,6 +3614,11 @@ struct TurnTrailingPluginAutocompleteToken: Equatable {
 private struct TurnTrailingToken: Equatable {
     let query: String
     let tokenRange: Range<String.Index>
+}
+
+private struct TurnSkillSearchIndexCacheEntry: Equatable {
+    let indexedSkills: [TurnSkillSearchIndexEntry]
+    let providersSignature: String
 }
 
 private struct TurnSkillSearchIndexEntry: Equatable {

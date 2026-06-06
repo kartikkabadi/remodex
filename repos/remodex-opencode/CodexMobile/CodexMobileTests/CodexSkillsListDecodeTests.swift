@@ -147,6 +147,31 @@ final class CodexSkillsListDecodeTests: XCTestCase {
         XCTAssertEqual(skills?.first?.provider, nil)
     }
 
+    func testDecodeSkillsListParsesProvidersArrayFromBridgeMerge() {
+        let service = makeService()
+        let result: JSONValue = .object([
+            "skills": .array([
+                .object([
+                    "name": .string("review"),
+                    "description": .string("Review recent changes"),
+                    "path": .string("/Users/me/work/repo/.agents/skills/review/SKILL.md"),
+                    "scope": .string("project"),
+                    "provider": .string("codex"),
+                    "providers": .array([.string("codex"), .string("opencode")]),
+                    "enabled": .bool(true),
+                ]),
+            ]),
+        ])
+
+        let skills = service.decodeSkillMetadata(from: result)
+
+        XCTAssertEqual(skills?.count, 1)
+        XCTAssertEqual(skills?.first?.name, "review")
+        XCTAssertEqual(skills?.first?.provider, "codex")
+        XCTAssertEqual(skills?.first?.providers, ["codex", "opencode"])
+        XCTAssertEqual(skills?.first?.providerIds, ["codex", "opencode"])
+    }
+
     func testDecodeSkillsListParsesProviderTagFromBridgeUnion() {
         let service = makeService()
         let result: JSONValue = .object([

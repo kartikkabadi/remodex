@@ -8,6 +8,7 @@ import SwiftUI
 
 struct SkillAutocompletePanel: View {
     let items: [CodexSkillMetadata]
+    let totalCount: Int
     let isLoading: Bool
     let query: String
     let onSelect: (CodexSkillMetadata) -> Void
@@ -81,7 +82,7 @@ struct SkillAutocompletePanel: View {
                         Text("Skills")
                             .font(AppFont.subheadline(weight: .semibold))
                             .foregroundStyle(.primary)
-                        Text("(\(items.count))")
+                        Text("(\(totalCount))")
                             .font(AppFont.subheadline(weight: .regular))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -150,7 +151,11 @@ struct SkillAutocompletePanel: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    RuntimeProviderLogoView(provider: skill.provider ?? "codex", size: 14)
+                    HStack(spacing: 4) {
+                        ForEach(skill.providerIds, id: \.self) { providerID in
+                            RuntimeProviderLogoView(provider: providerID, size: 14)
+                        }
+                    }
 
                     Text(SkillDisplayNameFormatter.displayName(for: skill.name))
                         .font(AppFont.subheadline(weight: .semibold))
@@ -215,7 +220,8 @@ struct SkillAutocompletePanel: View {
                     description: "Review recent diffs and suggest improvements",
                     path: "/repo/.agents/skills/review/SKILL.md",
                     scope: "project",
-                    provider: "opencode",
+                    provider: "codex",
+                    providers: ["codex", "opencode"],
                     enabled: true
                 ),
                 CodexSkillMetadata(
@@ -235,6 +241,7 @@ struct SkillAutocompletePanel: View {
                     enabled: true
                 ),
             ],
+            totalCount: 3,
             isLoading: false,
             query: "",
             onSelect: { _ in }
@@ -243,6 +250,7 @@ struct SkillAutocompletePanel: View {
 
         SkillAutocompletePanel(
             items: [],
+            totalCount: 0,
             isLoading: false,
             query: "foo",
             onSelect: { _ in }
@@ -256,6 +264,7 @@ struct SkillAutocompletePanel: View {
 #Preview("V2 loading state") {
     SkillAutocompletePanel(
         items: [],
+        totalCount: 0,
         isLoading: true,
         query: "re",
         onSelect: { _ in }

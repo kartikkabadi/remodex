@@ -775,13 +775,9 @@ extension CodexService {
             throw CodexServiceError.invalidResponse("skills/list response missing result.data[].skills")
         }
 
-        let dedupedByName = Dictionary(grouping: decodedSkills) { $0.normalizedName }
-            .compactMap { _, bucket -> CodexSkillMetadata? in
-                bucket.first(where: { $0.enabled }) ?? bucket.first
-            }
+        return decodedSkills
             .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return dedupedByName
     }
 
     // Loads Codex app-server plugins and returns entries usable as `@plugin` mentions.

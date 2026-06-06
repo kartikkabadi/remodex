@@ -121,6 +121,8 @@ struct TurnComposerHostView: View {
             isFileAutocompleteLoading: viewModel.isFileAutocompleteLoading,
             fileAutocompleteQuery: viewModel.fileAutocompleteQuery,
             skillAutocompleteItems: viewModel.skillAutocompleteItems,
+            skillFullListItems: viewModel.skillFullListItems,
+            skillTotalCount: viewModel.skillTotalCount,
             isSkillAutocompleteVisible: viewModel.isSkillAutocompleteVisible,
             isSkillAutocompleteLoading: viewModel.isSkillAutocompleteLoading,
             skillAutocompleteQuery: viewModel.skillAutocompleteQuery,
@@ -390,7 +392,7 @@ struct TurnComposerHostView: View {
         )
         .sheet(isPresented: $isShowingAllSkills) {
             BridgeSkillsFullListSheet(
-                items: viewModel.skillAutocompleteItems,
+                items: viewModel.skillFullListItems,
                 onSelect: { skill in
                     isShowingAllSkills = false
                     viewModel.onSelectSkillAutocomplete(skill)

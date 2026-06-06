@@ -42,10 +42,14 @@ struct BridgeSkillsFullListSheet: View {
                                     } label: {
                                         VStack(alignment: .leading, spacing: 4) {
                                             HStack(spacing: 8) {
-                                                RuntimeProviderLogoView(
-                                                    provider: skill.provider ?? "codex",
-                                                    size: 14
-                                                )
+                                                HStack(spacing: 4) {
+                                                    ForEach(skill.providerIds, id: \.self) { providerID in
+                                                        RuntimeProviderLogoView(
+                                                            provider: providerID,
+                                                            size: 14
+                                                        )
+                                                    }
+                                                }
 
                                                 Text(SkillDisplayNameFormatter.displayName(for: skill.name))
                                                     .font(AppFont.subheadline(weight: .semibold))

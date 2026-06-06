@@ -353,6 +353,7 @@ private struct TurnComposerAutocompletePanels: View {
                 if state.supportsSkillAutocomplete {
                     SkillAutocompletePanel(
                         items: state.skillAutocompleteItems,
+                        totalCount: state.skillTotalCount,
                         isLoading: state.isSkillAutocompleteLoading,
                         query: state.skillAutocompleteQuery,
                         onSelect: onSelectSkillAutocomplete,
@@ -693,6 +694,8 @@ private struct ComposerPreviewContent: View {
                 isFileAutocompleteLoading: false,
                 fileAutocompleteQuery: "",
                 skillAutocompleteItems: [],
+                skillFullListItems: [],
+                skillTotalCount: 0,
                 isSkillAutocompleteVisible: false,
                 isSkillAutocompleteLoading: false,
                 skillAutocompleteQuery: "",

@@ -22,6 +22,8 @@ struct TurnComposerAutocompleteState {
     let isFileAutocompleteLoading: Bool
     let fileAutocompleteQuery: String
     let skillAutocompleteItems: [CodexSkillMetadata]
+    let skillFullListItems: [CodexSkillMetadata]
+    let skillTotalCount: Int
     let isSkillAutocompleteVisible: Bool
     let isSkillAutocompleteLoading: Bool
     let skillAutocompleteQuery: String
