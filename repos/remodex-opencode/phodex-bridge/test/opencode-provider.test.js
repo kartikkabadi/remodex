@@ -796,7 +796,7 @@ test("duplicate turn/completed from session.idle is ignored after first completi
   const provider = makeProvider({
     send: (raw) => {
       const message = JSON.parse(raw);
-      emitted.push(message.method);
+      emitted.push(message);
     },
     clientFactory: () => ({
       ...fakeClient(),
@@ -824,22 +824,29 @@ test("duplicate turn/completed from session.idle is ignored after first completi
     method: "thread/start",
     params: { title: "Idle dedupe" },
   });
-  await provider.handleRequest({
+  const turn = await provider.handleRequest({
     id: 2,
     method: "turn/start",
     params: { threadId: start.thread.id, input: "hello" },
   });
 
+  const bridgeItemId = `opencode-agent-${turn.turnId}`;
   const deadline = Date.now() + 2000;
-  let completedCount = 0;
+  let turnCompletedCount = 0;
+  let itemCompletedCount = 0;
   while (Date.now() < deadline) {
-    completedCount = emitted.filter((method) => method === "turn/completed").length;
-    if (completedCount >= 1) {
+    turnCompletedCount = emitted.filter((message) => message.method === "turn/completed").length;
+    itemCompletedCount = emitted.filter((message) => message.method === "item/completed").length;
+    if (turnCompletedCount >= 1 && itemCompletedCount >= 1) {
       break;
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  assert.equal(completedCount, 1);
+  assert.equal(turnCompletedCount, 1);
+  assert.equal(itemCompletedCount, 1);
+  const itemCompleted = emitted.find((message) => message.method === "item/completed");
+  assert.equal(itemCompleted.params.itemId, bridgeItemId);
+  assert.equal(itemCompleted.params.item.id, bridgeItemId);
 });
 
 function createProbeMockClient({ connected = [], auth = {} } = {}) {
@@ -1644,6 +1651,33 @@ function collectItemCompleted(messages) {
   return messages.filter((entry) => entry.method === "item/completed");
 }
 
+function captureTelemetryLogs(eventName) {
+  const events = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    for (const arg of args) {
+      if (typeof arg !== "string") {
+        continue;
+      }
+      try {
+        const payload = JSON.parse(arg);
+        if (payload.event === eventName) {
+          events.push(payload);
+        }
+      } catch {
+        // ignore non-JSON log lines
+      }
+    }
+    originalLog(...args);
+  };
+  return {
+    events,
+    restore() {
+      console.log = originalLog;
+    },
+  };
+}
+
 async function waitForItemCompleted(messages, { min = 1, timeoutMs = 2000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1665,9 +1699,9 @@ const itemCompletedIdempotencyScenarios = [
     hangPrompt: false,
   },
   {
-    name: "sse foreign itemId hydrate and completeTurn",
+    name: "turn/completed hydrates without prior SSE item/completed",
     foreignItemId: "opencode-part-foreign-abc",
-    fireSseItemCompleted: true,
+    fireSseItemCompleted: false,
     fireTurnCompleted: true,
     promptResolves: true,
     hangPrompt: false,
@@ -1778,6 +1812,76 @@ for (const scenario of itemCompletedIdempotencyScenarios) {
     }
   });
 }
+
+test("duplicate SSE item/completed logs opencode_item_completed_skipped telemetry", async () => {
+  const messages = [];
+  let subscribeHandler = null;
+  const skippedTelemetry = captureTelemetryLogs("opencode_item_completed_skipped");
+  try {
+    const provider = makeProvider({
+      send: (raw) => messages.push(JSON.parse(raw)),
+      env: {
+        REMODEX_ENABLE_OPENCODE: "1",
+        REMODEX_TEST: "1",
+        REMODEX_OPENCODE_TURN_WATCHDOG_MS: "300000",
+      },
+      clientFactory: async () => ({
+        ...fakeClient(),
+        subscribeToEvents: (handler) => {
+          subscribeHandler = handler;
+          setImmediate(() => {
+            handler("item/completed", {
+              itemId: "opencode-part-foreign-dup",
+              message: ASSISTANT_REPLY,
+              assistantPhase: "final_answer",
+              item: {
+                id: "opencode-part-foreign-dup",
+                type: "agentMessage",
+                phase: "final",
+                text: ASSISTANT_REPLY,
+              },
+            });
+          });
+          return () => {};
+        },
+        getMessages: async () => [],
+        prompt: async () => new Promise(() => {}),
+      }),
+    });
+
+    const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+    const turn = await provider.handleRequest({
+      id: 2,
+      method: "turn/start",
+      params: { threadId: start.thread.id, input: "hey" },
+    });
+
+    const subscribeDeadline = Date.now() + 500;
+    while (!subscribeHandler && Date.now() < subscribeDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(subscribeHandler, "subscribeToEvents should register before SSE replay");
+
+    const completed = await waitForItemCompleted(messages, { min: 1, timeoutMs: 1500 });
+    assert.equal(completed.length, 1);
+    assert.equal(completed[0].params.itemId, `opencode-agent-${turn.turnId}`);
+
+    subscribeHandler("item/completed", {
+      itemId: "opencode-part-foreign-dup",
+      message: ASSISTANT_REPLY,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(collectItemCompleted(messages).length, 1);
+    assert.equal(skippedTelemetry.events.length, 1);
+    assert.equal(skippedTelemetry.events[0].source, "sse");
+    assert.equal(skippedTelemetry.events[0].reason, "already_finalized");
+    assert.equal(skippedTelemetry.events[0].threadId, start.thread.id);
+    assert.equal(skippedTelemetry.events[0].turnId, turn.turnId);
+  } finally {
+    skippedTelemetry.restore();
+  }
+});
 
 test("sse foreign itemId is normalized before hydrate and completeTurn paths run", async () => {
   const messages = [];

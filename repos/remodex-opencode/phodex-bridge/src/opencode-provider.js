@@ -1279,7 +1279,7 @@ function createOpenCodeProvider({
       });
     }
 
-    emitAssistantCompletedOnce(
+    const completed = emitAssistantCompletedOnce(
       active,
       {
         message: text,
@@ -1294,6 +1294,9 @@ function createOpenCodeProvider({
       },
       "hydrate",
     );
+    if (!completed) {
+      return false;
+    }
 
     console.log(
       JSON.stringify({
