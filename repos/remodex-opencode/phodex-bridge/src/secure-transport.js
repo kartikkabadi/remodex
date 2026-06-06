@@ -46,6 +46,7 @@ const SYSTEM_OUTBOUND_METHODS = new Set([
   "thread/status/changed",
   "thread/tokenUsage/updated",
   "runtime/catalog/updated",
+  "runtime/auth/error",
   "runtime/warning",
   "account/rateLimits/updated",
 ]);

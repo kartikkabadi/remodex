@@ -46,6 +46,8 @@ const {
 const { isOpenCodeHandoffEnabled } = require("./opencode-handoff");
 const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
 const { resolveOpenCodeVariantForPrompt } = require("./opencode-variant-resolve");
+const { createOpenCodeAuthErrorNotifier } = require("./opencode-auth-error-handler");
+const { mapOpenCodeSessionToContextUsage } = require("./opencode-usage-mapper");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -145,6 +147,10 @@ function createOpenCodeProvider({
   const COMMAND_EXECUTE_DEDUPE_TTL_MS = 5000;
   /** @type {Map<string, number>} */
   const commandExecuteDedupeByKey = new Map();
+  const authErrorNotifier = createOpenCodeAuthErrorNotifier({
+    sendApplicationMessage,
+    logPrefix,
+  });
 
   function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
     const tid = readString(threadId);
@@ -1540,6 +1546,12 @@ function createOpenCodeProvider({
           if (eventTurnId && eventTurnId !== active.turn.id) {
             return;
           }
+          authErrorNotifier.inspectTurnFailure({
+            threadId: active.thread.id,
+            turnId: active.turn.id,
+            message: readString(params.message),
+            error: params.error,
+          });
           completeTurn({
             status: "failed",
             errorMessage: readString(params.message) || "OpenCode session error",
@@ -1547,6 +1559,15 @@ function createOpenCodeProvider({
             source: "turn_failed",
           });
           clearWatchdog();
+          return;
+        }
+
+        if (method === "runtime/auth/error") {
+          authErrorNotifier.notifyAuthError({
+            ...params,
+            threadId: active.thread.id,
+            turnId: active.turn.id,
+          });
           return;
         }
 
@@ -1727,6 +1748,17 @@ function createOpenCodeProvider({
       status,
       turn: { id: turnId, status, error: errorMessage ? { message: errorMessage } : undefined },
     });
+
+    if (status !== "failed") {
+      void pushThreadUsageUpdate(active.thread);
+    } else {
+      authErrorNotifier.inspectTurnFailure({
+        threadId: active.thread.id,
+        turnId,
+        message: errorMessage,
+        error: active.turn.error,
+      });
+    }
 
     resetIdleTimer();
     return true;
@@ -2256,6 +2288,61 @@ function createOpenCodeProvider({
     return client.selectTuiSession(normalizedSessionId);
   }
 
+  function resolveModelContextWindow(modelId) {
+    const normalizedModelId = readString(modelId);
+    if (!normalizedModelId) {
+      return 0;
+    }
+    const catalogModel = lastListedModels.find(
+      (entry) => readString(entry.id || entry.model) === normalizedModelId,
+    );
+    return Number(catalogModel?.contextWindow || catalogModel?.context_window) || 0;
+  }
+
+  async function discoverProjects({ directory } = {}) {
+    await ensureStarted();
+    if (!client || typeof client.listProjects !== "function") {
+      return [];
+    }
+    return client.listProjects({ directory });
+  }
+
+  async function getUsageStatsForThread(threadId) {
+    const thread = await requireThread(threadId);
+    const sessionId = readString(thread.sessionId) || sessions.get(thread.id);
+    if (!sessionId) {
+      return { sessionId: null, usage: null };
+    }
+
+    await ensureStarted();
+    const session = await client.getSession(sessionId, { directory: thread.cwd });
+    const usage = mapOpenCodeSessionToContextUsage(session, {
+      tokenLimit: resolveModelContextWindow(thread.model),
+    });
+    return { sessionId, usage };
+  }
+
+  async function pushThreadUsageUpdate(thread) {
+    if (!thread?.id) {
+      return;
+    }
+    try {
+      const usageResult = await getUsageStatsForThread(thread.id);
+      if (!usageResult?.usage) {
+        return;
+      }
+      emit("thread/tokenUsage/updated", {
+        threadId: thread.id,
+        usage: usageResult.usage,
+        source: "opencode_session",
+      });
+    } catch (error) {
+      console.warn(
+        `${logPrefix} OpenCode usage push failed for ${thread.id}: ${error?.message || error}`,
+      );
+    }
+  }
+
   return {
     id: OPENCODE_PROVIDER_ID,
     ownsThread,
@@ -2275,6 +2362,9 @@ function createOpenCodeProvider({
     getLastCatalogAgents,
     getHandoffContext,
     selectTuiSession,
+    discoverProjects,
+    getUsageStatsForThread,
+    pushThreadUsageUpdate,
   };
 }
 
