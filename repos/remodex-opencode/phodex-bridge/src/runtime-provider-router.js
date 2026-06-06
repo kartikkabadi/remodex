@@ -302,7 +302,10 @@ function computeCatalogFingerprint(runtimeStatus) {
     runtimeStatus?.providerInventoryPartial ? "partial:1" : "partial:0",
     runtimeStatus?.authDiscoveryReasonCode ?? "unknown",
     ...inventory
-      .map((provider) => `${provider.id}:${provider.authenticated ? 1 : 0}:${provider.connected ? 1 : 0}`)
+      .map((provider) => {
+        const connectedOnServe = provider.connectedOnServe ?? provider.connected;
+        return `${provider.id}:${provider.authenticated ? 1 : 0}:${connectedOnServe ? 1 : 0}`;
+      })
       .sort(),
   ].join("|");
 }

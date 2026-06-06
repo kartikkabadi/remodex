@@ -11,6 +11,7 @@ const {
   MODEL_LIST_PROVIDER_BUDGET_MS,
   buildCatalogOpenCodeRuntime,
   capOpenCodeModelsForMobileList,
+  computeCatalogFingerprint,
   computeCatalogRevision,
   createRuntimeProviderRouter,
   mergeModelListResult,
@@ -1697,6 +1698,29 @@ test("identical subsequent model/list does not push runtime/catalog/updated agai
 
   const catalogUpdates = runtimeMessages.filter((message) => message.method === "runtime/catalog/updated");
   assert.equal(catalogUpdates.length, 1);
+});
+
+test("computeCatalogFingerprint changes when only connectedOnServe flips", () => {
+  const before = computeCatalogFingerprint({
+    providerInventory: [{ id: "openai", authenticated: true, connectedOnServe: false }],
+    authDiscoveryReasonCode: "ok",
+    providerInventoryPartial: false,
+  });
+  const after = computeCatalogFingerprint({
+    providerInventory: [{ id: "openai", authenticated: true, connectedOnServe: true }],
+    authDiscoveryReasonCode: "ok",
+    providerInventoryPartial: false,
+  });
+  assert.notEqual(before, after);
+  assert.notEqual(computeCatalogRevision({
+    providerInventory: [{ id: "openai", authenticated: true, connectedOnServe: false }],
+    authDiscoveryReasonCode: "ok",
+    providerInventoryPartial: false,
+  }), computeCatalogRevision({
+    providerInventory: [{ id: "openai", authenticated: true, connectedOnServe: true }],
+    authDiscoveryReasonCode: "ok",
+    providerInventoryPartial: false,
+  }));
 });
 
 test("auth inventory change via model/list pushes runtime/catalog/updated once", async () => {
