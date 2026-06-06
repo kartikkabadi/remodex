@@ -44,7 +44,7 @@ Additional confirmed facts:
 
 - **Push disabled:** L68 `[remodex] push notifications disabled: no push service URL configured` (`push-notification-service-client.js` L140; `pushServiceUrl` empty).
 - **Mac path healthy:** L73 `[remodex]:server OpenCode serve ready`; `opencode_turn_prompt` from `opencode-provider.js` / `opencode-client.js`.
-- **Thread ID** (user report): `opencode-thread-<REDACTED>` @ 2026-06-03 20:15:30 local.
+- **Thread ID** (user report): `opencode-thread-<REDACTED>` @ `<TIMESTAMP>` local.
 - **iOS thinking clearance:** `turn/completed` via `handleTurnCompleted` → `markTurnCompleted`. `thread/status` idle guarded when `protectedRunningFallbackThreadIDs` active (`CodexService+Incoming.swift` L749–754).
 - **Zen logo:** `ComposerBottomBar.swift` uses `modelProvider` (`"opencode"`); `resolveLogoProviderId` only on inventory, not `buildModelFromAny`.
 
@@ -400,7 +400,7 @@ cd ../relay && npm test # after PR1–2
 
 | # | Resolution |
 |---|------------|
-| 1 | **Repro uses manual TCP websocket** (`prefersDirectRelayTransport` for `<LAN-IP-OTHER>`). PR3 ping-before-text is on the critical path. |
+| 1 | **Repro uses manual TCP websocket** (`prefersDirectRelayTransport` for `<LAN-IP>`). PR3 ping-before-text is on the critical path. |
 | 2 | **First drop = relay heartbeat terminate** (L786–787); **later drops = reconnect churn** without heartbeat (L791, L795). PR1 must log mobile `close` code/reason. |
 | 3 | **Add `threadId`, `turnId`, `sessionId` to `opencode_turn_prompt`** in `opencode-client.js` `prompt()` via provider call site (`opencode-provider.js` `executeTurn`). |
 

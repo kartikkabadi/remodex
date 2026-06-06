@@ -1,5 +1,24 @@
 # Agent artifacts (local only; never commit)
 .sisyphus/
+.cursor/
+.commandcode/
+
+# macOS / deps (belt-and-suspenders at meta level)
+.DS_Store
+**/.DS_Store
+node_modules/
+**/node_modules/
+
+# Secrets (never commit)
+**/.env
+**/.env.*
+!**/.env.example
+**/PrivateOverrides.xcconfig
+**/private-defaults.json
+
+# Accidental minified bundles
+**/deeplinks-*.js
+**/main-*.js
 
 # Embedded local checkout (full tree on branch wip/local-2026-06-03)
 repos/remodex/

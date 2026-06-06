@@ -1,0 +1,9 @@
+[submodule "repos/opencode"]
+	path = repos/opencode
+	url = https://github.com/anomalyco/opencode.git
+[submodule "repos/dpcode"]
+	path = repos/dpcode
+	url = https://github.com/Emanuele-web04/dpcode.git
+[submodule "repos/litter"]
+	path = repos/litter
+	url = https://github.com/dnakov/litter.git

@@ -10,3 +10,6 @@
 // REMODEX_MENUBAR_BUNDLE_ID = com.you.remodex.dev.RemodexMenuBar
 
 PHODEX_DEFAULT_RELAY_URL =
+
+// Optional: RevenueCat public API key for local builds.
+// REVENUECAT_PUBLIC_API_KEY = your_revenuecat_public_key
