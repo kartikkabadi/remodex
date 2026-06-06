@@ -1138,21 +1138,73 @@ function resolveSkillsListCwds(params = {}) {
   return [...new Set(cwds)];
 }
 
-function dedupeSkillsByName(skills) {
-  const byName = new Map();
+function readSkillProvider(skill) {
+  return readString(skill?.provider) || CODEX_PROVIDER_ID;
+}
+
+function resolvePrimaryProvider(providerIds) {
+  const ids = [...new Set(providerIds.map((id) => readString(id)).filter(Boolean))].sort();
+  if (ids.includes(CODEX_PROVIDER_ID)) {
+    return CODEX_PROVIDER_ID;
+  }
+  if (ids.includes(OPENCODE_PROVIDER_ID)) {
+    return OPENCODE_PROVIDER_ID;
+  }
+  return ids[0] || CODEX_PROVIDER_ID;
+}
+
+function shouldPreferSkillRecord(existing, incoming) {
+  if (incoming.enabled !== false && existing.enabled === false) {
+    return true;
+  }
+  if (existing.enabled !== false && incoming.enabled === false) {
+    return false;
+  }
+  const existingProvider = readSkillProvider(existing);
+  const incomingProvider = readSkillProvider(incoming);
+  if (incomingProvider === CODEX_PROVIDER_ID && existingProvider !== CODEX_PROVIDER_ID) {
+    return true;
+  }
+  return false;
+}
+
+function mergeSkillsAcrossProviders(skills) {
+  const byFoldedName = new Map();
   for (const skill of skills) {
     const name = readString(skill?.name);
     if (!name) {
       continue;
     }
-    const existing = byName.get(name);
-    if (!existing || (skill.enabled !== false && existing.enabled === false)) {
-      byName.set(name, skill);
+    const key = name.trim().toLowerCase();
+    const providerId = readSkillProvider(skill);
+    const existing = byFoldedName.get(key);
+    if (!existing) {
+      byFoldedName.set(key, {
+        skill: { ...skill, name: name.trim() },
+        providers: new Set([providerId]),
+      });
+      continue;
+    }
+    existing.providers.add(providerId);
+    if (shouldPreferSkillRecord(existing.skill, skill)) {
+      existing.skill = { ...skill, name: name.trim() };
     }
   }
-  return [...byName.values()].sort((a, b) =>
-    readString(a.name).localeCompare(readString(b.name), undefined, { sensitivity: "base" }),
-  );
+
+  return [...byFoldedName.values()]
+    .map(({ skill, providers }) => {
+      const providerIds = [...providers].sort();
+      const primary = resolvePrimaryProvider(providerIds);
+      return {
+        ...skill,
+        name: readString(skill.name),
+        provider: primary,
+        providers: providerIds,
+      };
+    })
+    .sort((a, b) =>
+      readString(a.name).localeCompare(readString(b.name), undefined, { sensitivity: "base" }),
+    );
 }
 
 async function mergeSkillsListResult(params, providers, sendCodexRequest) {
@@ -1177,7 +1229,9 @@ async function mergeSkillsListResult(params, providers, sendCodexRequest) {
   }
   if (Array.isArray(codexResult?.skills)) {
     return {
-      skills: dedupeSkillsByName(mergedBuckets.flatMap((bucket) => bucket.skills || [])),
+      skills: mergeSkillsAcrossProviders(
+        mergedBuckets.flatMap((bucket) => bucket.skills || []),
+      ),
     };
   }
   return { data: mergedBuckets };
@@ -1216,12 +1270,13 @@ function mergeSkillsBuckets(codexBuckets, opencodeBuckets) {
   for (const bucket of [...codexBuckets, ...opencodeBuckets]) {
     const cwd = readString(bucket?.cwd) || "";
     const existing = byCwd.get(cwd) || { cwd, skills: [] };
-    // union across providers (no cross-provider name dedup); keep inner dedupe per source (prefers enabled)
-    const incoming = dedupeSkillsByName(bucket.skills || []);
-    existing.skills = [...(existing.skills || []), ...incoming];
+    existing.skills = [...(existing.skills || []), ...(bucket.skills || [])];
     byCwd.set(cwd, existing);
   }
-  return [...byCwd.values()];
+  return [...byCwd.values()].map((bucket) => ({
+    cwd: bucket.cwd,
+    skills: mergeSkillsAcrossProviders(bucket.skills || []),
+  }));
 }
 
 async function buildRuntimeCatalog(providers, env, sendRuntimeMessage = null) {
@@ -1266,8 +1321,10 @@ module.exports = {
   shortHash,
   withModelListBudget,
   mergeModelListResult,
+  mergeSkillsAcrossProviders,
   mergeSkillsListResult,
   mergeThreadListResult,
+  resolvePrimaryProvider,
   providerForRequest,
   providerModelsForModelList,
   registerThreadProjects,

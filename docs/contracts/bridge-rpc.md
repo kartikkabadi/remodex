@@ -469,9 +469,22 @@ Duplicate within dedupe window:
 { cwds?: string[], cwd?: string, forceReload?: boolean }
 ```
 
-**Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`.
+**Result:** Same shapes as Codex app-server — bucketed `{ data: [{ cwd, skills: [...] }] }` or flat `{ skills: [...] }`. Each skill includes `name`, `description`, `path`, `scope`, `enabled`, `provider` (primary), and `providers` (all contributing runtimes).
 
-**Merge behavior:** For each `cwd`, Codex skills and OpenCode skills are deduped by `name` (enabled wins). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
+**Example skill entry (cross-provider overlap):**
+```json
+{
+  "name": "review",
+  "description": "Code review skill",
+  "path": "/path/to/.agents/skills/review/SKILL.md",
+  "scope": "project",
+  "enabled": true,
+  "provider": "codex",
+  "providers": ["codex", "opencode"]
+}
+```
+
+**Merge behavior:** For each `cwd`, Codex and OpenCode skills are merged with `mergeSkillsAcrossProviders`: dedupe key is `name.trim().toLowerCase()` (case-folded); enabled entries win; `provider` is the primary runtime via `resolvePrimaryProvider` (prefers `codex` when both contribute); `providers` lists every contributing runtime id (sorted). The flat `{ skills: [...] }` response shape uses the same cross-provider merge (not per-bucket concatenation). OpenCode skills are omitted when `app.skills` is unavailable or returns empty.
 
 **OpenCode-only notes:** When `REMODEX_ENABLE_OPENCODE` is set and the OpenCode provider is registered, `listOpenCodeSkillsBuckets` calls `opencodeProvider.listSkills(cwd)` per requested cwd (defaulting to `process.cwd()` when none are supplied). SDK failures return empty buckets with a bridge warning; Codex buckets are still returned.
 

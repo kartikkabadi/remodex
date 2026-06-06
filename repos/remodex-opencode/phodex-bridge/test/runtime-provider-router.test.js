@@ -14,11 +14,13 @@ const {
   computeCatalogRevision,
   createRuntimeProviderRouter,
   mergeModelListResult,
+  mergeSkillsAcrossProviders,
   mergeThreadListResult,
   opencodeModelListBudgetMs,
   providerForRequest,
   providerModelsForModelList,
   resetCatalogPushState,
+  resolvePrimaryProvider,
   shouldWarmProviderInventory,
   stripRuntimeProviderFieldsForCodex,
 } = require("../src/runtime-provider-router");
@@ -626,6 +628,271 @@ test("command/list returns commands from opencode provider", async () => {
   assert.equal(responsePayload.result.commands.length, 2);
   assert.equal(responsePayload.result.commands[0].token, "/build");
   assert.equal(responsePayload.result.commands[1].token, "/test");
+});
+
+test("resolvePrimaryProvider prefers codex when both runtimes contribute", () => {
+  assert.equal(resolvePrimaryProvider(["opencode", "codex"]), "codex");
+  assert.equal(resolvePrimaryProvider(["opencode"]), "opencode");
+  assert.equal(resolvePrimaryProvider(["custom-runtime"]), "custom-runtime");
+});
+
+test("mergeSkillsAcrossProviders dedupes case-folded names and attaches providers[]", () => {
+  const merged = mergeSkillsAcrossProviders([
+    {
+      name: "Review",
+      description: "Codex copy",
+      path: "/tmp/repo/.agents/skills/review/SKILL.md",
+      scope: "project",
+      enabled: true,
+      provider: "codex",
+    },
+    {
+      name: "review",
+      description: "OpenCode copy",
+      path: "/tmp/repo/.opencode/skills/review/SKILL.md",
+      scope: "project",
+      enabled: true,
+      provider: "opencode",
+    },
+    {
+      name: "deploy",
+      description: "OpenCode only",
+      path: "/tmp/repo/.opencode/skills/deploy/SKILL.md",
+      scope: "project",
+      enabled: true,
+      provider: "opencode",
+    },
+  ]);
+
+  assert.equal(merged.length, 2);
+  const review = merged.find((skill) => skill.name === "Review");
+  assert.ok(review);
+  assert.equal(review.provider, "codex");
+  assert.deepEqual(review.providers, ["codex", "opencode"]);
+  assert.equal(review.description, "Codex copy");
+  const deploy = merged.find((skill) => skill.name === "deploy");
+  assert.ok(deploy);
+  assert.equal(deploy.provider, "opencode");
+  assert.deepEqual(deploy.providers, ["opencode"]);
+});
+
+test("mergeSkillsAcrossProviders prefers enabled skill metadata", () => {
+  const merged = mergeSkillsAcrossProviders([
+    {
+      name: "lint",
+      description: "Disabled Codex copy",
+      enabled: false,
+      provider: "codex",
+    },
+    {
+      name: "lint",
+      description: "Enabled OpenCode copy",
+      enabled: true,
+      provider: "opencode",
+    },
+  ]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].description, "Enabled OpenCode copy");
+  assert.equal(merged[0].provider, "codex");
+  assert.deepEqual(merged[0].providers, ["codex", "opencode"]);
+});
+
+test("skills/list merges overlapping skills into unified providers[] in data[] shape", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({
+      data: [
+        {
+          cwd: "/tmp/repo",
+          skills: [
+            {
+              name: "review",
+              description: "From Codex",
+              path: "/tmp/repo/.agents/skills/review/SKILL.md",
+              scope: "project",
+              enabled: true,
+              provider: "codex",
+            },
+          ],
+        },
+      ],
+    }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listSkills(directory) {
+          return [
+            {
+              name: "review",
+              description: "From OpenCode",
+              path: `${directory}/.opencode/skills/review/SKILL.md`,
+              scope: "project",
+              enabled: true,
+              provider: "opencode",
+            },
+            {
+              name: "opencode-only",
+              description: "OpenCode exclusive",
+              path: `${directory}/.opencode/skills/opencode-only/SKILL.md`,
+              scope: "project",
+              enabled: true,
+              provider: "opencode",
+            },
+          ];
+        },
+        listThreads: async () => ({ data: [] }),
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {},
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "skills-overlap-data",
+      method: "skills/list",
+      params: { cwds: ["/tmp/repo"] },
+    }),
+  );
+  await responsePromise;
+
+  const bucket = responsePayload.result.data.find((entry) => entry.cwd === "/tmp/repo");
+  assert.ok(bucket);
+  assert.equal(bucket.skills.length, 2);
+  const review = bucket.skills.find((skill) => skill.name === "review");
+  assert.ok(review);
+  assert.equal(review.provider, "codex");
+  assert.deepEqual(review.providers, ["codex", "opencode"]);
+  const opencodeOnly = bucket.skills.find((skill) => skill.name === "opencode-only");
+  assert.ok(opencodeOnly);
+  assert.deepEqual(opencodeOnly.providers, ["opencode"]);
+});
+
+test("skills/list merges overlapping skills into unified providers[] in flat skills[] shape", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({
+      skills: [
+        {
+          name: "review",
+          description: "From Codex",
+          path: "/tmp/repo/.agents/skills/review/SKILL.md",
+          scope: "project",
+          enabled: true,
+          provider: "codex",
+        },
+      ],
+    }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listSkills() {
+          return [
+            {
+              name: "review",
+              description: "From OpenCode",
+              path: "/tmp/repo/.opencode/skills/review/SKILL.md",
+              scope: "project",
+              enabled: true,
+              provider: "opencode",
+            },
+          ];
+        },
+        listThreads: async () => ({ data: [] }),
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {},
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "skills-overlap-flat",
+      method: "skills/list",
+      params: { cwd: "/tmp/repo" },
+    }),
+  );
+  await responsePromise;
+
+  assert.ok(Array.isArray(responsePayload.result.skills));
+  assert.equal(responsePayload.result.skills.length, 1);
+  assert.equal(responsePayload.result.skills[0].provider, "codex");
+  assert.deepEqual(responsePayload.result.skills[0].providers, ["codex", "opencode"]);
+});
+
+test("skills/list returns Codex-only skills when OpenCode provider is absent", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({
+      data: [
+        {
+          cwd: "/tmp/repo",
+          skills: [
+            {
+              name: "codex-skill",
+              description: "From Codex",
+              path: "/tmp/repo/.agents/skills/codex-skill/SKILL.md",
+              scope: "project",
+              enabled: true,
+              provider: "codex",
+            },
+          ],
+        },
+      ],
+    }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "skills-codex-only",
+      method: "skills/list",
+      params: { cwds: ["/tmp/repo"] },
+    }),
+  );
+  await responsePromise;
+
+  const bucket = responsePayload.result.data.find((entry) => entry.cwd === "/tmp/repo");
+  assert.ok(bucket);
+  assert.equal(bucket.skills.length, 1);
+  assert.equal(bucket.skills[0].name, "codex-skill");
+  assert.equal(bucket.skills[0].provider, "codex");
+  assert.deepEqual(bucket.skills[0].providers, ["codex"]);
 });
 
 test("skills/list merges Codex and OpenCode skill buckets", async () => {
