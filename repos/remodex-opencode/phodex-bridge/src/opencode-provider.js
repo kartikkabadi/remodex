@@ -1220,36 +1220,45 @@ function createOpenCodeProvider({
       return extractLatestAssistantText(messages);
     }
 
-    let latest = "";
-    let seenCurrentPrompt = false;
-    for (const message of messages) {
-      if (!seenCurrentPrompt && !isOpenCodeAssistantMessage(message)) {
-        const text = extractOpenCodeMessageText(message).trim();
-        if (text === normalizedPrompt) {
-          seenCurrentPrompt = true;
-          latest = "";
-        }
-        continue;
-      }
-
-      if (!seenCurrentPrompt) {
-        continue;
-      }
-
+    let promptIndex = -1;
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index];
       if (isOpenCodeAssistantMessage(message)) {
-        const text = extractOpenCodeMessageText(message);
-        if (text) {
-          latest = text;
-        }
-      } else {
-        const text = extractOpenCodeMessageText(message).trim();
-        if (text) {
-          latest = "";
-        }
+        continue;
+      }
+      const text = extractOpenCodeMessageText(message).trim();
+      if (text === normalizedPrompt) {
+        promptIndex = index;
       }
     }
 
-    return latest || extractLatestAssistantText(messages);
+    if (promptIndex >= 0) {
+      let latest = "";
+      for (let index = promptIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (isOpenCodeAssistantMessage(message)) {
+          const text = extractOpenCodeMessageText(message);
+          if (text) {
+            latest = text;
+          }
+        } else {
+          const text = extractOpenCodeMessageText(message).trim();
+          if (text) {
+            latest = "";
+          }
+        }
+      }
+      return latest;
+    }
+
+    const hasUserMessages = messages.some(
+      (message) => !isOpenCodeAssistantMessage(message) && extractOpenCodeMessageText(message).trim(),
+    );
+    if (hasUserMessages) {
+      return "";
+    }
+
+    return extractLatestAssistantText(messages);
   }
 
   function assistantAgentItem(active) {

@@ -1441,6 +1441,108 @@ test("poll hydration uses assistant after current user prompt", async () => {
   assert.deepEqual(deltas, [currentAnswer]);
 });
 
+test("poll hydration does not reuse prior assistant before current reply exists", async () => {
+  const priorAnswer = "Hey. What can I help you with?";
+  const deltas = [];
+  let completed = false;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        deltas.push(payload.params.delta);
+      }
+      if (payload.method === "turn/completed" && payload.params.status === "completed") {
+        completed = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => ({
+        data: [
+          {
+            info: { id: "msg-user-1", role: "user" },
+            parts: [{ type: "text", text: "Hey" }],
+          },
+          {
+            info: { id: "msg-assistant-1", role: "assistant" },
+            parts: [{ type: "text", text: priorAnswer }],
+          },
+          {
+            info: { id: "msg-user-2", role: "user" },
+            parts: [{ type: "text", text: "Who are you" }],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "Who are you" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.deepEqual(deltas, [], "must not hydrate with a prior assistant answer");
+  assert.equal(completed, false, "turn must stay open until the current reply exists");
+});
+
+test("poll hydration waits when current prompt is not in session yet", async () => {
+  const priorAnswer = "Hey. What can I help you with?";
+  const deltas = [];
+  let completed = false;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "item/agentMessage/delta") {
+        deltas.push(payload.params.delta);
+      }
+      if (payload.method === "turn/completed" && payload.params.status === "completed") {
+        completed = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: () => () => {},
+      getMessages: async () => ({
+        data: [
+          {
+            info: { id: "msg-user-1", role: "user" },
+            parts: [{ type: "text", text: "Hey" }],
+          },
+          {
+            info: { id: "msg-assistant-1", role: "assistant" },
+            parts: [{ type: "text", text: priorAnswer }],
+          },
+        ],
+      }),
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "200",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "Who are you" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.deepEqual(deltas, [], "must not reuse prior assistant before prompt is persisted");
+  assert.equal(completed, false);
+});
+
 test("poll hydration keeps reasoning parts out of assistant text", async () => {
   let assistantDelta = "";
   const provider = makeProvider({
