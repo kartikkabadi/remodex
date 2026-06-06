@@ -730,6 +730,47 @@ test("turnStart returns turnId and status running", async () => {
   assert.equal(result.turn.status, "running");
 });
 
+test("thread/turns/list prefers in-memory bridge turn ids over SDK synthetic ids", async () => {
+  const provider = makeProvider({
+    clientFactory: () => ({
+      ...fakeClient(),
+      getMessages: async () => [
+        {
+          id: "msg-user-1",
+          role: "user",
+          content: [{ type: "text", text: "Hey" }],
+        },
+        {
+          id: "msg-assistant-1",
+          role: "assistant",
+          content: [{ type: "text", text: "Hello back" }],
+        },
+      ],
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  const turn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "Hey" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const listed = await provider.handleRequest({
+    id: 3,
+    method: "thread/turns/list",
+    params: { threadId: start.thread.id, limit: 10 },
+  });
+
+  assert.ok(Array.isArray(listed.data));
+  assert.equal(listed.data.length, 1);
+  assert.equal(listed.data[0].id, turn.turnId);
+  assert.notEqual(listed.data[0].id, "turn-0");
+  const userItem = listed.data[0].items.find((item) => item.type === "userMessage");
+  assert.equal(userItem?.text, "Hey");
+});
+
 test("threadFork creates new thread with forked session", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({

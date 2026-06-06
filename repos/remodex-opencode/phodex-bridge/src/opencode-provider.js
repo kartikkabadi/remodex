@@ -1073,7 +1073,14 @@ function createOpenCodeProvider({
     const turns = [...(thread.turns || [])];
     if (sortDirection === "asc") turns.reverse();
 
-    // Try SDK messages if session exists
+    // In-memory turns carry canonical bridge turn/item ids that match live notifications.
+    // SDK-derived turns use synthetic ids (turn-0, user-0) and cause duplicate iOS bubbles
+    // when history pagination reconciles against optimistic/live rows.
+    if (turns.length > 0) {
+      return { data: turns.slice(0, limit), nextCursor: null };
+    }
+
+    // Try SDK messages if session exists (e.g. provider restart with empty in-memory turns)
     if (thread.sessionId) {
       try {
         await ensureStarted();
