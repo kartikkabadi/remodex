@@ -1194,6 +1194,26 @@ function createOpenCodeProvider({
     return latest;
   }
 
+  function assistantAgentItem(active) {
+    return active.turn.items.find((item) => item.type === "agentMessage");
+  }
+
+  function isTurnAssistantFinalized(active) {
+    const assistantItem = assistantAgentItem(active);
+    return Boolean(assistantItem?.finalized === true && readString(assistantItem.text));
+  }
+
+  function tryCompleteTurnWhenAssistantReady(active, source = "") {
+    if (active.completed || !isTurnAssistantFinalized(active)) {
+      return false;
+    }
+    return completeTurn({
+      status: "completed",
+      active,
+      source: readString(source) || "assistant_ready",
+    });
+  }
+
   function emitAssistantCompletedOnce(active, params, source) {
     const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
     if (!assistantItem) {
@@ -1325,8 +1345,8 @@ function createOpenCodeProvider({
     const intervalMs = readString(env.REMODEX_TEST) === "1" ? 10 : 2000;
     const deadline = Date.now() + resolveOpenCodeTurnWatchdogMs(env);
     while (!active.completed && Date.now() < deadline) {
-      if (await hydrateAssistantFromSessionMessages(active)) {
-        completeTurn({ status: "completed", active, source: "poll_messages" });
+      await hydrateAssistantFromSessionMessages(active);
+      if (tryCompleteTurnWhenAssistantReady(active, "poll_messages")) {
         return;
       }
       const remainingMs = deadline - Date.now();
@@ -1468,15 +1488,11 @@ function createOpenCodeProvider({
           }
           const completionSource = readString(params.completionSource);
           void (async () => {
-            if (completionSource === "session.idle") {
-              const hydrated = await hydrateAssistantFromSessionMessages(active);
-              if (!hydrated) {
-                return;
-              }
-            } else {
-              await hydrateAssistantFromSessionMessages(active);
-            }
+            await hydrateAssistantFromSessionMessages(active);
             if (active.completed) {
+              return;
+            }
+            if (completionSource === "session.idle" && !isTurnAssistantFinalized(active)) {
               return;
             }
             completeTurn({
@@ -1491,6 +1507,7 @@ function createOpenCodeProvider({
 
         if (method === "item/completed") {
           emitAssistantCompletedOnce(active, enriched, "sse");
+          tryCompleteTurnWhenAssistantReady(active, "sse_item_completed");
           return;
         }
 
@@ -1541,10 +1558,14 @@ function createOpenCodeProvider({
       } finally {
         if (!active.completed) {
           await hydrateAssistantFromSessionMessages(active);
+          tryCompleteTurnWhenAssistantReady(active, "prompt_finally");
         }
       }
       if (!active.completed) {
         await pollTask;
+      }
+      if (!active.completed) {
+        tryCompleteTurnWhenAssistantReady(active, "prompt_post_poll");
       }
       if (!active.completed) {
         active.started = true;
@@ -1597,8 +1618,8 @@ function createOpenCodeProvider({
       active.turn.error = { message: errorMessage, errorCode: errorCode || null, action: action || null };
     }
 
-    const assistantItem = active.turn.items.find((item) => item.type === "agentMessage");
-    if (assistantItem && assistantItem.text) {
+    const assistantItem = assistantAgentItem(active);
+    if (assistantItem && assistantItem.text && assistantItem.finalized !== true) {
       emitAssistantCompletedOnce(
         active,
         {

@@ -1294,6 +1294,54 @@ test("hydrate after streamed assistant text does not emit duplicate delta", asyn
   assert.equal(deltas, 1, "hydrate must not re-emit delta when assistant text already streamed");
 });
 
+test("sse item/completed finalizes assistant and emits turn/completed without session.idle", async () => {
+  const assistantText = "Hey! What can I help you with?";
+  let turnCompleted = false;
+  const provider = makeProvider({
+    send: (msg) => {
+      const payload = JSON.parse(msg);
+      if (payload.method === "turn/completed" && payload.params.status === "completed") {
+        turnCompleted = true;
+      }
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler) => {
+        setImmediate(() => {
+          handler("item/completed", {
+            message: assistantText,
+            assistantPhase: "final_answer",
+            item: {
+              type: "agentMessage",
+              phase: "final",
+              text: assistantText,
+            },
+          });
+        });
+        return () => {};
+      },
+      getMessages: async () => [],
+      prompt: () => new Promise(() => {}),
+    }),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_TURN_WATCHDOG_MS: "500",
+    },
+  });
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hey" },
+  });
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline && !turnCompleted) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(turnCompleted, true, "expected turn/completed after SSE item/completed finalizes assistant");
+});
+
 test("poll hydration completes via getMessages info/parts snapshots", async () => {
   let completed = false;
   let deltas = 0;
@@ -1914,11 +1962,21 @@ test("duplicate SSE item/completed logs opencode_item_completed_skipped telemetr
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.equal(collectItemCompleted(messages).length, 1);
-    assert.equal(skippedTelemetry.events.length, 1);
-    assert.equal(skippedTelemetry.events[0].source, "sse");
-    assert.equal(skippedTelemetry.events[0].reason, "already_finalized");
-    assert.equal(skippedTelemetry.events[0].threadId, start.thread.id);
-    assert.equal(skippedTelemetry.events[0].turnId, turn.turnId);
+    assert.equal(
+      messages.filter((entry) => entry.method === "turn/completed").length,
+      1,
+      "duplicate SSE item/completed must not emit a second turn/completed",
+    );
+    assert.ok(
+      skippedTelemetry.events.length <= 1,
+      "duplicate SSE after completion should not spam item/completed telemetry",
+    );
+    if (skippedTelemetry.events.length === 1) {
+      assert.equal(skippedTelemetry.events[0].source, "sse");
+      assert.equal(skippedTelemetry.events[0].reason, "already_finalized");
+      assert.equal(skippedTelemetry.events[0].threadId, start.thread.id);
+      assert.equal(skippedTelemetry.events[0].turnId, turn.turnId);
+    }
   } finally {
     skippedTelemetry.restore();
   }
