@@ -768,7 +768,7 @@ test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (b
       skipResumeState: true,
     });
 
-    const fillerPayload = JSON.stringify({ method: "thread/status", params: { status: "running" } });
+    const fillerPayload = JSON.stringify({ method: "thread/updated", params: { threadId: "thread-filler" } });
     for (let index = 0; index < MAX_BRIDGE_OUTBOUND_MESSAGES; index += 1) {
       secureTransport.queueOutboundApplicationMessage(fillerPayload, () => false);
     }
@@ -786,7 +786,7 @@ test("trimOutboundBuffer emits bridge_outbound_dropped when caps are exceeded (b
     assert.equal(trimLogs[0].firstSeq, 1);
     assert.equal(trimLogs[0].lastSeq, 1);
     assert.equal(trimLogs[0].reason, "overflow");
-    assert.equal(trimLogs[0].method, "thread/status");
+    assert.equal(trimLogs[0].method, "thread/updated");
     assert.equal(trimLogs[0].priority, OUTBOUND_PRIORITY.NOTIFY);
 
     const replayWireMessages = [];
@@ -854,7 +854,11 @@ test("classifyOutboundPriority maps lifecycle, stream, notify, and rpc tiers", (
   );
   assert.equal(
     classifyOutboundPriority({ method: "thread/status", params: {} }),
-    OUTBOUND_PRIORITY.NOTIFY
+    OUTBOUND_PRIORITY.LIFECYCLE
+  );
+  assert.equal(
+    classifyOutboundPriority({ method: "item/toolCallUpdate", params: {} }),
+    OUTBOUND_PRIORITY.TOOL
   );
   assert.equal(
     classifyOutboundPriority({ id: "rpc-1", result: { ok: true } }),
@@ -1103,6 +1107,113 @@ test("priority trim retains pinned item/completed and turn/completed pair per tu
     restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
     restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
     restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+  }
+});
+
+test("priority trim drops old tool outputs before system and recent turn traffic", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  const previousRecentTurns = process.env.REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "3";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+  process.env.REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS = "1";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-priority-tool-prune",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-priority-tool-prune",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-priority-tool-prune": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  try {
+    const { serverHello, transcriptBytes } = finishHandshake({
+      secureTransport,
+      sessionId: "session-priority-tool-prune",
+      macDeviceId: "mac-priority-tool-prune",
+      phoneDeviceId: "phone-priority-tool-prune",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/toolCallUpdate",
+        params: { threadId: "thread-a", turnId: "turn-old", status: "completed", output: "old output" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "thread/status/changed", params: { threadId: "thread-a", status: "running" } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread-a", turnId: "turn-new", delta: "streaming now" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/toolCallUpdate",
+        params: { threadId: "thread-a", turnId: "turn-old", status: "completed", output: "older output" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId: "thread-a", usage: { tokensUsed: 1, tokenLimit: 10 } } }),
+      () => false
+    );
+
+    const replayedPayloads = replayBufferedPayloads({
+      secureTransport,
+      serverHello,
+      transcriptBytes,
+      phoneEphemeral,
+      sessionId: "session-priority-tool-prune",
+      macDeviceId: "mac-priority-tool-prune",
+      phoneDeviceId: "phone-priority-tool-prune",
+    });
+    const replayedObjects = replayedPayloads.map((payload) => JSON.parse(payload.payloadText));
+
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "thread/status/changed"),
+      "expected system status to survive trim pressure"
+    );
+    assert.ok(
+      replayedObjects.some(
+        (payload) => payload.method === "item/agentMessage/delta" && payload.params?.turnId === "turn-new"
+      ),
+      "expected recent turn stream delta to survive trim pressure"
+    );
+    assert.ok(
+      replayedObjects.some((payload) => payload.method === "thread/tokenUsage/updated"),
+      "expected system token usage update to survive trim pressure"
+    );
+    assert.ok(
+      !replayedObjects.some((payload) => payload.method === "item/toolCallUpdate"),
+      "expected old tool outputs to be dropped first"
+    );
+  } finally {
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS", previousRecentTurns);
   }
 });
 

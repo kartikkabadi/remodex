@@ -33,12 +33,22 @@ const MAX_PAIRING_AGE_MS = 5 * 60 * 1000;
 const MAX_BRIDGE_OUTBOUND_MESSAGES = 100;
 const MAX_BRIDGE_OUTBOUND_BYTES = 10 * 1024 * 1024;
 const LIFECYCLE_STREAM_BYTE_RESERVE_RATIO = 0.3;
+const DEFAULT_RECENT_TURN_PROTECT_COUNT = 2;
 const OUTBOUND_PRIORITY = {
   LIFECYCLE: 0,
   STREAM: 1,
   NOTIFY: 2,
   RPC_RESPONSE: 3,
+  TOOL: 4,
 };
+const SYSTEM_OUTBOUND_METHODS = new Set([
+  "thread/status",
+  "thread/status/changed",
+  "thread/tokenUsage/updated",
+  "runtime/catalog/updated",
+  "runtime/warning",
+  "account/rateLimits/updated",
+]);
 
 function createBridgeSecureTransport({
   sessionId,
@@ -62,6 +72,8 @@ function createBridgeSecureTransport({
   let nextBridgeOutboundSeq = 1;
   let outboundBufferBytes = 0;
   const outboundBuffer = [];
+  const turnRegistrationOrder = [];
+  const turnRegistrationRank = new Map();
 
   function createPairingPayload() {
     currentPairingExpiresAt = Date.now() + MAX_PAIRING_AGE_MS;
@@ -118,6 +130,11 @@ function createBridgeSecureTransport({
     }
 
     const parsedPayload = safeParseJSON(normalizedPayload) || {};
+    const turnContextKey = extractTurnContextKey(parsedPayload);
+    if (turnContextKey && !turnRegistrationRank.has(turnContextKey)) {
+      turnRegistrationRank.set(turnContextKey, turnRegistrationOrder.length);
+      turnRegistrationOrder.push(turnContextKey);
+    }
     const bufferEntry = {
       queuedAt: Date.now(),
       raw: normalizedPayload,
@@ -126,6 +143,7 @@ function createBridgeSecureTransport({
       priority: classifyOutboundPriority(parsedPayload),
       method: normalizeNonEmptyString(parsedPayload.method) || null,
       turnPinKey: extractTurnPinKey(parsedPayload),
+      turnContextKey,
     };
     nextBridgeOutboundSeq += 1;
     outboundBuffer.push(bufferEntry);
@@ -545,8 +563,10 @@ function createBridgeSecureTransport({
       outboundBuffer.length > messageCap
       || outboundBufferBytes > MAX_BRIDGE_OUTBOUND_BYTES
     ) {
-      const pinnedIndices = computePinnedEntryIndices(outboundBuffer);
-      const dropIndex = selectPriorityDropIndex(outboundBuffer, pinnedIndices);
+      const protectedIndices = computeProtectedEntryIndices(outboundBuffer, {
+        turnRegistrationOrder,
+      });
+      const dropIndex = selectPriorityDropIndex(outboundBuffer, protectedIndices);
       if (dropIndex < 0) {
         break;
       }
@@ -588,6 +608,8 @@ function createBridgeSecureTransport({
   function resetOutboundReplayState() {
     outboundBuffer.length = 0;
     outboundBufferBytes = 0;
+    turnRegistrationOrder.length = 0;
+    turnRegistrationRank.clear();
     lastRelayedBridgeOutboundSeq = 0;
     nextBridgeOutboundSeq = 1;
   }
@@ -857,6 +879,20 @@ function readString(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function readRecentTurnProtectCount() {
+  const raw = process.env.REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS;
+  if (!raw) {
+    return DEFAULT_RECENT_TURN_PROTECT_COUNT;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_RECENT_TURN_PROTECT_COUNT;
+  }
+
+  return Math.floor(parsed);
+}
+
 function classifyOutboundPriority(payload) {
   if (!payload || typeof payload !== "object") {
     return OUTBOUND_PRIORITY.NOTIFY;
@@ -871,6 +907,10 @@ function classifyOutboundPriority(payload) {
     return OUTBOUND_PRIORITY.NOTIFY;
   }
 
+  if (SYSTEM_OUTBOUND_METHODS.has(method)) {
+    return OUTBOUND_PRIORITY.LIFECYCLE;
+  }
+
   switch (method) {
   case "turn/started":
   case "turn/completed":
@@ -878,10 +918,46 @@ function classifyOutboundPriority(payload) {
     return OUTBOUND_PRIORITY.LIFECYCLE;
   case "item/completed":
   case "item/agentMessage/delta":
+  case "item/reasoning/textDelta":
     return OUTBOUND_PRIORITY.STREAM;
+  case "item/toolCall":
+  case "item/toolCallUpdate":
+    return OUTBOUND_PRIORITY.TOOL;
   default:
     return OUTBOUND_PRIORITY.NOTIFY;
   }
+}
+
+function readTurnIdsFromParams(params) {
+  const normalizedParams = params && typeof params === "object" ? params : {};
+  const threadId = readString(normalizedParams.threadId)
+    || readString(normalizedParams.thread_id)
+    || readString(normalizedParams.item?.threadId)
+    || readString(normalizedParams.item?.thread_id)
+    || readString(normalizedParams.item?.thread?.id);
+  const turnId = readString(normalizedParams.turnId)
+    || readString(normalizedParams.turn_id)
+    || readString(normalizedParams.item?.turnId)
+    || readString(normalizedParams.item?.turn_id)
+    || readString(normalizedParams.item?.turn?.id);
+  if (!threadId || !turnId) {
+    return null;
+  }
+
+  return { threadId, turnId };
+}
+
+function extractTurnContextKey(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const turnIds = readTurnIdsFromParams(payload.params);
+  if (!turnIds) {
+    return null;
+  }
+
+  return turnPinKeyString(turnIds);
 }
 
 function extractTurnPinKey(payload) {
@@ -902,18 +978,7 @@ function extractTurnPinKey(payload) {
     return null;
   }
 
-  const params = payload.params && typeof payload.params === "object" ? payload.params : {};
-  const threadId = readString(params.threadId)
-    || readString(params.item?.threadId)
-    || readString(params.item?.thread?.id);
-  const turnId = readString(params.turnId)
-    || readString(params.item?.turnId)
-    || readString(params.item?.turn?.id);
-  if (!threadId || !turnId) {
-    return null;
-  }
-
-  return { threadId, turnId };
+  return readTurnIdsFromParams(payload.params);
 }
 
 function turnPinKeyString(pinKey) {
@@ -955,6 +1020,65 @@ function computePinnedEntryIndices(entries) {
   return pinnedIndices;
 }
 
+function computeSystemProtectedIndices(entries) {
+  const protectedIndices = new Set();
+  entries.forEach((entry, index) => {
+    if (entry.method && SYSTEM_OUTBOUND_METHODS.has(entry.method)) {
+      protectedIndices.add(index);
+    }
+  });
+  return protectedIndices;
+}
+
+function computeRecentTurnProtectedIndices(
+  entries,
+  recentCount = readRecentTurnProtectCount(),
+  options = {},
+) {
+  if (recentCount <= 0) {
+    return new Set();
+  }
+
+  const registrationOrder = Array.isArray(options.turnRegistrationOrder)
+    ? options.turnRegistrationOrder
+    : null;
+  let recentTurnKeySet;
+  if (registrationOrder && registrationOrder.length > 0) {
+    recentTurnKeySet = new Set(registrationOrder.slice(-recentCount));
+  } else {
+    const turnOrder = [];
+    const seenTurnKeys = new Set();
+    entries.forEach((entry) => {
+      const turnContextKey = entry.turnContextKey;
+      if (!turnContextKey || seenTurnKeys.has(turnContextKey)) {
+        return;
+      }
+      seenTurnKeys.add(turnContextKey);
+      turnOrder.push(turnContextKey);
+    });
+    recentTurnKeySet = new Set(turnOrder.slice(-recentCount));
+  }
+
+  const protectedIndices = new Set();
+
+  entries.forEach((entry, index) => {
+    if (entry.turnContextKey && recentTurnKeySet.has(entry.turnContextKey)) {
+      protectedIndices.add(index);
+    }
+  });
+
+  return protectedIndices;
+}
+
+function computeProtectedEntryIndices(entries, options = {}) {
+  const protectedIndices = new Set([
+    ...computePinnedEntryIndices(entries),
+    ...computeSystemProtectedIndices(entries),
+    ...computeRecentTurnProtectedIndices(entries, readRecentTurnProtectCount(), options),
+  ]);
+  return protectedIndices;
+}
+
 function sumEntryBytesByPriority(entries, maxPriorityInclusive) {
   return entries.reduce((total, entry) => {
     if ((entry.priority ?? OUTBOUND_PRIORITY.NOTIFY) <= maxPriorityInclusive) {
@@ -964,7 +1088,7 @@ function sumEntryBytesByPriority(entries, maxPriorityInclusive) {
   }, 0);
 }
 
-function selectPriorityDropIndex(entries, pinnedIndices) {
+function selectPriorityDropIndex(entries, protectedIndices) {
   const lifecycleStreamBytes = sumEntryBytesByPriority(entries, OUTBOUND_PRIORITY.STREAM);
   const totalBytes = entries.reduce((total, entry) => total + entry.sizeBytes, 0);
   const nonLifecycleStreamBytes = totalBytes - lifecycleStreamBytes;
@@ -975,7 +1099,7 @@ function selectPriorityDropIndex(entries, pinnedIndices) {
 
   const candidateIndices = [];
   entries.forEach((entry, index) => {
-    if (pinnedIndices.has(index)) {
+    if (protectedIndices.has(index)) {
       return;
     }
     if (
@@ -989,7 +1113,7 @@ function selectPriorityDropIndex(entries, pinnedIndices) {
 
   if (candidateIndices.length === 0) {
     entries.forEach((entry, index) => {
-      if (pinnedIndices.has(index)) {
+      if (protectedIndices.has(index)) {
         return;
       }
       candidateIndices.push(index);
@@ -997,7 +1121,7 @@ function selectPriorityDropIndex(entries, pinnedIndices) {
   }
 
   if (candidateIndices.length === 0) {
-    return selectOldestPinnedTurnDropIndex(entries, pinnedIndices);
+    return selectOldestPinnedTurnDropIndex(entries, protectedIndices);
   }
 
   let selectedIndex = candidateIndices[0];
@@ -1104,7 +1228,11 @@ module.exports = {
   PAIRING_QR_VERSION,
   SECURE_PROTOCOL_VERSION,
   classifyOutboundPriority,
+  computeProtectedEntryIndices,
+  computeRecentTurnProtectedIndices,
+  computeSystemProtectedIndices,
   createBridgeSecureTransport,
+  extractTurnContextKey,
   extractTurnPinKey,
   nonceForDirection,
 };
