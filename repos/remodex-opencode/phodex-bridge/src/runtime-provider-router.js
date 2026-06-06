@@ -211,6 +211,199 @@ function createRuntimeProviderRouter({
       return true;
     }
 
+    if (method === "project_discover") {
+      respondAsync(parsed, async () => {
+        // Project discovery using existing project registry
+        if (!projectRegistry || typeof projectRegistry.listProjects !== "function") {
+          return { projects: [], metadata: { source: "no_registry", discovered: 0 } };
+        }
+        const projects = projectRegistry.listProjects({});
+        return {
+          projects: projects.map((project) => ({
+            path: project.path,
+            label: project.label || project.path.split('/').pop() || 'Untitled',
+            source: project.source || 'unknown',
+            provider: project.provider || null,
+            available: true
+          })),
+          metadata: {
+            source: "project_registry",
+            discovered: projects.length,
+            timestamp: new Date().toISOString()
+          }
+        };
+      });
+      return true;
+    }
+
+    if (method === "session.getUsageStats") {
+      respondAsync(parsed, async () => {
+        // Get usage stats from active OpenCode session
+        const params = parsed.params || {};
+        const threadId = readString(params.threadId || params.thread_id);
+        const opencodeProvider = runtimeProviders.find((p) => p.id === OPENCODE_PROVIDER_ID);
+        
+        if (!opencodeProvider) {
+          return {
+            tokensUsed: 0,
+            maxContext: null,
+            percentageUsed: 0,
+            provider: "opencode_unavailable"
+          };
+        }
+
+        try {
+          // Try to get session info from the provider's active sessions
+          let sessionId = null;
+          let contextWindow = null;
+          
+          if (threadId && opencodeProvider.sessions) {
+            sessionId = opencodeProvider.sessions.get(threadId);
+          }
+          
+          // For now, return placeholder values since session usage API needs to be added
+          // This structure matches what iOS expects
+          return {
+            tokensUsed: sessionId ? 150 : 0, // Placeholder: would need session.get() with usage info
+            maxContext: contextWindow || 8192, // Default context window
+            percentageUsed: sessionId ? Math.round((150 / 8192) * 100) : 0,
+            provider: OPENCODE_PROVIDER_ID,
+            sessionId: sessionId || null,
+            metadata: {
+              threadId,
+              timestamp: new Date().toISOString(),
+              note: "Usage tracking requires OpenCode SDK session.usage endpoint"
+            }
+          };
+        } catch (error) {
+          console.warn(`${logPrefix} session.getUsageStats failed: ${error?.message || error}`);
+          return {
+            tokensUsed: 0,
+            maxContext: 8192,
+            percentageUsed: 0,
+            provider: OPENCODE_PROVIDER_ID,
+            error: "usage_unavailable"
+          };
+        }
+      });
+      return true;
+    }
+
+    if (method === "auth_error") {
+      respondAsync(parsed, async () => {
+        // Return authentication error details from OpenCode runtime
+        const opencodeProvider = runtimeProviders.find((p) => p.id === OPENCODE_PROVIDER_ID);
+        
+        if (!opencodeProvider || typeof opencodeProvider.getRuntimeStatus !== "function") {
+          return {
+            error: "provider_unavailable",
+            message: "OpenCode provider not available",
+            reasonCode: "opencode_not_configured"
+          };
+        }
+
+        try {
+          const runtimeStatus = opencodeProvider.getRuntimeStatus(process.env);
+          const authDiscoveryReasonCode = runtimeStatus?.authDiscoveryReasonCode;
+          const providerInventory = runtimeStatus?.providerInventory || [];
+          const authenticatedCount = providerInventory.filter(p => p?.authenticated === true).length;
+          
+          if (authDiscoveryReasonCode === "ok" && authenticatedCount > 0) {
+            return {
+              error: null,
+              message: "Authentication successful",
+              reasonCode: "ok",
+              metadata: {
+                authenticatedProviders: authenticatedCount,
+                totalProviders: providerInventory.length
+              }
+            };
+          }
+
+          // Return specific auth error details
+          return {
+            error: "authentication_failed", 
+            message: getAuthErrorMessage(authDiscoveryReasonCode),
+            reasonCode: authDiscoveryReasonCode || "auth_unknown",
+            metadata: {
+              authenticatedProviders: authenticatedCount,
+              totalProviders: providerInventory.length,
+              providerInventoryPartial: runtimeStatus?.providerInventoryPartial,
+              providers: providerInventory.map(p => ({
+                id: p.id,
+                authenticated: p.authenticated,
+                connected: p.connected || p.connectedOnServe
+              }))
+            }
+          };
+        } catch (error) {
+          console.warn(`${logPrefix} auth_error handler failed: ${error?.message || error}`);
+          return {
+            error: "auth_check_failed",
+            message: "Unable to check authentication status",
+            reasonCode: "runtime_error"
+          };
+        }
+      });
+      return true;
+    }
+
+    if (method === "thread/contextWindow/read") {
+      respondAsync(parsed, async () => {
+        // Bridge iOS context window requests to OpenCode session usage
+        const params = parsed.params || {};
+        const threadId = readString(params.threadId || params.thread_id);
+        const opencodeProvider = runtimeProviders.find((p) => p.id === OPENCODE_PROVIDER_ID);
+        
+        if (!opencodeProvider) {
+          return {
+            usage: {
+              tokensUsed: 0,
+              tokenLimit: 8192,
+              provider: "opencode_unavailable"
+            }
+          };
+        }
+
+        try {
+          // Get session info from the provider's active sessions
+          let sessionId = null;
+          let contextWindow = 8192; // Default context window
+          
+          if (threadId && opencodeProvider.sessions && typeof opencodeProvider.sessions.get === "function") {
+            sessionId = opencodeProvider.sessions.get(threadId);
+          }
+          
+          // For now, return placeholder values since session usage API needs to be added
+          // This structure matches what iOS context window extraction expects
+          return {
+            usage: {
+              tokensUsed: sessionId ? 150 : 0,
+              tokenLimit: contextWindow,
+              sessionId: sessionId || null,
+              provider: OPENCODE_PROVIDER_ID,
+              metadata: {
+                threadId,
+                timestamp: new Date().toISOString(),
+                note: "Usage tracking requires OpenCode SDK session.usage endpoint"
+              }
+            }
+          };
+        } catch (error) {
+          console.warn(`${logPrefix} thread/contextWindow/read failed: ${error?.message || error}`);
+          return {
+            usage: {
+              tokensUsed: 0,
+              tokenLimit: 8192,
+              provider: OPENCODE_PROVIDER_ID,
+              error: "usage_unavailable"
+            }
+          };
+        }
+      });
+      return true;
+    }
+
     if (!ROUTABLE_THREAD_METHODS.has(method)) {
       return false;
     }
@@ -877,6 +1070,20 @@ function createJsonRpcErrorResponse(requestId, error, defaultErrorCode) {
       },
     },
   });
+}
+
+function getAuthErrorMessage(reasonCode) {
+  const messages = {
+    "ok": "Authentication successful",
+    "no_credentials": "No authentication credentials found. Run 'opencode login' to authenticate with providers.",
+    "credentials_invalid": "Authentication credentials are invalid or expired. Run 'opencode login' to re-authenticate.",
+    "network_error": "Network error while checking authentication status. Check your internet connection.",
+    "timeout": "Authentication check timed out. Try again or check network connection.",
+    "provider_error": "Provider authentication failed. Check provider-specific credentials.",
+    "opencode_not_configured": "OpenCode is not properly configured. Install and configure OpenCode CLI.",
+    "auth_unknown": "Unknown authentication error occurred."
+  };
+  return messages[reasonCode] || messages["auth_unknown"];
 }
 
 function safeParseJSON(rawMessage) {
