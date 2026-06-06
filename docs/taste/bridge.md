@@ -136,19 +136,21 @@ Incoming messages flow through a fixed-order chain in `bridge.js:handleApplicati
 
 1. Bridge-managed handshake/account
 2. Voice handler
-3. Thread context handler
-4. Workspace handler
-5. Project handler
-6. Pet handler
-7. Notifications handler
-8. Desktop handler
-9. Git handler
-10. Desktop refresher (observes, does not consume)
-11. Rollout live mirror (observes, does not consume)
-12. IPC action follower (observes, may consume)
-13. **Runtime provider router** (insert new OpenCode handlers HERE)
-14. Thread turns list handler (JSONL fallback)
-15. **Passthrough** — strip provider fields, forward to Codex
+3. Thread context handler (`thread/contextWindow/read`)
+4. OpenCode session usage handler (`session/getUsageStats`)
+5. Workspace handler
+6. OpenCode project discover handler (`project/discover`)
+7. Project handler
+8. Pet handler
+9. Notifications handler
+10. Desktop handler
+11. Git handler
+12. **Runtime provider router** (insert new router-level OpenCode methods HERE)
+13. Desktop refresher (observes, does not consume)
+14. Rollout live mirror (observes, does not consume)
+15. IPC action follower (observes, may consume)
+16. Thread turns list handler (JSONL fallback)
+17. **Passthrough** — strip provider fields, forward to Codex
 
 **Why:** Handlers early in the chain (git, workspace) must intercept before the router, so bridge-local operations don't get forwarded to the wrong provider. Handlers after the router (turns list, passthrough) are Codex-specific and must not run on OpenCode threads.
 

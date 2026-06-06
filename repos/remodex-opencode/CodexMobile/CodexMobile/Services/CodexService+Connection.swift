@@ -689,7 +689,7 @@ extension CodexService {
         catalogRefetchDebounceTask?.cancel()
         catalogRefetchDebounceTask = nil
         lastOpenCodeCatalogRevision = nil
-        modelsErrorMessage = nil
+        clearModelsErrorMessages()
         assistantCompletionFingerprintByThread.removeAll()
         assistantCompletionFingerprintByTurn.removeAll()
         deferredSyncTasks.values.forEach { $0.cancel() }

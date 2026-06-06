@@ -85,18 +85,19 @@ function createOpenCodeAuthErrorNotifier({ sendApplicationMessage, logPrefix = "
 function extractOpenCodeAuthError(payload = {}) {
   const errorObject = payload.error && typeof payload.error === "object" ? payload.error : payload;
   if (!isProviderAuthErrorPayload(errorObject) && !isProviderAuthErrorPayload(payload)) {
-    const message = readString(payload.message || errorObject?.message);
-    if (!message.toLowerCase().includes("providerautherror")) {
-      return null;
-    }
+    return null;
   }
 
   const providerID = readString(
     payload.providerID ||
       payload.providerId ||
+      payload.authProvider ||
       errorObject?.providerID ||
       errorObject?.providerId ||
-      errorObject?.data?.providerID,
+      errorObject?.authProvider ||
+      errorObject?.data?.providerID ||
+      errorObject?.data?.providerId ||
+      errorObject?.data?.authProvider,
   );
   const message =
     readString(errorObject?.message || payload.message) ||

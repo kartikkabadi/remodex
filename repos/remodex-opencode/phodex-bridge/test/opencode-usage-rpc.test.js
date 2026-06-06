@@ -21,7 +21,10 @@ const {
   createOpenCodeAuthErrorNotifier,
   extractOpenCodeAuthError,
 } = require("../src/opencode-auth-error-handler");
-const { mapOpenCodeSessionToContextUsage } = require("../src/opencode-usage-mapper");
+const {
+  mapOpenCodeSessionToContextUsage,
+  isProviderAuthErrorPayload,
+} = require("../src/opencode-usage-mapper");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
 function makeTempDir() {
@@ -209,4 +212,39 @@ test("extractOpenCodeAuthError ignores non-auth failures", () => {
     extractOpenCodeAuthError({ message: "tool execution timed out", error: { name: "TimeoutError" } }),
     null,
   );
+  assert.equal(
+    extractOpenCodeAuthError({
+      message: "unauthorized workspace access",
+      error: { message: "unauthorized workspace access" },
+    }),
+    null,
+  );
+});
+
+test("isProviderAuthErrorPayload matches structured auth signals", () => {
+  assert.equal(
+    isProviderAuthErrorPayload({ name: "ProviderAuthError", providerID: "anthropic" }),
+    true,
+  );
+  assert.equal(
+    isProviderAuthErrorPayload({ errorCode: "provider_auth_error", providerId: "openai" }),
+    true,
+  );
+  assert.equal(
+    isProviderAuthErrorPayload({ status: 401, providerID: "google" }),
+    true,
+  );
+  assert.equal(
+    isProviderAuthErrorPayload({ data: { errorCode: "invalid_api_key", providerID: "xai" } }),
+    true,
+  );
+});
+
+test("isProviderAuthErrorPayload ignores message-only unauthorized substrings", () => {
+  assert.equal(isProviderAuthErrorPayload({ message: "unauthorized" }), false);
+  assert.equal(
+    isProviderAuthErrorPayload({ message: "authentication failed for tool execution" }),
+    false,
+  );
+  assert.equal(isProviderAuthErrorPayload({ message: "invalid api key in prompt" }), false);
 });

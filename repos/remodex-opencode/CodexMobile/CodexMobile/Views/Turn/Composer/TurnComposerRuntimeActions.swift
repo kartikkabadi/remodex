@@ -51,7 +51,7 @@ struct TurnComposerRuntimeActions {
             refreshModels: {
                 Task { @MainActor in
                     codex.resetOpenCodeModelsRetry()
-                    codex.modelsErrorMessage = nil
+                    codex.setModelsErrorMessage(nil, forProvider: "opencode")
                     await codex.refreshRuntimeMetadataSequential()
                 }
             }

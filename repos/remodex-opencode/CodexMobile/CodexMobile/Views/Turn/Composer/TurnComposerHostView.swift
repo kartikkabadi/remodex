@@ -221,7 +221,7 @@ struct TurnComposerHostView: View {
             isLoadingModels: codex.isLoadingModels,
             isLoadingOpenCodeProvider: codex.isLoadingOpenCodeProvider,
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
-            modelsErrorMessage: codex.modelsErrorMessage,
+            modelsErrorMessage: codex.modelsErrorMessage(forThreadId: thread.id),
             openCodeProviderDiscoveryReasonCode: codex.openCodeProviderDiscoveryReasonCode,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,

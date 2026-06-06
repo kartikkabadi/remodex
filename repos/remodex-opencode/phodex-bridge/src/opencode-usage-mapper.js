@@ -55,23 +55,66 @@ function mapOpenCodeSessionToContextUsage(session, { tokenLimit = 0 } = {}) {
   };
 }
 
+const PROVIDER_AUTH_ERROR_CODES = new Set([
+  "provider_auth_error",
+  "providerautherror",
+  "authentication_failed",
+  "auth_error",
+  "invalid_api_key",
+  "api_key_invalid",
+]);
+
+function readStructuredErrorCode(error) {
+  return readString(
+    error?.errorCode ||
+      error?.code ||
+      error?.data?.errorCode ||
+      error?.data?.code,
+  ).toLowerCase();
+}
+
+function readStructuredProviderId(error) {
+  return readString(
+    error?.providerID ||
+      error?.providerId ||
+      error?.data?.providerID ||
+      error?.data?.providerId ||
+      error?.authProvider ||
+      error?.data?.authProvider,
+  );
+}
+
+function readStructuredHttpStatus(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  return Number.isFinite(status) ? status : null;
+}
+
 function isProviderAuthErrorPayload(error) {
   if (!error || typeof error !== "object") {
     return false;
   }
 
-  const name = readString(error.name || error.type || error.errorCode);
-  if (name === "ProviderAuthError" || name === "provider_auth_error") {
+  const name = readString(error.name || error.type).toLowerCase();
+  if (name === "providerautherror") {
     return true;
   }
 
-  const message = readString(error.message).toLowerCase();
-  return (
-    message.includes("provider auth") ||
-    message.includes("authentication failed") ||
-    message.includes("invalid api key") ||
-    message.includes("unauthorized")
-  );
+  const errorCode = readStructuredErrorCode(error);
+  if (PROVIDER_AUTH_ERROR_CODES.has(errorCode)) {
+    return true;
+  }
+
+  const providerID = readStructuredProviderId(error);
+  const status = readStructuredHttpStatus(error);
+  if (providerID && (status === 401 || status === 403)) {
+    return true;
+  }
+
+  if (providerID && (errorCode === "unauthorized" || errorCode === "forbidden")) {
+    return true;
+  }
+
+  return false;
 }
 
 module.exports = {

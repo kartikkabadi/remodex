@@ -13,23 +13,25 @@ The Remodex bridge handles encrypted JSON-RPC messages from the iPhone. Every me
 
 ## Handler Cascade Order
 
-In `bridge.js:handleApplicationMessage()`, handlers run in this fixed order. A handler that matches returns true and consumes the message. Order is load-bearing:
+In `bridge.js:handleApplicationMessage()`, handlers run in this fixed order. A handler that matches returns `true` and consumes the message. Order is load-bearing — insert new OpenCode bridge-local handlers **before** the runtime provider router (position 12), not at the end.
 
-1. Bridge-managed handshake/account (initialize, account/status/read, voice/resolveAuth)
-2. Voice handler (voice/transcribe)
-3. Thread context handler (thread/contextWindow/read)
-4. Workspace handler (workspace/*)
-5. Project handler (project/*)
-6. Pet handler (pet/*)
-7. Notifications handler (notifications/push/register)
-8. Desktop handler (desktop/*)
-9. Git handler (git/*)
-10. Desktop refresher (observes thread/turn — does not consume)
-11. Rollout live mirror (observes — does not consume)
-12. IPC action follower (observes — may consume)
-13. **Runtime provider router** (model/list, thread/list, thread/*, turn/*, runtime/catalog)
-14. Thread turns list handler (JSONL fallback)
-15. **Passthrough** — strip provider fields, forward to Codex
+1. Bridge-managed handshake/account (`initialize`, `account/status/read`, `voice/resolveAuth`)
+2. Voice handler (`voice/transcribe`)
+3. Thread context handler (`thread/contextWindow/read` — Codex rollout or OpenCode fork; see below)
+4. OpenCode session usage handler (`session/getUsageStats` — OpenCode-owned threads only)
+5. Workspace handler (`workspace/*`)
+6. OpenCode project discover handler (`project/discover`)
+7. Project handler (`project/*`)
+8. Pet handler (`pet/*`)
+9. Notifications handler (`notifications/push/register`)
+10. Desktop handler (`desktop/*`)
+11. Git handler (`git/*`)
+12. **Runtime provider router** (`model/list`, `thread/list`, `thread/*`, `turn/*`, `runtime/catalog`, `command/*`, `skills/list`)
+13. Desktop refresher (observes thread/turn — does not consume)
+14. Rollout live mirror (observes — does not consume)
+15. IPC action follower (observes — may consume)
+16. Thread turns list handler (JSONL fallback)
+17. **Passthrough** — strip provider fields, forward to Codex app-server
 
 ## Method Reference
 
@@ -533,6 +535,69 @@ Duplicate within dedupe window:
 | `opencode_fork_requires_session` | Source thread has no `sessionId` yet |
 | `opencode_server_unreachable` | `opencode serve` could not be reached for `session.fork` |
 
+### session/getUsageStats
+
+**Routing:** `bridge-local` with an ownership fork — handled by `opencode-session-usage-handler.js` at cascade position **4**, before workspace/project handlers and **before** the runtime provider router.
+
+**Purpose:** Return live OpenCode session token counters for the context-window ring on iPhone. Codex-owned threads do **not** use this method; they use `thread/contextWindow/read` (rollout JSONL).
+
+#### Routing fork (maintainers)
+
+| Thread ownership | iOS caller | Bridge handler | Data source |
+|----------------|------------|----------------|-------------|
+| `opencode` | `CodexService+Status.refreshOpenCodeContextWindowUsage` → `session/getUsageStats` | `handleOpenCodeSessionUsageRequest` (cascade #4) | `opencode-provider.getUsageStatsForThread` → SDK `session.get` + `mapOpenCodeSessionToContextUsage` |
+| `opencode` | Legacy/alternate: `thread/contextWindow/read` | `handleThreadContextRequest` (cascade #3) **forks** to the same `sessionGetUsageStats` helper when `ownershipStore.ownsThread(threadId, "opencode")` | Same OpenCode session stats |
+| `codex` | `CodexService+Status.refreshContextWindowUsage` → `thread/contextWindow/read` | `handleThreadContextRequest` (cascade #3) | Local Codex rollout via `readLatestContextWindowUsage` |
+| `codex` | `session/getUsageStats` | Handler still matches method name but returns `wrong_provider` error | N/A — iOS must not call this for Codex threads |
+
+**Why two entry points for OpenCode usage:** iOS prefers the dedicated `session/getUsageStats` RPC for OpenCode threads. `thread/contextWindow/read` remains compatible and delegates to the same `sessionGetUsageStats` implementation when ownership is `opencode`, so older clients and status-sheet fallbacks stay aligned.
+
+**Params:**
+```json
+{ "threadId": "opencode-thread-1717000000-a1b2c3" }
+```
+
+**Result (success):**
+```json
+{
+  "threadId": "opencode-thread-1717000000-a1b2c3",
+  "sessionId": "ses_abc123",
+  "usage": { "tokensUsed": 1650, "tokenLimit": 128000 },
+  "source": "opencode"
+}
+```
+
+**Errors:**
+
+| errorCode | When |
+|-----------|------|
+| `missing_thread_id` | `threadId` omitted |
+| `wrong_provider` | Thread not owned by `opencode` |
+| `opencode_disabled` | `REMODEX_DISABLE_OPENCODE=1` |
+| `opencode_unavailable` | OpenCode provider not registered |
+| `session_usage_failed` | SDK/session lookup failed |
+
+**Push path:** After OpenCode turns, `opencode-provider.pushThreadUsageUpdate` may emit `thread/tokenUsage/updated` with the same `usage` shape (no request id).
+
+### runtime/auth/error
+
+**Routing:** bridge → iPhone notification (no request id). Emitted by `opencode-auth-error-handler.js` when OpenCode surfaces a structured `ProviderAuthError`.
+
+**Params:**
+```json
+{
+  "providerID": "anthropic",
+  "providerId": "anthropic",
+  "threadId": "opencode-thread-…",
+  "turnId": "opencode-turn-…",
+  "message": "Re-authenticate on your Mac.",
+  "errorCode": "provider_auth_error",
+  "source": "turn_failed"
+}
+```
+
+Detection uses structured fields (`name`, `errorCode`, `providerID`, HTTP 401/403 with provider id) — not loose message substring matching. See ADR-005.
+
 ### Bridge-Local Methods
 
 These methods are handled by bridge.js handlers and never reach any agent:
@@ -563,6 +628,8 @@ These methods are handled by bridge.js handlers and never reach any agent:
 | `desktop/wakeDisplay` | `desktop-handler.js` | Wake Mac display |
 | `desktop/preferences/read` | `desktop-handler.js` | Read bridge prefs |
 | `voice/transcribe` | `voice-handler.js` | Transcribe audio |
+| `session/getUsageStats` | `opencode-session-usage-handler.js` | OpenCode session token usage (owned threads only) |
+| `project/discover` | `opencode-project-discover-handler.js` | Discover OpenCode projects into registry |
 | `notifications/push/register` | `notifications-handler.js` | Register push token |
 | `account/status/read` | `bridge.js` (bridge-managed) | Auth status snapshot |
 | `initialize` | `bridge.js` (bridge-managed) | Handshake + version check |

@@ -50,7 +50,34 @@ private enum RuntimeProviderPolicy {
     ]
 }
 
+private let openCodeModelsRetryErrorMessage = "OpenCode models did not load. Tap Retry in the model menu."
+
 extension CodexService {
+    func modelsErrorMessage(forThreadId threadId: String?) -> String? {
+        guard let threadId = threadId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !threadId.isEmpty else {
+            return nil
+        }
+        let provider = CodexModelOption.normalizedProvider(
+            runtimeModelProviderForTurn(threadId: threadId)
+        ) ?? RuntimeSelectionDefaults.provider
+        return modelsErrorMessageByProvider[provider]
+    }
+
+    func setModelsErrorMessage(_ message: String?, forProvider provider: String) {
+        let normalizedProvider = CodexModelOption.normalizedProvider(provider) ?? provider
+        let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            modelsErrorMessageByProvider.removeValue(forKey: normalizedProvider)
+        } else {
+            modelsErrorMessageByProvider[normalizedProvider] = trimmed
+        }
+    }
+
+    func clearModelsErrorMessages() {
+        modelsErrorMessageByProvider.removeAll()
+    }
+
     // Resolves the effective per-chat override record after normalizing the thread id.
     func threadRuntimeOverride(for threadId: String?) -> CodexThreadRuntimeOverride? {
         guard let normalizedThreadID = normalizedInterruptIdentifier(threadId) else {
@@ -226,18 +253,21 @@ extension CodexService {
 
             let decodedModels = items.compactMap { decodeModel(CodexModelOption.self, from: $0) }
             if decodedModels.isEmpty, !items.isEmpty {
-                modelsErrorMessage = "Models could not be decoded. Tap Retry in the model menu."
+                setModelsErrorMessage(
+                    "Models could not be decoded. Tap Retry in the model menu.",
+                    forProvider: "opencode"
+                )
                 debugRuntimeLog("model/list decode produced 0 models from \(items.count) items")
             } else {
                 availableModels = decodedModels
-                modelsErrorMessage = nil
+                clearModelsErrorMessages()
                 normalizeRuntimeSelectionsAfterModelsUpdate()
                 debugRuntimeLog("model/list success count=\(decodedModels.count)")
             }
             reconcileOpenCodeModelsAfterList()
         } catch {
             if !availableModels.isEmpty {
-                modelsErrorMessage = nil
+                clearModelsErrorMessages()
                 debugRuntimeLog("model/list refresh failed; keeping \(availableModels.count) cached models")
                 reconcileOpenCodeModelsAfterList()
                 return
@@ -263,7 +293,7 @@ extension CodexService {
         if isOpenCodeModelListRetryTerminal() {
             resetOpenCodeModelsRetry()
             if openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
-                modelsErrorMessage = nil
+                setModelsErrorMessage(nil, forProvider: "opencode")
             }
             return
         }
@@ -273,15 +303,15 @@ extension CodexService {
         }
         if hasOpenCodeModels {
             resetOpenCodeModelsRetry()
-            if modelsErrorMessage == "OpenCode models did not load. Tap Retry in the model menu." {
-                modelsErrorMessage = nil
+            if modelsErrorMessage(forThreadId: activeThreadId) == openCodeModelsRetryErrorMessage {
+                setModelsErrorMessage(nil, forProvider: "opencode")
             }
             return
         }
 
         guard openCodeModelRetryCount < 4 else {
             openCodeModelsRetryTask = nil
-            modelsErrorMessage = "OpenCode models did not load. Tap Retry in the model menu."
+            setModelsErrorMessage(openCodeModelsRetryErrorMessage, forProvider: "opencode")
             debugRuntimeLog("OpenCode model/list gave up after \(openCodeModelRetryCount) retries")
             return
         }
@@ -964,7 +994,7 @@ extension CodexService {
     func handleModelListFailure(_ error: Error) {
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = message.isEmpty ? "Unable to load models" : message
-        modelsErrorMessage = normalized
+        setModelsErrorMessage(normalized, forProvider: "opencode")
         debugRuntimeLog("model/list failed: \(normalized)")
     }
 

@@ -83,6 +83,22 @@ final class OpenCodeModelListRetryTests: XCTestCase {
         XCTAssertFalse(service.isOpenCodeModelListRetryTerminal())
     }
 
+    func testModelsErrorMessageIsScopedByProvider() {
+        let service = makeService()
+        service.setModelsErrorMessage("OpenCode models failed", forProvider: "opencode")
+        service.threadRuntimeOverridesByThreadID["thread-codex"] = CodexThreadRuntimeOverride(
+            modelId: "gpt-5.5",
+            modelProvider: "codex"
+        )
+        service.threadRuntimeOverridesByThreadID["thread-oc"] = CodexThreadRuntimeOverride(
+            modelId: "anthropic/claude",
+            modelProvider: "opencode"
+        )
+
+        XCTAssertNil(service.modelsErrorMessage(forThreadId: "thread-codex"))
+        XCTAssertEqual(service.modelsErrorMessage(forThreadId: "thread-oc"), "OpenCode models failed")
+    }
+
     func testReconcileDoesNotScheduleRetryForUnknown() {
         let service = makeService()
         service.availableRuntimes = [makeOpenCodeRuntime(enabled: true)]

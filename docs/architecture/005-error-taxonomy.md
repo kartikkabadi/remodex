@@ -38,7 +38,9 @@ try {
 ```
 
 **Error codes from the SDK layer:**
-`opencode_not_installed`, `opencode_version_too_old`, `opencode_server_failed`, `opencode_server_not_healthy`, `opencode_sdk_error`, `opencode_timeout`
+`opencode_not_installed`, `opencode_version_too_old`, `opencode_server_failed`, `opencode_server_not_healthy`, `opencode_sdk_error`, `opencode_timeout`, `provider_auth_error`
+
+**OpenCode provider auth (`ProviderAuthError`):** The bridge classifies auth failures using structured payload fields in `opencode-usage-mapper.isProviderAuthErrorPayload` — `name: "ProviderAuthError"`, `errorCode: "provider_auth_error"`, nested `data.errorCode`, `providerID` / `authProvider`, and HTTP `401`/`403` paired with a provider id. Message substring heuristics (e.g. bare `"unauthorized"`) are intentionally **not** used. Matching failures are forwarded to iOS as the `runtime/auth/error` notification (see `opencode-auth-error-handler.js`).
 
 ### Layer 2: Bridge/Router Errors
 
@@ -82,11 +84,20 @@ Every error crossing the encrypted relay uses this shape:
 
 The `message` field is user-facing on iPhone. The `data.errorCode` is machine-readable for iOS to decide recovery actions. The `data.sdkMessage` and `data.minVersion` are optional diagnostic fields.
 
+### Handler cascade (where errors are produced)
+
+Bridge-local handlers run in a fixed order in `bridge.js:handleApplicationMessage()` before the runtime provider router. Load-bearing positions for error-producing paths:
+
+1. Handshake/account → 2. Voice → 3. `thread/contextWindow/read` → 4. `session/getUsageStats` → 5. Workspace → 6. `project/discover` → 7. Project → 8. Pet → 9. Notifications → 10. Desktop → 11. Git → **12. Runtime provider router** → 13–15. Observers → 16. Thread turns list → 17. Codex passthrough.
+
+Auth and usage errors for OpenCode originate in the provider layer (`opencode-provider.js`) and are either returned as JSON-RPC errors (usage/session handlers) or pushed as `runtime/auth/error` notifications. Full method list: `docs/contracts/bridge-rpc.md`.
+
 ### Error Flow
 
 ```
 OpenCode SDK  ──throws──▶  opencode-client.js  ──wraps──▶  Domain Error { errorCode: "opencode_sdk_error" }
 Domain Error  ──caught──▶  opencode-provider.js  ──maps──▶  JSON-RPC Error { message: "...", data: { errorCode: "..." } }
+                                                      └──▶  runtime/auth/error notification (provider_auth_error)
 JSON-RPC Error ──relay──▶  iPhone  ──renders──▶  SwiftUI alert/error card
 ```
 
