@@ -3119,6 +3119,58 @@ extension CodexService {
         return true
     }
 
+    func shouldDedupeAssistantCompletion(
+        threadId: String,
+        turnId: String?,
+        text: String,
+        itemId: String?,
+        now: Date = Date()
+    ) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let textHash = trimmed.hashValue.description
+
+        if let turnId,
+           let fingerprint = assistantCompletionFingerprintByTurn[turnId],
+           now.timeIntervalSince(fingerprint.timestamp) < 30,
+           fingerprint.textHash == textHash,
+           fingerprint.itemId == itemId || fingerprint.itemId == nil || itemId == nil {
+            return true
+        }
+
+        if let fingerprint = assistantCompletionFingerprintByThread[threadId],
+           now.timeIntervalSince(fingerprint.timestamp) < 45,
+           fingerprint.text == trimmed {
+            return true
+        }
+
+        return false
+    }
+
+    func recordAssistantCompletion(
+        threadId: String,
+        turnId: String?,
+        text: String,
+        itemId: String?
+    ) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        assistantCompletionFingerprintByThread[threadId] = (text: trimmed, timestamp: now)
+        if let turnId {
+            assistantCompletionFingerprintByTurn[turnId] = (
+                textHash: trimmed.hashValue.description,
+                itemId: itemId,
+                timestamp: now
+            )
+        }
+    }
+
+    func clearAssistantCompletionFingerprint(for turnId: String?) {
+        guard let normalizedTurnId = normalizedStreamingItemID(turnId) else {
+            return
+        }
+        assistantCompletionFingerprintByTurn.removeValue(forKey: normalizedTurnId)
+    }
+
     // Finalizes assistant text when item/completed carries the canonical message body.
     func completeAssistantMessage(
         threadId: String,
@@ -3155,7 +3207,12 @@ extension CodexService {
            activeTurnIdForThread != nil || threadHasActiveOrRunningTurn(threadId) {
             // t3code never assigns turn-less completions to the newest active turn.
             // Late legacy payloads are ambiguous, so do not let them overwrite the current answer.
-            assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+            recordAssistantCompletion(
+                threadId: threadId,
+                turnId: activeTurnIdForThread,
+                text: trimmedText,
+                itemId: explicitItemId
+            )
             return
         }
 
@@ -3167,10 +3224,16 @@ extension CodexService {
         }
         flushPendingAssistantDeltas(for: threadId, turnId: resolvedTurnId, itemId: explicitItemId)
 
-        if resolvedTurnId == nil, explicitItemId == nil,
-           let fingerprint = assistantCompletionFingerprintByThread[threadId],
-           fingerprint.text == trimmedText,
-           now.timeIntervalSince(fingerprint.timestamp) <= 45 {
+        if shouldDedupeAssistantCompletion(
+            threadId: threadId,
+            turnId: resolvedTurnId,
+            text: trimmedText,
+            itemId: explicitItemId,
+            now: now
+        ) {
+            debugRuntimeLog(
+                "ios_assistant_completion_deduped thread=\(threadId) turn=\(resolvedTurnId ?? "nil")"
+            )
             return
         }
 
@@ -3184,7 +3247,12 @@ extension CodexService {
                 messageId: replayTerminalMessageId,
                 assistantPhase: normalizedPhase
             )
-            assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+            recordAssistantCompletion(
+                threadId: threadId,
+                turnId: resolvedTurnId,
+                text: trimmedText,
+                itemId: explicitItemId
+            )
             _ = mergeGeneratedImageArtifactsIntoAssistantMessage(
                 threadId: threadId,
                 turnId: resolvedTurnId,
@@ -3225,7 +3293,12 @@ extension CodexService {
             }
             refreshDerivedPlanMetadata(threadId: threadId, messageIndex: imagePreviewIndex)
             let messageId = messagesByThread[threadId]?[imagePreviewIndex].id
-            assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+            recordAssistantCompletion(
+                threadId: threadId,
+                turnId: resolvedTurnId,
+                text: trimmedText,
+                itemId: explicitItemId
+            )
             if let messageId {
                 _ = mergeGeneratedImageArtifactsIntoAssistantMessage(
                     threadId: threadId,
@@ -3258,7 +3331,12 @@ extension CodexService {
                 assistantPhase: normalizedPhase
             )
             refreshDerivedPlanMetadata(threadId: threadId, messageIndex: duplicateIndex)
-            assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+            recordAssistantCompletion(
+                threadId: threadId,
+                turnId: resolvedTurnId,
+                text: trimmedText,
+                itemId: explicitItemId
+            )
             if let resolvedAssistantMessageId = messagesByThread[threadId]?[duplicateIndex].id {
                 _ = mergeGeneratedImageArtifactsIntoAssistantMessage(
                     threadId: threadId,
@@ -3317,7 +3395,12 @@ extension CodexService {
                     refreshDerivedPlanMetadata(threadId: threadId, messageIndex: targetIndex)
                     resolvedAssistantMessageId = messagesByThread[threadId]?[targetIndex].id
                 }
-                assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+                recordAssistantCompletion(
+                    threadId: threadId,
+                    turnId: resolvedTurnId,
+                    text: trimmedText,
+                    itemId: explicitItemId
+                )
                 if let resolvedAssistantMessageId {
                     _ = mergeGeneratedImageArtifactsIntoAssistantMessage(
                         threadId: threadId,
@@ -3338,7 +3421,12 @@ extension CodexService {
             if !completedAssistantIndices.isEmpty {
                 // Late legacy completions without item identity are ambiguous once a closed
                 // turn already has assistant bubbles. Ignore them instead of appending a duplicate.
-                assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+                recordAssistantCompletion(
+                    threadId: threadId,
+                    turnId: resolvedTurnId,
+                    text: trimmedText,
+                    itemId: explicitItemId
+                )
                 return
             }
         }
@@ -3441,7 +3529,12 @@ extension CodexService {
             }
         }
 
-        assistantCompletionFingerprintByThread[threadId] = (text: trimmedText, timestamp: now)
+        recordAssistantCompletion(
+            threadId: threadId,
+            turnId: resolvedTurnId,
+            text: trimmedText,
+            itemId: explicitItemId
+        )
 
         if let resolvedAssistantMessageId {
             _ = mergeGeneratedImageArtifactsIntoAssistantMessage(
@@ -5234,9 +5327,13 @@ extension CodexService {
         activeTurnId: String?,
         now: Date
     ) -> Bool {
-        if let fingerprint = assistantCompletionFingerprintByThread[threadId],
-           fingerprint.text == text,
-           now.timeIntervalSince(fingerprint.timestamp) <= 45 {
+        if shouldDedupeAssistantCompletion(
+            threadId: threadId,
+            turnId: activeTurnId,
+            text: text,
+            itemId: nil,
+            now: now
+        ) {
             return true
         }
 

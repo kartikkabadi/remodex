@@ -168,6 +168,9 @@ extension CodexService {
             persistCurrentMacMessages()
         }
         assistantCompletionFingerprintByThread.removeAll()
+        assistantCompletionFingerprintByTurn.removeAll()
+        deferredSyncTasks.values.forEach { $0.cancel() }
+        deferredSyncTasks.removeAll()
         recentActivityLineByThread.removeAll()
         removeAllThreadTimelineState()
         assistantRevertStateCacheByThread.removeAll()
@@ -689,6 +692,9 @@ extension CodexService {
         runtimeOptionRefreshToken = nil
         modelsErrorMessage = nil
         assistantCompletionFingerprintByThread.removeAll()
+        assistantCompletionFingerprintByTurn.removeAll()
+        deferredSyncTasks.values.forEach { $0.cancel() }
+        deferredSyncTasks.removeAll()
         recentActivityLineByThread.removeAll()
         removeAllThreadTimelineState()
         assistantRevertStateCacheByThread.removeAll()

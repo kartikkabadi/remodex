@@ -588,6 +588,10 @@ final class CodexService {
     var coalescedRevertRefreshTask: Task<Void, Never>?
     // Dedupes completion payloads when servers omit turn/item identifiers.
     var assistantCompletionFingerprintByThread: [String: (text: String, timestamp: Date)] = [:]
+    // Dedupes duplicate item/completed races within a single turn (30s TTL).
+    @ObservationIgnored var assistantCompletionFingerprintByTurn: [String: (textHash: String, itemId: String?, timestamp: Date)] = [:]
+    // Coalesces turn/started history sync so live pending rows are not raced by thread/read.
+    @ObservationIgnored var deferredSyncTasks: [String: Task<Void, Never>] = [:]
     // Dedupes concise activity feed lines per thread/turn to avoid visual spam.
     var recentActivityLineByThread: [String: CodexRecentActivityLine] = [:]
     var contextWindowUsageByThread: [String: ContextWindowUsage] = [:]

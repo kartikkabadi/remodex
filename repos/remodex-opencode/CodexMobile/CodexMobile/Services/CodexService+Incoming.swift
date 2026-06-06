@@ -294,8 +294,11 @@ extension CodexService {
         case "item/started", "codex/event/item_started":
             handleItemStarted(paramsObject)
 
-        case "error", "codex/event/error", "turn/failed":
-            handleErrorNotification(paramsObject)
+        case "turn/failed":
+            handleErrorNotification(paramsObject, isTurnFailed: true)
+
+        case "error", "codex/event/error":
+            handleErrorNotification(paramsObject, isTurnFailed: false)
 
         case "serverRequest/resolved":
             handleServerRequestResolved(paramsObject)
@@ -596,7 +599,14 @@ extension CodexService {
             activeTurnId = turnID
         }
 
-        requestImmediateSync(threadId: threadId ?? activeThreadId)
+        if let threadId {
+            requestDeferredSync(threadId: threadId)
+            if isDesktopMirroredTurn {
+                requestImmediateSync(threadId: threadId)
+            }
+        } else {
+            requestImmediateSync(threadId: activeThreadId)
+        }
     }
 
     private func handleTurnCompleted(_ paramsObject: IncomingParamsObject?) {
@@ -622,6 +632,7 @@ extension CodexService {
                 turnFailureMessage: turnFailureMessage
             )
             recordTurnTerminalState(threadId: threadId, turnId: resolvedTurnID, state: terminalState)
+            clearAssistantCompletionFingerprint(for: resolvedTurnID)
             noteTurnFinished(turnId: resolvedTurnID)
             markTurnCompleted(threadId: threadId, turnId: resolvedTurnID)
             if terminalState == .completed {
@@ -640,6 +651,7 @@ extension CodexService {
             } else {
                 discardTurnStartWorkspaceCheckpointCopyIfNeeded(turnId: resolvedTurnID)
             }
+            cancelDeferredSync(threadId: threadId)
             requestImmediateSync(threadId: threadId)
             requestThreadHistoryReconcile(threadId: threadId)
 
@@ -670,7 +682,7 @@ extension CodexService {
             : (userFacingRuntimeMessage(for: turnFailureMessage) ?? turnFailureMessage)
     }
 
-    private func handleErrorNotification(_ paramsObject: IncomingParamsObject?) {
+    private func handleErrorNotification(_ paramsObject: IncomingParamsObject?, isTurnFailed: Bool = false) {
         if shouldRetryTurnError(from: paramsObject) {
             return
         }
@@ -692,7 +704,13 @@ extension CodexService {
 
         let turnId = extractTurnID(from: paramsObject)
         if let threadId = resolveThreadID(from: paramsObject, turnIdHint: turnId) {
+            if isTurnFailed {
+                cancelDeferredSync(threadId: threadId)
+            }
             let resolvedTurnID = turnId ?? activeTurnIdByThread[threadId]
+            if isTurnFailed {
+                clearAssistantCompletionFingerprint(for: resolvedTurnID)
+            }
             if !shouldSuppressErrorMessage {
                 appendSystemMessage(threadId: threadId, text: "Error: \(userFacingErrorMessage)", turnId: turnId)
             }

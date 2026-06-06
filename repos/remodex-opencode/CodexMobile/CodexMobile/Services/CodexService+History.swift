@@ -619,6 +619,31 @@ extension CodexService {
                 }
             }
 
+            // Running threads can still receive thread/read duplicates once the live assistant
+            // row has already finalized. Reconcile exact text instead of appending a replay.
+            if message.role == .assistant,
+               let turnId = message.turnId, !turnId.isEmpty,
+               threadIsStillActive {
+                let candidateIndices = merged.indices.filter { index in
+                    let candidate = merged[index]
+                    return candidate.role == .assistant
+                        && candidate.turnId == turnId
+                        && !candidate.isStreaming
+                        && historyTextsMatch(candidate.text, message.text)
+                }
+
+                if candidateIndices.count == 1,
+                   let index = candidateIndices.last {
+                    merged[index] = reconcileExistingMessage(
+                        merged[index],
+                        with: message,
+                        activeThreadIDs: activeThreadIDs,
+                        runningThreadIDs: runningThreadIDs
+                    )
+                    continue
+                }
+            }
+
             if message.role == .user,
                let turnId = message.turnId, !turnId.isEmpty,
                let index = uniqueUserHistoryMergeIndex(
@@ -751,7 +776,27 @@ extension CodexService {
                    in: merged,
                    message: message
                ) {
-                merged[pendingIndex] = reconcileExistingMessage(merged[pendingIndex], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                let hasConfirmedDuplicate = threadIsStillActive
+                    && merged.contains(where: { candidate in
+                        guard candidate.role == .user,
+                              candidate.deliveryState == .confirmed else {
+                            return false
+                        }
+                        let candidateTurnId = normalizedHistoryIdentifier(candidate.turnId)
+                        let incomingTurnId = normalizedHistoryIdentifier(message.turnId)
+                        return historyTextsMatch(candidate.text, message.text)
+                            && (candidateTurnId == nil
+                                || incomingTurnId == nil
+                                || candidateTurnId == incomingTurnId)
+                    })
+                if !hasConfirmedDuplicate {
+                    merged[pendingIndex] = reconcileExistingMessage(
+                        merged[pendingIndex],
+                        with: message,
+                        activeThreadIDs: activeThreadIDs,
+                        runningThreadIDs: runningThreadIDs
+                    )
+                }
                 continue
             }
 
@@ -1354,11 +1399,19 @@ extension CodexService {
             return matchingIndices[0]
         }
 
+        let confirmedIndices = matchingIndices.filter { merged[$0].deliveryState == .confirmed }
         let normalizedTurnId = normalizedHistoryIdentifier(turnId)
         let sameTurnIndices = matchingIndices.filter { index in
             normalizedHistoryIdentifier(merged[index].turnId) == normalizedTurnId
         }
-        let candidates = sameTurnIndices.isEmpty ? matchingIndices : sameTurnIndices
+        let candidates: [Int]
+        if !confirmedIndices.isEmpty {
+            candidates = confirmedIndices
+        } else if !sameTurnIndices.isEmpty {
+            candidates = sameTurnIndices
+        } else {
+            candidates = matchingIndices
+        }
         return candidates.min(by: { lhs, rhs in
             abs(message.createdAt.timeIntervalSince(merged[lhs].createdAt))
                 < abs(message.createdAt.timeIntervalSince(merged[rhs].createdAt))

@@ -2338,6 +2338,64 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         XCTAssertTrue(merged[0].isStreaming)
     }
 
+    func testConfirmedUserHistoryMergeDoesNotAppendSecondBubble() throws {
+        let service = makeService()
+        let threadID = "thread-user-merge-\(UUID().uuidString)"
+        let turnID = "turn-user-merge-\(UUID().uuidString)"
+        let prompt = "Hey"
+
+        service.appendUserMessage(threadId: threadID, text: prompt, turnId: turnID)
+        service.confirmLatestPendingUserMessage(threadId: threadID, turnId: turnID)
+
+        let existing = service.messages(for: threadID)
+        let history = [
+            CodexMessage(
+                threadId: threadID,
+                role: .user,
+                text: prompt,
+                turnId: turnID,
+                deliveryState: .confirmed,
+                orderIndex: 0
+            ),
+        ]
+
+        let merged = try CodexService.mergeHistoryMessages(
+            existing,
+            history,
+            activeThreadIDs: [threadID],
+            runningThreadIDs: [threadID]
+        )
+
+        XCTAssertEqual(merged.filter { $0.role == .user }.count, 1)
+        XCTAssertEqual(merged.first(where: { $0.role == .user })?.deliveryState, .confirmed)
+    }
+
+    func testDuplicateAssistantCompletionRaceIsDedupedPerTurn() {
+        let service = makeService()
+        let threadID = "thread-dedupe-\(UUID().uuidString)"
+        let turnID = "turn-dedupe-\(UUID().uuidString)"
+        let itemID = "item-dedupe"
+        let answer = "Single canonical assistant answer for this turn."
+
+        service.completeAssistantMessage(
+            threadId: threadID,
+            turnId: turnID,
+            itemId: itemID,
+            text: answer
+        )
+        service.completeAssistantMessage(
+            threadId: threadID,
+            turnId: turnID,
+            itemId: itemID,
+            text: answer
+        )
+
+        let assistantMessages = service.messages(for: threadID).filter { $0.role == .assistant }
+        XCTAssertEqual(assistantMessages.count, 1)
+        XCTAssertEqual(assistantMessages.first?.text, answer)
+        XCTAssertNotNil(service.assistantCompletionFingerprintByTurn[turnID])
+    }
+
     func testRunningHistorySnapshotWithExtraOlderSuffixDoesNotExtendAssistantText() throws {
         let threadID = "thread-\(UUID().uuidString)"
         let turnID = "turn-\(UUID().uuidString)"

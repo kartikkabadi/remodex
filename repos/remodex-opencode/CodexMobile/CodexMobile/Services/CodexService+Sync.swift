@@ -139,6 +139,29 @@ extension CodexService {
         }
     }
 
+    // Defers thread/read reconciliation until a turn settles so turn/started does not race live rows.
+    func requestDeferredSync(threadId: String, delayNanoseconds: UInt64 = 2_000_000_000) {
+        guard canRunRealtimeSyncLoop else {
+            return
+        }
+
+        deferredSyncTasks[threadId]?.cancel()
+        deferredSyncTasks[threadId] = Task { @MainActor [weak self] in
+            defer { self?.deferredSyncTasks.removeValue(forKey: threadId) }
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard let self, !Task.isCancelled, self.isConnected, self.isInitialized else { return }
+            if self.threadHasActiveOrRunningTurn(threadId) {
+                return
+            }
+            await self.syncActiveThreadState(threadId: threadId)
+        }
+    }
+
+    func cancelDeferredSync(threadId: String) {
+        deferredSyncTasks[threadId]?.cancel()
+        deferredSyncTasks.removeValue(forKey: threadId)
+    }
+
     // Thread opening should refresh the visible chat, not refetch the full sidebar list.
     func requestImmediateActiveThreadSync(threadId: String? = nil, forceHistoryRefresh: Bool = false) {
         guard canRunRealtimeSyncLoop else {
