@@ -82,24 +82,26 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
         {
           "enabled": true,
           "providers": [
-            { "id": "anthropic", "name": "Anthropic" },
+            { "id": "anthropic", "name": "Anthropic", "logoAssetId": "provider-anthropic-logo" },
+            { "id": "openai", "name": "OpenAI", "logoAssetId": "provider-openai-logo" },
             { "id": "opencode-go", "name": "OpenCode Go", "logoAssetId": "provider-opencode-go-logo" }
           ]
         }
         """
         let data = try XCTUnwrap(json.data(using: .utf8))
         let details = try JSONDecoder().decode(OpenCodeRuntimeDetails.self, from: data)
-        XCTAssertEqual(details.providers?.count, 2)
+        XCTAssertEqual(details.providers?.count, 3)
         XCTAssertEqual(details.providers?.first?.id, "anthropic")
-        XCTAssertNil(details.providers?.first?.logoAssetId)
+        XCTAssertEqual(details.providers?.first?.logoAssetId, "provider-anthropic-logo")
+        XCTAssertEqual(details.providers?[1].logoAssetId, "provider-openai-logo")
         XCTAssertEqual(details.providers?.last?.logoAssetId, "provider-opencode-go-logo")
     }
 
     func testRuntimeProviderLogoCatalogResolverKnownIdsAndFallback() {
         let catalog: [OpenCodeCatalogProvider] = [
             OpenCodeCatalogProvider(id: "opencode-go", name: "Go", logoAssetId: "provider-opencode-go-logo"),
-            OpenCodeCatalogProvider(id: "anthropic", name: "Anthropic", logoAssetId: nil),
-            OpenCodeCatalogProvider(id: "openai", name: "OpenAI", logoAssetId: nil),
+            OpenCodeCatalogProvider(id: "anthropic", name: "Anthropic", logoAssetId: "provider-anthropic-logo"),
+            OpenCodeCatalogProvider(id: "openai", name: "OpenAI", logoAssetId: "provider-openai-logo"),
         ]
 
         // catalog provides logoAssetId -> use it (drives asset render for cleared)
@@ -112,9 +114,15 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
             "provider-opencode-go-logo"
         )
 
-        // catalog entry but no logoAssetId -> nil (triggers SF in image/menuUIImage)
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "anthropic", catalogProviders: catalog))
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "openai", catalogProviders: catalog))
+        // catalog provides logoAssetId for cleared providers
+        XCTAssertEqual(
+            RuntimeProviderLogo.assetName(for: "anthropic", catalogProviders: catalog),
+            "provider-anthropic-logo"
+        )
+        XCTAssertEqual(
+            RuntimeProviderLogo.assetName(for: "openai", catalogProviders: catalog),
+            "provider-openai-logo"
+        )
 
         // no catalog match, falls back to hardcoded assets for the 4
         XCTAssertEqual(RuntimeProviderLogo.assetName(for: "codex", catalogProviders: []), "provider-codex-logo")

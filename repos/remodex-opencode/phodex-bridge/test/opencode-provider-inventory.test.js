@@ -10,7 +10,10 @@ const {
   discoveryReasonCodeFromInventory,
   buildInventoryMeta,
   buildProviderInventory,
+  buildProviderLogoCatalog,
   resolveLogoProviderId,
+  COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS,
+  PROVIDER_LOGO_ID_ALIASES,
 } = require("../src/opencode-provider-inventory");
 
 function makeProvider({ id, name, source = "api", models = {} }) {
@@ -286,6 +289,61 @@ describe("buildProviderInventory", () => {
     assert.equal(row.logoAssetId, undefined);
   });
 
+  test("anthropic inventory row gets logoAssetId from committed catalog", () => {
+    const inventory = {
+      connected: ["anthropic"],
+      all: [
+        makeProvider({
+          id: "anthropic",
+          name: "Anthropic",
+          models: { sonnet: { id: "sonnet", name: "Sonnet" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const anthropic = rows.find((row) => row.id === "anthropic");
+    assert.ok(anthropic);
+    assert.equal(anthropic.logoProviderId, "anthropic");
+    assert.equal(anthropic.logoAssetId, "provider-anthropic-logo");
+  });
+
+  test("amazon-bedrock alias resolves to bedrock logoAssetId", () => {
+    const inventory = {
+      connected: ["amazon-bedrock"],
+      all: [
+        makeProvider({
+          id: "amazon-bedrock",
+          name: "Amazon Bedrock",
+          models: { claude: { id: "claude", name: "Claude" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const bedrock = rows.find((row) => row.id === "amazon-bedrock");
+    assert.ok(bedrock);
+    assert.equal(bedrock.logoProviderId, "bedrock");
+    assert.equal(bedrock.logoAssetId, "provider-bedrock-logo");
+    assert.equal(resolveLogoProviderId("amazon-bedrock", "Amazon Bedrock"), "bedrock");
+  });
+
+  test("github-copilot alias resolves to github logoAssetId", () => {
+    assert.equal(resolveLogoProviderId("github-copilot", "GitHub Copilot"), "github");
+    const inventory = {
+      connected: ["github-copilot"],
+      all: [
+        makeProvider({
+          id: "github-copilot",
+          name: "GitHub Copilot",
+          models: { gpt: { id: "gpt", name: "GPT" } },
+        }),
+      ],
+    };
+    const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
+    const row = rows.find((entry) => entry.id === "github-copilot");
+    assert.ok(row);
+    assert.equal(row.logoAssetId, "provider-github-logo");
+  });
+
   test("dedupes canonical id casing from all[]", () => {
     const inventory = {
       connected: ["openai"],
@@ -296,6 +354,45 @@ describe("buildProviderInventory", () => {
     });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].id, "OpenAI");
+  });
+});
+
+describe("resolveLogoProviderId — committed external assets", () => {
+  test("maps all 30 committed external providers to logoAssetId ids", () => {
+    assert.equal(COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.size, 30);
+    for (const logoProviderId of COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS) {
+      assert.equal(
+        resolveLogoProviderId(logoProviderId, ""),
+        logoProviderId,
+        `expected direct match for ${logoProviderId}`,
+      );
+    }
+  });
+
+  test("maps upstream aliases to committed logo provider ids", () => {
+    for (const [upstreamId, logoProviderId] of Object.entries(PROVIDER_LOGO_ID_ALIASES)) {
+      assert.equal(resolveLogoProviderId(upstreamId, ""), logoProviderId);
+      assert.ok(
+        COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(logoProviderId),
+        `alias target ${logoProviderId} must be committed`,
+      );
+    }
+  });
+
+  test("buildProviderLogoCatalog exposes logoAssetId for key providers", () => {
+    const catalog = buildProviderLogoCatalog([
+      { id: "anthropic", displayName: "Anthropic", logoProviderId: "anthropic", logoAssetId: "provider-anthropic-logo" },
+      { id: "openai", displayName: "OpenAI", logoProviderId: "openai", logoAssetId: "provider-openai-logo" },
+      { id: "ollama", displayName: "Ollama" },
+    ]);
+    assert.equal(catalog.length, 3);
+    assert.equal(catalog[0].logoAssetId, "provider-anthropic-logo");
+    assert.equal(catalog[1].logoAssetId, "provider-openai-logo");
+    assert.equal(catalog[2].logoAssetId, undefined);
+  });
+
+  test("unknown provider has no logoProviderId", () => {
+    assert.equal(resolveLogoProviderId("ollama", "Ollama"), undefined);
   });
 });
 

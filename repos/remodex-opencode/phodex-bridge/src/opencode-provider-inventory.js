@@ -199,19 +199,70 @@ function formatProviderDisplayNameFromId(id) {
     .join(" ");
 }
 
+// 30 external providers with committed Assets.xcassets imagesets (provider-{id}-logo).
+const COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS = new Set([
+  "anthropic",
+  "openai",
+  "google",
+  "xai",
+  "groq",
+  "deepseek",
+  "mistral",
+  "cohere",
+  "perplexity",
+  "together",
+  "amazon",
+  "azure",
+  "openrouter",
+  "github",
+  "bedrock",
+  "alibaba",
+  "cerebras",
+  "cloudflare",
+  "databricks",
+  "deepinfra",
+  "fireworks",
+  "gitlab",
+  "google-vertex",
+  "huggingface",
+  "lmstudio",
+  "minimax",
+  "nebius",
+  "novita",
+  "ovhcloud",
+  "scaleway",
+]);
+
+// Maps upstream OpenCode provider IDs to committed logo asset provider IDs.
+const PROVIDER_LOGO_ID_ALIASES = {
+  "amazon-bedrock": "bedrock",
+  "github-copilot": "github",
+  vertex: "google-vertex",
+  "google-vertex-anthropic": "google-vertex",
+  aws: "amazon",
+};
+
 function resolveLogoProviderId(id, displayName) {
   const canonical = canonicalProviderId(id);
   if (canonical === "opencode-go") {
     return "opencode-go";
   }
-  if (canonical !== "opencode") {
-    return undefined;
+  if (canonical === "opencode") {
+    const normalized = readString(displayName).trim().toLowerCase();
+    if (normalized !== "opencode zen") {
+      return undefined;
+    }
+    return "opencode-zen";
   }
-  const normalized = readString(displayName).trim().toLowerCase();
-  if (normalized !== "opencode zen") {
-    return undefined;
+
+  const alias = PROVIDER_LOGO_ID_ALIASES[canonical];
+  if (alias) {
+    return alias;
   }
-  return "opencode-zen";
+  if (COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(canonical)) {
+    return canonical;
+  }
+  return undefined;
 }
 
 function withLogoProviderId(entry) {
@@ -461,4 +512,6 @@ module.exports = {
   resolveProviderListPayload,
   resolveLogoProviderId,
   buildProviderLogoCatalog,
+  COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS,
+  PROVIDER_LOGO_ID_ALIASES,
 };

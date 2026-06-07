@@ -280,6 +280,13 @@ private struct SettingsNotificationsCard: View {
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
+            if let pushFailure = codex.pushRegistrationFailureMessage,
+               !pushFailure.isEmpty {
+                Text(pushFailure)
+                    .font(AppFont.caption())
+                    .foregroundStyle(.orange)
+            }
+
             if codex.notificationAuthorizationStatus == .notDetermined {
                 SettingsButton("Allow notifications") {
                     HapticFeedback.shared.triggerImpactFeedback()

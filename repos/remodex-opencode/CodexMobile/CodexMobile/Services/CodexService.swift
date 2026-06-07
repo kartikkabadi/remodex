@@ -720,6 +720,8 @@ final class CodexService {
     var notificationObserverTokens: [NSObjectProtocol] = []
     var remoteNotificationDeviceToken: String?
     var lastPushRegistrationSignature: String?
+    /// Set when APNs or relay push registration fails; surfaced in Settings notifications card.
+    var pushRegistrationFailureMessage: String?
     var shouldAutoReconnectOnForeground = false
     // Test hook so connection handling can model `.inactive` without waiting for real app lifecycle changes.
     @ObservationIgnored var applicationStateProvider: () -> UIApplication.State = { UIApplication.shared.applicationState }
