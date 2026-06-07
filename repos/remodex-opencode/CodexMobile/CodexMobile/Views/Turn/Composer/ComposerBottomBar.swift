@@ -345,7 +345,7 @@ struct ComposerBottomBar: View {
     }
 
     private var supportsImageAttachments: Bool {
-        runtimeState.showsComposerAccessMode
+        runtimeState.capabilities.supportsImageAttachments
     }
 
     private var queueBadge: some View {

@@ -13,8 +13,13 @@ struct TurnComposerRuntimeActions {
     let selectServiceTier: (CodexServiceTier?) -> Void
     let selectAgent: (String?) -> Void
     let refreshModels: () -> Void
+    let browseAllModels: () -> Void
 
-    static func resolve(codex: CodexService, threadId: String? = nil) -> TurnComposerRuntimeActions {
+    static func resolve(
+        codex: CodexService,
+        threadId: String? = nil,
+        onBrowseAllModels: (() -> Void)? = nil
+    ) -> TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
             selectModel: { selectionKey in
                 if let threadId,
@@ -54,7 +59,8 @@ struct TurnComposerRuntimeActions {
                     codex.setModelsErrorMessage(nil, forProvider: "opencode")
                     await codex.refreshRuntimeMetadataSequential()
                 }
-            }
+            },
+            browseAllModels: onBrowseAllModels ?? {}
         )
     }
 }

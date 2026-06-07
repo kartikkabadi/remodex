@@ -758,7 +758,8 @@ private struct ComposerPreviewContent: View {
                 selectReasoning: { _ in },
                 selectServiceTier: { _ in },
                 selectAgent: { _ in },
-                refreshModels: {}
+                refreshModels: {},
+                browseAllModels: {}
             ),
             voiceButtonPresentation: TurnComposerVoiceButtonPresentation(
                 systemImageName: "mic",

@@ -8,6 +8,14 @@ import XCTest
 final class OpenCodePermissionQueueTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
+    func testPendingOpenCodePermissionReturnsNilWhenNoMatchForThread() {
+        let service = makeService()
+        service.enqueuePendingOpenCodePermission(makePermission(id: "perm-1", threadId: "thread-a"))
+
+        XCTAssertNil(service.pendingOpenCodePermission(for: "thread-b"))
+        XCTAssertEqual(service.pendingOpenCodePermission(for: "thread-a")?.permissionId, "perm-1")
+    }
+
     func testEnqueuePendingOpenCodePermissionIsFIFOPerThread() {
         let service = makeService()
         let first = makePermission(id: "perm-1", threadId: "thread-a")

@@ -24,7 +24,6 @@ extension CodexService {
         if let threadId {
             let normalized = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
             return pendingOpenCodePermissions.first(where: { $0.threadId == normalized })
-                ?? pendingOpenCodePermissions.first
         }
         return pendingOpenCodePermissions.first
     }

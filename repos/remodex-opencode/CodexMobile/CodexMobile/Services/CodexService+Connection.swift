@@ -549,9 +549,14 @@ extension CodexService {
         }
         connectionRecoveryState = disposition.connectionRecoveryState
         lastErrorMessage = disposition.lastErrorMessage
-        finalizeAllStreamingState()
+        if disposition.shouldAutoReconnectOnForeground {
+            finalizeStreamingPresentationOnly()
+            clearConnectionSyncState(preservingRunningThreads: true)
+        } else {
+            finalizeAllStreamingState()
+            clearConnectionSyncState()
+        }
         endBackgroundRunGraceTask(reason: "receive-error")
-        clearConnectionSyncState()
         // Thread resumes are transport-scoped; a fresh socket must be allowed to
         // issue `thread/resume` again for desktop-origin threads after recovery.
         resumedThreadIDs.removeAll()
@@ -782,7 +787,7 @@ extension CodexService {
     }
 
     // Drops sync work tied to the old transport so reconnect starts from a clean baseline.
-    private func clearConnectionSyncState() {
+    private func clearConnectionSyncState(preservingRunningThreads: Bool = false) {
         isBootstrappingConnectionSync = false
         stopSyncLoop()
         postConnectSyncTask?.cancel()
@@ -790,7 +795,11 @@ extension CodexService {
         postConnectSyncToken = nil
         threadListFetchTaskByLimit.values.forEach { $0.task.cancel() }
         threadListFetchTaskByLimit.removeAll()
-        cancelAllPerThreadRefreshWork()
+        if preservingRunningThreads {
+            clearHydrationCachesPreservingRunningThreads()
+        } else {
+            cancelAllPerThreadRefreshWork()
+        }
     }
 
     // Avoids wiping thread/runtime state when reconnecting after a socket that already died.

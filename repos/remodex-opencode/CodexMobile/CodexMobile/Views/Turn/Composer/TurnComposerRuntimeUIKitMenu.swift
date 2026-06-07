@@ -268,11 +268,13 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
     ) -> UIMenu {
         let upstreamGroups = TurnComposerMetaMapper.openCodeModelsGroupedByUpstream(models)
         if upstreamGroups.isEmpty {
+            var flatChildren: [UIMenuElement] = models.map { modelAction(model: $0, input: input) }
+            flatChildren.append(browseAllModelsAction(input))
             return UIMenu(
                 title: providerTitle,
                 image: RuntimeProviderLogo.menuUIImage(provider: "opencode", catalogProviders: input.openCodeCatalogProviders),
-                options: [.singleSelection],
-                children: models.map { modelAction(model: $0, input: input) }
+                options: [],
+                children: flatChildren
             )
         }
 
@@ -297,6 +299,8 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         if !ungrouped.isEmpty {
             children.append(contentsOf: ungrouped.map { modelAction(model: $0, input: input) })
         }
+
+        children.append(browseAllModelsAction(input))
 
         return UIMenu(
             title: providerTitle,
@@ -476,5 +480,12 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let action = UIAction(title: title) { _ in }
         action.attributes.insert(.disabled)
         return action
+    }
+
+    private static func browseAllModelsAction(_ input: Input) -> UIAction {
+        UIAction(title: "Browse all models…") { _ in
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            input.runtimeActions.browseAllModels()
+        }
     }
 }

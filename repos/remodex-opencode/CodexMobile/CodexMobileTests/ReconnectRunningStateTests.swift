@@ -4,6 +4,7 @@
 // Exports: ReconnectRunningStateTests
 // Depends on: XCTest, CodexMobile
 
+import Network
 import XCTest
 @testable import CodexMobile
 
@@ -101,6 +102,26 @@ final class ReconnectRunningStateTests: XCTestCase {
         XCTAssertNil(service.activeTurnID(for: threadID))
         XCTAssertFalse(service.runningThreadIDs.contains(threadID))
         XCTAssertEqual(service.threadRunBadgeState(for: threadID), .idle)
+    }
+
+    func testReceiveErrorWithReconnectPreservesRunningMarkers() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+
+        service.isConnected = true
+        service.isInitialized = true
+        service.activeTurnIdByThread[threadID] = turnID
+        service.activeTurnId = turnID
+        service.runningThreadIDs.insert(threadID)
+
+        service.handleReceiveError(NWError.posix(.ECONNABORTED))
+
+        XCTAssertFalse(service.isConnected)
+        XCTAssertTrue(service.shouldAutoReconnectOnForeground)
+        XCTAssertEqual(service.activeTurnID(for: threadID), turnID)
+        XCTAssertEqual(service.activeTurnId, turnID)
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
     }
 
     func testTransportOnlyDisconnectPreservesTimelineState() async {

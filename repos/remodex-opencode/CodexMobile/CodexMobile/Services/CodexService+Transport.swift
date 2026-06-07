@@ -218,7 +218,8 @@ extension CodexService {
                     timeoutMessage: timeoutMessage
                 )
 
-                Task {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     do {
                         try await sendMessage(request)
                     } catch {

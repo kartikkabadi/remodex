@@ -48,6 +48,7 @@ struct TurnComposerHostView: View {
 
     @State private var isShowingAllBridgeSlashCommands = false
     @State private var isShowingAllSkills = false
+    @State private var isShowingAllModels = false
 
     private var slashHostContext: TurnSlashHostContext {
         TurnSlashHostContext(
@@ -160,7 +161,11 @@ struct TurnComposerHostView: View {
             voiceAudioLevels: voiceAudioLevels,
             voiceRecordingDuration: voiceRecordingDuration
         )
-        let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex, threadId: thread.id)
+        let runtimeActions = TurnComposerRuntimeActions.resolve(
+            codex: codex,
+            threadId: thread.id,
+            onBrowseAllModels: { isShowingAllModels = true }
+        )
         let selectedModelID = codex.visibleSelectedModelIDForComposer(threadId: thread.id)
         let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer(threadId: thread.id)
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
@@ -390,6 +395,14 @@ struct TurnComposerHostView: View {
             isDesktopHandoffLoading: isDesktopHandoffLoading,
             onContinueOnDesktop: onContinueOnDesktop
         )
+        .sheet(isPresented: $isShowingAllModels) {
+            OpenCodeAllModelsSheet(
+                threadId: thread.id,
+                onSelect: { model in
+                    runtimeActions.selectModel(model.selectionKey)
+                }
+            )
+        }
         .sheet(isPresented: $isShowingAllSkills) {
             BridgeSkillsFullListSheet(
                 items: viewModel.skillFullListItems,
