@@ -1212,7 +1212,7 @@ test("runtime/catalog includes opencode.providers logo catalog (id,name,logoAsse
   const responses = [];
   // simulate providerInventory rows (as produced by buildProviderInventory + withLogoProviderId post-extend)
   const mockInventory = [
-    { id: "anthropic", displayName: "Anthropic" /* no logo */ },
+    { id: "anthropic", displayName: "Anthropic", logoProviderId: "anthropic", logoAssetId: "provider-anthropic-logo" },
     { id: "opencode-go", displayName: "OpenCode Go", logoProviderId: "opencode-go" },
     { id: "opencode", displayName: "OpenCode Zen", logoProviderId: "opencode-zen" },
   ];
@@ -1254,10 +1254,10 @@ test("runtime/catalog includes opencode.providers logo catalog (id,name,logoAsse
   const zen = op.providers.find((p) => p.id === "opencode");
   assert.ok(zen);
   assert.equal(zen.logoAssetId, "provider-opencode-zen-logo");
-  const generic = op.providers.find((p) => p.id === "anthropic");
-  assert.ok(generic);
-  assert.equal(generic.name, "Anthropic");
-  assert.equal(generic.logoAssetId, undefined);
+  const anthropic = op.providers.find((p) => p.id === "anthropic");
+  assert.ok(anthropic);
+  assert.equal(anthropic.name, "Anthropic");
+  assert.equal(anthropic.logoAssetId, "provider-anthropic-logo");
 
   if (previousDisable === undefined) {
     delete process.env.REMODEX_DISABLE_OPENCODE;
@@ -1369,6 +1369,46 @@ test("routes providerless owned thread RPCs by durable ownership", async () => {
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test("permission/reply routes to opencode provider", async () => {
+  const handledRequests = [];
+  const responses = [];
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({}),
+    sendApplicationResponse: (message) => {
+      responses.push(JSON.parse(message));
+    },
+    sendRuntimeMessage: () => {},
+    providers: [
+      {
+        id: "opencode",
+        ownsThread() {
+          return false;
+        },
+        async handleRequest(request) {
+          handledRequests.push(request);
+          return { success: true, permissionId: request.params.permissionId, allow: true };
+        },
+      },
+    ],
+  });
+
+  const handled = router.handleApplicationMessage(
+    JSON.stringify({
+      id: "perm-reply-route",
+      method: "permission/reply",
+      params: { permissionId: "perm-route", allow: true },
+    }),
+  );
+
+  assert.equal(handled, true);
+  await waitOneTick();
+  assert.equal(handledRequests.length, 1);
+  assert.equal(handledRequests[0].method, "permission/reply");
+  const response = responses.find((entry) => entry.id === "perm-reply-route");
+  assert.equal(response?.error, undefined);
+  assert.equal(response?.result?.success, true);
 });
 
 test("turn/start logs bridge_turn_start_audit and bridge_ownership_mismatch", async () => {

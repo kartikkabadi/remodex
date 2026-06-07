@@ -2178,6 +2178,40 @@ test("sse foreign itemId is normalized before hydrate and completeTurn paths run
   assert.equal(messages.filter((entry) => entry.method === "turn/completed").length, 1);
 });
 
+test("sseReconnectCount increments on SSE resubscribe", async () => {
+  let onResubscribe;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler, options = {}) => {
+        onResubscribe = options.onResubscribe;
+        return () => {};
+      },
+      prompt: async () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello" },
+  });
+
+  const subscribeDeadline = Date.now() + 500;
+  while (!onResubscribe && Date.now() < subscribeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(provider.getObservabilityMetrics().sseReconnectCount, 0);
+  onResubscribe({ attempt: 1, reason: "error" });
+  assert.equal(provider.getObservabilityMetrics().sseReconnectCount, 1);
+});
+
 test("REMODEX_OPENCODE_SSE_RECONNECT=0 disables SSE reconnect", async () => {
   let reconnectEnabled;
   const provider = makeProvider({

@@ -173,6 +173,101 @@ test("permission/reply handles client error", async () => {
   await provider.shutdown();
 });
 
+test("permission/reply success clears pending and second reply is unknown", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  provider.testSeedPendingPermission("perm_once", { threadId: "thread-1" });
+
+  const first = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_once", allow: true },
+  });
+  assert.equal(first.success, true);
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
+
+  const second = await provider.handleRequest({
+    id: 2,
+    method: "permission/reply",
+    params: { permissionId: "perm_once", allow: true },
+  });
+  assert.equal(second.success, false);
+  assert.match(second.reason, /unknown|expired/i);
+
+  await provider.shutdown();
+});
+
+test("permission/reply rejects sessionId mismatch", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  provider.testSeedPendingPermission("perm_session", {
+    threadId: "thread-1",
+    sessionId: "ses_expected",
+  });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_session", allow: true, sessionId: "ses_other" },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.reason, /session id does not match/i);
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+
+  await provider.shutdown();
+});
+
+test("permission/reply re-arms watchdog on SDK failure when permissions UI disabled", async () => {
+  const errorClient = fakeClient(async () => {
+    throw new Error("SDK permission error");
+  });
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_PERMISSIONS_UI: "0",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: () => errorClient,
+  });
+  provider.testSeedPendingPermission("perm_watchdog", {
+    threadId: "thread-1",
+    turnId: "turn-1",
+  });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_watchdog", allow: true },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+  assert.equal(provider.__test.hasPendingPermissionWatchdog("perm_watchdog"), true);
+
+  await provider.shutdown();
+});
+
+test("shutdown clears pending permissions and watchdogs", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_PERMISSIONS_UI: "0",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: () => fakeClient(),
+  });
+  provider.__test.handlePermissionRequestEvent(
+    { thread: { id: "thread-1", cwd: "/tmp" }, turn: { id: "turn-1" }, sessionId: "ses-1" },
+    { permissionId: "perm_shutdown", tool: "bash", args: { command: "ls" } },
+  );
+
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+  assert.equal(provider.__test.hasPendingPermissionWatchdog("perm_shutdown"), true);
+
+  await provider.shutdown();
+
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
+});
+
 test("permission/reply rejects threadId mismatch", async () => {
   const provider = makeProvider({ clientFactory: () => fakeClient() });
   provider.testSeedPendingPermission("perm_thread", { threadId: "thread-1" });

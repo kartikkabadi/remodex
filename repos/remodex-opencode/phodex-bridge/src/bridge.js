@@ -14,6 +14,7 @@ const { promisify } = require("util");
 const { CodexDesktopRefresher, readBridgeConfig } = require("./codex-desktop-refresher");
 const {
   buildHeartbeatBridgeStatus,
+  buildOpenCodeBridgeStatusSection,
   createBridgeStatusPublisher,
   hasRelayConnectionGoneStale,
 } = require("./bridge-status");
@@ -1462,16 +1463,7 @@ function startBridge({
     const opencodeProvider = runtimeProviderRouter.providers.find(
       (provider) => provider.id === "opencode",
     );
-    let opencode =
-      typeof opencodeProvider?.getRuntimeStatus === "function"
-        ? opencodeProvider.getRuntimeStatus(process.env)
-        : undefined;
-    if (opencode && typeof opencodeProvider?.getObservabilityMetrics === "function") {
-      opencode = {
-        ...opencode,
-        ...opencodeProvider.getObservabilityMetrics(),
-      };
-    }
+    const opencode = buildOpenCodeBridgeStatusSection(opencodeProvider, process.env);
     bridgeStatusPublisher.publish(
       opencode ? { ...status, opencode } : status,
     );

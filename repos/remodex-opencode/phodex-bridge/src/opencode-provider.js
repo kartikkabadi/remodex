@@ -1068,6 +1068,10 @@ function createOpenCodeProvider({
       unsubscribe();
     }
     eventUnsubscribers.clear();
+    for (const pending of pendingPermissions.values()) {
+      clearPermissionWatchdog(pending);
+    }
+    pendingPermissions.clear();
     activeTurns.clear();
     inFlightThreadIds.clear();
     completedTurnIds.clear();
@@ -1858,6 +1862,30 @@ function createOpenCodeProvider({
     }
   }
 
+  function armPermissionWatchdog(entry, payload) {
+    clearPermissionWatchdog(entry);
+    entry.watchdog = setTimeout(() => {
+      void (async () => {
+        pendingPermissions.delete(payload.permissionId);
+        try {
+          await ensureStarted();
+          await client.replyToPermission(payload.permissionId, false);
+          emit("turn/failed", {
+            threadId: payload.threadId,
+            turnId: payload.turnId,
+            message: "Permission required — update Remodex to respond.",
+            errorCode: ERROR_CODES.OPENCODE_PERMISSION_TIMEOUT.errorCode,
+          });
+        } catch (error) {
+          console.error(`${logPrefix} permission auto-deny failed: ${error.message}`);
+        }
+      })();
+    }, PERMISSION_WATCHDOG_MS);
+    if (readString(process.env.REMODEX_TEST) === "1" && typeof entry.watchdog?.unref === "function") {
+      entry.watchdog.unref();
+    }
+  }
+
   function handlePermissionRequestEvent(active, params) {
     const permissionId = readString(params.permissionId || params.permission_id || params.requestId);
     const tool = readString(params.tool || params.toolName) || "tool";
@@ -1899,26 +1927,7 @@ function createOpenCodeProvider({
     pendingPermissions.set(permissionId, entry);
 
     if (!isOpenCodePermissionsUIEnabled()) {
-      entry.watchdog = setTimeout(() => {
-        void (async () => {
-          pendingPermissions.delete(permissionId);
-          try {
-            await ensureStarted();
-            await client.replyToPermission(permissionId, false);
-            emit("turn/failed", {
-              threadId: payload.threadId,
-              turnId: payload.turnId,
-              message: "Permission required — update Remodex to respond.",
-              errorCode: ERROR_CODES.OPENCODE_PERMISSION_TIMEOUT.errorCode,
-            });
-          } catch (error) {
-            console.error(`${logPrefix} permission auto-deny failed: ${error.message}`);
-          }
-        })();
-      }, PERMISSION_WATCHDOG_MS);
-      if (readString(process.env.REMODEX_TEST) === "1" && typeof entry.watchdog?.unref === "function") {
-        entry.watchdog.unref();
-      }
+      armPermissionWatchdog(entry, payload);
       return;
     }
 
@@ -1992,6 +2001,19 @@ function createOpenCodeProvider({
       return { success: false, reason: "Permission thread ID does not match" };
     }
 
+    if (sessionId && sessionId !== readString(pending.sessionId)) {
+      console.log(
+        JSON.stringify({
+          event: "permission_reply_rejected",
+          permissionId,
+          reason: "session_id_mismatch",
+          expectedSessionId: pending.sessionId,
+          replySessionId: sessionId,
+        }),
+      );
+      return { success: false, reason: "Permission session ID does not match" };
+    }
+
     clearPermissionWatchdog(pending);
 
     try {
@@ -2012,6 +2034,13 @@ function createOpenCodeProvider({
       return { success: true, permissionId, allow, scope };
     } catch (error) {
       pendingPermissions.set(permissionId, pending);
+      if (!isOpenCodePermissionsUIEnabled()) {
+        armPermissionWatchdog(pending, {
+          permissionId,
+          threadId: pending.threadId,
+          turnId: pending.turnId,
+        });
+      }
       return { success: false, reason: error.message };
     }
   }
@@ -2604,6 +2633,8 @@ function createOpenCodeProvider({
     __test: {
       redactPermissionArgs,
       handlePermissionRequestEvent,
+      hasPendingPermissionWatchdog: (permissionId) =>
+        Boolean(pendingPermissions.get(permissionId)?.watchdog),
       scheduleAttachmentCleanup,
       setLastAttachmentCleanupAt: (timestamp) => {
         lastAttachmentCleanupAt = timestamp;

@@ -7,6 +7,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  buildOpenCodeBridgeStatusSection,
   createBridgeStatusPublisher,
 } = require("../src/bridge-status");
 
@@ -65,6 +66,33 @@ test("status publisher heartbeat emits stale relay downgrade without mutating la
 
   assert.equal(published.at(-1).connectionStatus, "disconnected");
   assert.equal(publisher.latest().connectionStatus, "connected");
+});
+
+test("buildOpenCodeBridgeStatusSection merges observability metrics", () => {
+  const opencode = buildOpenCodeBridgeStatusSection({
+    id: "opencode",
+    getRuntimeStatus() {
+      return {
+        enabled: true,
+        version: "2.1.0",
+        sessionCount: 2,
+        authConfigured: true,
+      };
+    },
+    getObservabilityMetrics() {
+      return {
+        sseReconnectCount: 3,
+        permissionPendingCount: 1,
+        catalogRefreshMs: 42,
+      };
+    },
+  });
+
+  assert.equal(opencode.enabled, true);
+  assert.equal(opencode.sessionCount, 2);
+  assert.equal(opencode.sseReconnectCount, 3);
+  assert.equal(opencode.permissionPendingCount, 1);
+  assert.equal(opencode.catalogRefreshMs, 42);
 });
 
 test("bridge status publisher accepts opencode subsection on publish payload", () => {
