@@ -125,10 +125,7 @@ function createPushNotificationTracker({
 
     const title = normalizePreviewText(threadTitleById.get(resolvedThreadId)) || "Permission required";
     const tool = readString(params?.tool || eventObject?.tool) || "tool";
-    const argsSummary = readString(params?.argsSummary || eventObject?.argsSummary) || "";
-    const body = normalizePreviewText(
-      argsSummary ? `${tool}: ${argsSummary}` : `OpenCode needs approval for ${tool}.`,
-    );
+    const body = normalizePreviewText(`OpenCode needs approval for ${tool}.`);
     const dedupeKey = `permission:${resolvedThreadId}:${readString(params?.permissionId || eventObject?.permissionId)}`;
 
     try {

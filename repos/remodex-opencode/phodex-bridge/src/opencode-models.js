@@ -9,6 +9,7 @@
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { readString, resolvedParam } = require("./normalize");
+const { MAX_IMAGES_PER_TURN } = require("./attachment-store");
 
 const CODEX_PROVIDER_ID = "codex";
 const OPENCODE_PROVIDER_ID = "opencode";
@@ -248,6 +249,7 @@ function buildPromptFromTurnInput(input, options = {}) {
   const textParts = [];
   const parts = [];
   const skills = [];
+  let imageCount = 0;
 
   for (const item of input) {
     if (typeof item === "string") {
@@ -285,9 +287,13 @@ function buildPromptFromTurnInput(input, options = {}) {
       continue;
     }
     if (type.includes("image")) {
+      if (imageCount >= MAX_IMAGES_PER_TURN) {
+        continue;
+      }
       const part = imageItemToPromptPart(item, options);
       if (part) {
         parts.push(part);
+        imageCount += 1;
       }
       const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
       appendNonEmpty(textParts, imagePath ? `[image attached: ${imagePath}]` : "[image attached]");

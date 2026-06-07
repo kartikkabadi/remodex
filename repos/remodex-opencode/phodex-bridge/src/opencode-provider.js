@@ -107,6 +107,9 @@ function assertOwnershipPersisted(ok, threadId) {
   throw error;
 }
 
+const SENSITIVE_PERMISSION_ARG_KEYS = new Set(["command", "script", "token", "secret", "password"]);
+const ATTACHMENT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
 function createOpenCodeProvider({
   sendApplicationMessage,
   env = process.env,
@@ -116,6 +119,7 @@ function createOpenCodeProvider({
   logPrefix = "[remodex]",
   serverFactory = null,
   clientFactory = null,
+  attachmentStore: injectedAttachmentStore = undefined,
 } = {}) {
   const server = serverFactory
     ? serverFactory({ env, logPrefix: `${logPrefix}:server` })
@@ -152,7 +156,10 @@ function createOpenCodeProvider({
     sendApplicationMessage,
     logPrefix,
   });
-  const attachmentStore = isAttachmentsEnabled(env) ? createAttachmentStore() : null;
+  const attachmentStore = injectedAttachmentStore !== undefined
+    ? injectedAttachmentStore
+    : (isAttachmentsEnabled(env) ? createAttachmentStore() : null);
+  let lastAttachmentCleanupAt = 0;
   let sseReconnectCount = 0;
   /** @type {Map<string, { permissionId: string, threadId: string, turnId?: string, sessionId?: string, tool: string, requestedAt: string, watchdog?: ReturnType<typeof setTimeout> }>} */
   const pendingPermissions = new Map();
@@ -313,8 +320,28 @@ function createOpenCodeProvider({
     return Promise.resolve();
   }
 
+  function scheduleAttachmentCleanup() {
+    if (!attachmentStore) {
+      return 0;
+    }
+    const now = Date.now();
+    if (now - lastAttachmentCleanupAt < ATTACHMENT_CLEANUP_INTERVAL_MS) {
+      return 0;
+    }
+    lastAttachmentCleanupAt = now;
+    try {
+      return attachmentStore.cleanupExpired();
+    } catch (error) {
+      console.warn(`${logPrefix} attachment cleanup failed: ${error.message}`);
+      return 0;
+    }
+  }
+
   async function ensureStarted() {
-    if (healthy && client) return;
+    if (healthy && client) {
+      scheduleAttachmentCleanup();
+      return;
+    }
 
     if (server.isRunning && !client) {
       client = clientFactory
@@ -324,6 +351,7 @@ function createOpenCodeProvider({
       await refreshAuthConfigured({ forceInventory: true });
       await restoreSessions();
       await scheduleStartupPrune();
+      scheduleAttachmentCleanup();
       return;
     }
 
@@ -394,6 +422,7 @@ function createOpenCodeProvider({
     await scheduleStartupPrune();
 
     resetIdleTimer();
+    scheduleAttachmentCleanup();
   }
 
   async function refreshAuthConfigured({ forceInventory = false } = {}) {
@@ -1810,7 +1839,7 @@ function createOpenCodeProvider({
     }
     const lines = Object.entries(args).map(([key, value]) => {
       const rendered = typeof value === "string" ? value : JSON.stringify(value);
-      if (/^[A-Z0-9_]+$/.test(key)) {
+      if (/^[A-Z0-9_]+$/.test(key) || SENSITIVE_PERMISSION_ARG_KEYS.has(key.toLowerCase())) {
         return `${key}=***`;
       }
       return `${key}=${rendered}`;
@@ -1894,7 +1923,13 @@ function createOpenCodeProvider({
     }
 
     emit("permission/request", {
-      ...payload,
+      permissionId: payload.permissionId,
+      threadId: payload.threadId,
+      turnId: payload.turnId,
+      sessionId: payload.sessionId,
+      tool: payload.tool,
+      cwd: payload.cwd,
+      requestedAt: payload.requestedAt,
       argsSummary: redactPermissionArgs(payload.args),
     });
   }
@@ -2566,6 +2601,14 @@ function createOpenCodeProvider({
     pushThreadUsageUpdate,
     getObservabilityMetrics,
     testSeedPendingPermission,
+    __test: {
+      redactPermissionArgs,
+      handlePermissionRequestEvent,
+      scheduleAttachmentCleanup,
+      setLastAttachmentCleanupAt: (timestamp) => {
+        lastAttachmentCleanupAt = timestamp;
+      },
+    },
   };
 }
 

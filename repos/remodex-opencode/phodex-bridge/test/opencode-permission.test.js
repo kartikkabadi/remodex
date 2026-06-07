@@ -190,6 +190,49 @@ test("permission/reply rejects threadId mismatch", async () => {
   await provider.shutdown();
 });
 
+test("redactPermissionArgs redacts sensitive keys and truncates", () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  const summary = provider.__test.redactPermissionArgs({
+    command: "rm -rf /",
+    script: "evil.sh",
+    token: "abc123",
+    PATH: "/bin",
+    note: "ok",
+    filler: "x".repeat(600),
+  });
+  assert.match(summary, /command=\*\*\*/);
+  assert.match(summary, /script=\*\*\*/);
+  assert.match(summary, /token=\*\*\*/);
+  assert.match(summary, /PATH=\*\*\*/);
+  assert.match(summary, /note=ok/);
+  assert.ok(summary.length <= 520);
+  assert.match(summary, /truncated/);
+});
+
+test("permission/request emit omits raw args and includes argsSummary", () => {
+  const messages = [];
+  const provider = makeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_OPENCODE_PERMISSIONS_UI: "1" },
+    send: (message) => messages.push(JSON.parse(message)),
+    clientFactory: () => fakeClient(),
+  });
+
+  provider.__test.handlePermissionRequestEvent(
+    { thread: { id: "thread-1", cwd: "/tmp" }, turn: { id: "turn-1" }, sessionId: "ses-1" },
+    {
+      permissionId: "perm-emit",
+      tool: "bash",
+      args: { command: "npm test", note: "safe" },
+    },
+  );
+
+  const permissionMessage = messages.find((message) => message.method === "permission/request");
+  assert.ok(permissionMessage);
+  assert.equal(permissionMessage.params.args, undefined);
+  assert.match(permissionMessage.params.argsSummary, /command=\*\*\*/);
+  assert.match(permissionMessage.params.argsSummary, /note=safe/);
+});
+
 test("permission/reply accepts permission_id snake_case", async () => {
   let receivedId = null;
   const replyClient = fakeClient(async (id, allow) => {

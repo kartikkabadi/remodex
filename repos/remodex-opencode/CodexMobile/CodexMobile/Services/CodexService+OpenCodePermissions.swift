@@ -69,8 +69,9 @@ extension CodexService {
         let tool = firstStringValue(in: paramsObject, keys: ["tool", "toolName", "tool_name"]) ?? "tool"
         let cwd = firstStringValue(in: paramsObject, keys: ["cwd", "directory", "working_directory"])
 
-        var argsObject: [String: JSONValue] = [:]
-        if let rawArgs = paramsObject["args"]?.objectValue {
+        let argsSummary = firstStringValue(in: paramsObject, keys: ["argsSummary", "args_summary"])
+        var argsObject: [String: JSONValue]?
+        if argsSummary == nil, let rawArgs = paramsObject["args"]?.objectValue {
             argsObject = rawArgs
         }
 
@@ -81,6 +82,7 @@ extension CodexService {
             sessionId: sessionId,
             tool: tool,
             args: argsObject,
+            argsSummary: argsSummary,
             cwd: cwd
         ) else {
             return

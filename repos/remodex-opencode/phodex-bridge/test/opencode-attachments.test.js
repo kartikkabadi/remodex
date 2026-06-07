@@ -7,12 +7,15 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { randomUUID } = require("crypto");
 const {
   createAttachmentStore,
   isAttachmentsEnabled,
   MAX_IMAGE_BYTES,
+  MAX_IMAGES_PER_TURN,
 } = require("../src/attachment-store");
-const { imageItemToPromptPart } = require("../src/opencode-models");
+const { buildPromptFromTurnInput, imageItemToPromptPart } = require("../src/opencode-models");
+const { createOpenCodeProvider } = require("../src/opencode-provider");
 
 test("isAttachmentsEnabled respects REMODEX_OPENCODE_ATTACHMENTS", () => {
   assert.equal(isAttachmentsEnabled({ REMODEX_OPENCODE_ATTACHMENTS: "0" }), false);
@@ -39,6 +42,99 @@ test("attachment store rejects oversize images", () => {
   const store = createAttachmentStore({ rootDir });
   const big = Buffer.alloc(MAX_IMAGE_BYTES + 1, 0xff);
   assert.throws(() => store.storeImageBuffer(big), /4194304|too large/i);
+});
+
+test("buildPromptFromTurnInput truncates images at MAX_IMAGES_PER_TURN", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const store = createAttachmentStore({ rootDir });
+  const dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const input = Array.from({ length: MAX_IMAGES_PER_TURN + 2 }, (_, index) => ({
+    type: "image",
+    dataURL: dataUrl,
+    filename: `pixel-${index}.png`,
+  }));
+
+  const { parts } = buildPromptFromTurnInput(input, {
+    attachmentStore: store,
+    attachmentsEnabled: true,
+  });
+  const fileParts = parts.filter((part) => part.type === "file");
+  assert.equal(fileParts.length, MAX_IMAGES_PER_TURN);
+});
+
+test("attachment store cleanupExpired removes old files", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const now = Date.now();
+  const store = createAttachmentStore({
+    rootDir,
+    ttlMs: 60_000,
+    now: () => now,
+  });
+  const stalePath = path.join(rootDir, `${randomUUID()}.png`);
+  const freshPath = path.join(rootDir, `${randomUUID()}.png`);
+  fs.writeFileSync(stalePath, "stale");
+  fs.writeFileSync(freshPath, "fresh");
+  const staleTime = new Date(now - 120_000);
+  const freshTime = new Date(now - 30_000);
+  fs.utimesSync(stalePath, staleTime, staleTime);
+  fs.utimesSync(freshPath, freshTime, freshTime);
+
+  const removed = store.cleanupExpired();
+  assert.equal(removed, 1);
+  assert.equal(fs.existsSync(stalePath), false);
+  assert.equal(fs.existsSync(freshPath), true);
+});
+
+test("ensureStarted schedules throttled attachment cleanup", async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const now = Date.now();
+  const store = createAttachmentStore({
+    rootDir,
+    ttlMs: 60_000,
+    now: () => now,
+  });
+  const stalePath = path.join(rootDir, `${randomUUID()}.png`);
+  fs.writeFileSync(stalePath, "stale");
+  const staleTime = new Date(now - 120_000);
+  fs.utimesSync(stalePath, staleTime, staleTime);
+
+  let running = false;
+  const provider = createOpenCodeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1" },
+    attachmentStore: store,
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start() {
+        running = true;
+        return Promise.resolve();
+      },
+      stop() {
+        running = false;
+        return Promise.resolve();
+      },
+    }),
+    clientFactory: async () => ({
+      listModels: async () => [],
+      listAgents: async () => [],
+      createSession: async () => "ses_fake",
+      getSession: async () => ({}),
+      prompt: async () => {},
+      abort: async () => {},
+      getMessages: async () => [],
+      replyToPermission: async () => ({ success: true }),
+      subscribeToEvents: () => () => {},
+    }),
+  });
+
+  provider.__test.setLastAttachmentCleanupAt(0);
+  await provider.warmup();
+  assert.equal(fs.existsSync(stalePath), false);
+  await provider.shutdown();
 });
 
 test("imageItemToPromptPart stores data URLs via attachment store", () => {

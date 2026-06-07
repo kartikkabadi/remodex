@@ -38,6 +38,8 @@ struct OpenCodePermissionRequest: Identifiable, Sendable, Equatable {
         self.receivedAt = receivedAt
     }
 
+    private static let sensitiveArgKeys: Set<String> = ["command", "script", "token", "secret", "password"]
+
     static func redactedArgsSummary(from raw: String, maxLength: Int = 500) -> String {
         let redacted = raw
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -45,7 +47,8 @@ struct OpenCodePermissionRequest: Identifiable, Sendable, Equatable {
                 let text = String(line)
                 guard let equalsIndex = text.firstIndex(of: "=") else { return text }
                 let key = text[..<equalsIndex]
-                if key.range(of: #"^[A-Z0-9_]+$"#, options: .regularExpression) != nil {
+                if key.range(of: #"^[A-Z0-9_]+$"#, options: .regularExpression) != nil
+                    || sensitiveArgKeys.contains(key.lowercased()) {
                     return "\(key)=***"
                 }
                 return text
@@ -63,7 +66,8 @@ struct OpenCodePermissionRequest: Identifiable, Sendable, Equatable {
         turnId: String?,
         sessionId: String?,
         tool: String,
-        args: [String: JSONValue]?,
+        args: [String: JSONValue]? = nil,
+        argsSummary: String? = nil,
         cwd: String?
     ) -> OpenCodePermissionRequest? {
         let normalizedPermissionId = permissionId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,14 +77,16 @@ struct OpenCodePermissionRequest: Identifiable, Sendable, Equatable {
             return nil
         }
 
-        let argsText: String
-        if let args, !args.isEmpty {
+        let summary: String
+        if let bridgeSummary = argsSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !bridgeSummary.isEmpty {
+            summary = bridgeSummary
+        } else if let args, !args.isEmpty {
             let pairs = args
                 .sorted { $0.key < $1.key }
                 .map { key, value in "\(key)=\(value.debugDescription)" }
-            argsText = pairs.joined(separator: "\n")
+            summary = redactedArgsSummary(from: pairs.joined(separator: "\n"))
         } else {
-            argsText = ""
+            summary = ""
         }
 
         return OpenCodePermissionRequest(
@@ -89,7 +95,7 @@ struct OpenCodePermissionRequest: Identifiable, Sendable, Equatable {
             turnId: turnId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             sessionId: sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             tool: normalizedTool,
-            argsSummary: redactedArgsSummary(from: argsText),
+            argsSummary: summary,
             cwd: cwd?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )
     }

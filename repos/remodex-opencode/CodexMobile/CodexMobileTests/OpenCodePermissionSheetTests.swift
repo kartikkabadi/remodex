@@ -13,6 +13,28 @@ final class OpenCodePermissionSheetTests: XCTestCase {
         XCTAssertTrue(summary.contains("note=ok"))
     }
 
+    func testArgsSummaryRedactsSensitiveKeys() {
+        let summary = OpenCodePermissionRequest.redactedArgsSummary(from: "command=rm -rf /\nscript=evil.sh\nnote=ok")
+        XCTAssertTrue(summary.contains("command=***"))
+        XCTAssertTrue(summary.contains("script=***"))
+        XCTAssertTrue(summary.contains("note=ok"))
+    }
+
+    func testBuildUsesBridgeArgsSummaryWithoutRebuilding() {
+        let request = OpenCodePermissionRequest.build(
+            permissionId: "perm-1",
+            threadId: "thread-1",
+            turnId: "turn-1",
+            sessionId: "ses-1",
+            tool: "bash",
+            args: ["command": .string("npm test")],
+            argsSummary: "command=***\nnote=ok",
+            cwd: nil
+        )
+
+        XCTAssertEqual(request?.argsSummary, "command=***\nnote=ok")
+    }
+
     func testArgsSummaryTruncatesLongPayload() {
         let long = String(repeating: "a", count: 600)
         let summary = OpenCodePermissionRequest.redactedArgsSummary(from: long)
