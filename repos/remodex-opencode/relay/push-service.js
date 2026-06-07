@@ -145,6 +145,71 @@ function createPushSessionService({
     return { ok: true };
   }
 
+  async function notifyPermission({
+    sessionId,
+    notificationSecret,
+    threadId,
+    turnId,
+    title,
+    body,
+    dedupeKey,
+  } = {}) {
+    const normalizedSessionId = readString(sessionId);
+    const normalizedSecret = readString(notificationSecret);
+    const normalizedThreadId = readString(threadId);
+    const normalizedDedupeKey = readString(dedupeKey);
+
+    if (!normalizedSessionId || !normalizedSecret || !normalizedThreadId || !normalizedDedupeKey) {
+      throw pushServiceError(
+        "invalid_request",
+        "Permission push requires sessionId, notificationSecret, threadId, and dedupeKey.",
+        400
+      );
+    }
+
+    if (!await resolvedCanNotifyCompletion({
+      sessionId: normalizedSessionId,
+      notificationSecret: normalizedSecret,
+    })) {
+      throw pushServiceError(
+        "session_unavailable",
+        "Permission push requires an active relay session.",
+        403
+      );
+    }
+
+    pruneDeliveredDedupeKeys();
+    if (deliveredDedupeKeys.has(normalizedDedupeKey)) {
+      return { ok: true, deduped: true };
+    }
+
+    const session = sessions.get(normalizedSessionId);
+    if (!session || !secretsEqual(session.notificationSecret, normalizedSecret)) {
+      throw pushServiceError("unauthorized", "Invalid notification secret for this session.", 403);
+    }
+
+    if (!session.alertsEnabled || !session.deviceToken) {
+      return { ok: true, skipped: true };
+    }
+
+    await apnsClient.sendNotification({
+      deviceToken: session.deviceToken,
+      apnsEnvironment: session.apnsEnvironment,
+      title: normalizePreviewText(title) || "Permission required",
+      body: normalizePreviewText(body) || "OpenCode needs your approval to continue.",
+      payload: {
+        source: "codex.structuredUserInput",
+        threadId: normalizedThreadId,
+        turnId: readString(turnId) || "",
+        result: "permission",
+      },
+    });
+
+    deliveredDedupeKeys.set(normalizedDedupeKey, now());
+    persistState("notifyPermission");
+    return { ok: true };
+  }
+
   function getStats() {
     pruneDeliveredDedupeKeys();
     return {
@@ -201,6 +266,7 @@ function createPushSessionService({
   return {
     registerDevice,
     notifyCompletion,
+    notifyPermission,
     getStats,
   };
 }

@@ -114,6 +114,7 @@ function createRuntimeProviderRouter({
       respondAsync(parsed, async () => {
         const params = parsed.params || {};
         const forceProviders = params.refreshProviders === true;
+        const fullList = params.full === true;
         const catalogOpenCode = catalogOpenCodeSnapshotForModelList(runtimeProviders, process.env);
         const [codexResult, providerListResult] = await Promise.all([
           withModelListBudget(
@@ -129,21 +130,27 @@ function createRuntimeProviderRouter({
           listProviderModelsForModelList(runtimeProviders, logPrefix, {
             force: forceProviders,
             sendRuntimeMessage,
+            full: fullList,
           }),
         ]);
         const { models: providerModels, opencodeMeta } = providerListResult;
-        const capped = providerModelsForModelList(
-          providerModels,
-          catalogOpenCode,
-          opencodeMeta,
-        );
+        const capped = fullList
+          ? providerModels
+          : providerModelsForModelList(
+            providerModels,
+            catalogOpenCode,
+            opencodeMeta,
+          );
         if (opencodeMeta) {
-          opencodeMeta.modelCountBeforeCap = providerModels.filter(
+          const opencodeOnly = providerModels.filter(
             (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
-          ).length;
-          opencodeMeta.modelCountAfterCap = capped.filter(
+          );
+          opencodeMeta.modelCountBeforeCap = opencodeOnly.length;
+          opencodeMeta.modelCountAfterCap = (fullList ? opencodeOnly : capped.filter(
             (model) => readModelProvider(model) === OPENCODE_PROVIDER_ID,
-          ).length;
+          )).length;
+          opencodeMeta.truncated = !fullList && opencodeMeta.modelCountAfterCap < opencodeMeta.modelCountBeforeCap;
+          opencodeMeta.full = fullList;
         }
         return mergeModelListResult(codexResult, capped, { opencode: opencodeMeta });
       });
@@ -208,6 +215,19 @@ function createRuntimeProviderRouter({
 
     if (method === "skills/list") {
       respondAsync(parsed, async () => mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest));
+      return true;
+    }
+
+    if (method === "permission/reply") {
+      respondAsync(parsed, async () => {
+        const opencodeProvider = runtimeProviders.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
+        if (!opencodeProvider || typeof opencodeProvider.handleRequest !== "function") {
+          const error = new Error("OpenCode provider unavailable for permission/reply");
+          error.errorCode = "opencode_unavailable";
+          throw error;
+        }
+        return opencodeProvider.handleRequest(parsed);
+      });
       return true;
     }
 

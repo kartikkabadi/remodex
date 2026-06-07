@@ -689,6 +689,31 @@ extension CodexService {
         invalidateSlashCommandCache()
     }
 
+    // Preserves hydration tickets for threads still marked running during transport-only teardown.
+    func clearHydrationCachesPreservingRunningThreads() {
+        let runningThreadIDs = self.runningThreadIDs
+        hydratedThreadIDs = hydratedThreadIDs.intersection(runningThreadIDs)
+        loadingThreadIDs = loadingThreadIDs.intersection(runningThreadIDs)
+
+        let preservedThreadIDs = runningThreadIDs
+        let threadIDsToCancel = Set(threadHistoryLoadTaskByThreadID.keys)
+            .union(threadResumeTaskByThreadID.keys)
+            .union(turnStateRefreshTaskByThreadID.keys)
+            .union(runningThreadCatchupTaskByThreadID.keys)
+            .union(forcedHistoryLoadThreadIDs)
+            .union(deferHydratedMarkForNotMaterializedThreadIDs)
+            .union(forcedResumeEscalationThreadIDs)
+            .union(forcedRunningCatchupEscalationThreadIDs)
+            .union(threadResumeRequestSignatureByThreadID.keys)
+            .union(lastForcedRunningResumeAtByThread.keys)
+            .union(canonicalHistoryReconcileRetryTaskByThreadID.keys)
+            .subtracting(preservedThreadIDs)
+
+        for threadId in threadIDsToCancel {
+            cancelPerThreadRefreshWork(for: threadId)
+        }
+    }
+
     // Bumps the invalidation token used to reject stale async refresh completions.
     func invalidatePerThreadRefreshGeneration(for threadId: String) {
         threadRefreshGenerationByThreadID[threadId, default: 0] &+= 1

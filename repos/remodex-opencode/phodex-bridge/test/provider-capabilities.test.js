@@ -39,6 +39,8 @@ test("OpenCode provider has agent selection and handoff enabled; fast/plan/voice
   assert.equal(capabilities.supportsStreamingTools, true);
   assert.equal(capabilities.supportsSlashCommands, true);
   assert.equal(capabilities.supportsMCP, false);
+  assert.equal(capabilities.supportsSkillFileInjection, true);
+  assert.equal(capabilities.supportsImageAttachments, true);
 });
 
 test("reasoning effort enabled when model has supportedReasoningEfforts", () => {
@@ -145,6 +147,8 @@ test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR
     supportsMCP: false,
     supportsSkillAutocomplete: true,
     supportsStructuredSkillInput: false,
+    supportsSkillFileInjection: true,
+    supportsImageAttachments: true,
     supportsSteer: false,
     supportsQueue: true,
   };

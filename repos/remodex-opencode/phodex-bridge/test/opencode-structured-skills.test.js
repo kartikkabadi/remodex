@@ -23,10 +23,12 @@ const {
   resolveModelCapabilities,
 } = require("../src/provider-capabilities");
 
-test("CAPABILITIES includes supportsSlashCommandExecute as 17th flag", () => {
-  assert.equal(CAPABILITIES.length, 17);
+test("CAPABILITIES includes skill and attachment flags", () => {
+  assert.equal(CAPABILITIES.length, 19);
   assert.equal(CAPABILITIES[11], "supportsSlashCommandExecute");
   assert.equal(CAPABILITIES[14], "supportsStructuredSkillInput");
+  assert.equal(CAPABILITIES[15], "supportsSkillFileInjection");
+  assert.equal(CAPABILITIES[16], "supportsImageAttachments");
 });
 
 test("Codex enables structured skill input; OpenCode defaults false (RP-SKILL-3 verification: no SDK skills[] support; gated)", () => {

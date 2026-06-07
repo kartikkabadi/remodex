@@ -197,25 +197,41 @@ function mentionItemToPromptPart(item) {
   return null;
 }
 
-function imageItemToPromptPart(item) {
-  const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
-  if (imagePath) {
-    return {
-      type: "file",
-      mime: readString(item.mime || item.contentType) || "application/octet-stream",
-      url: imagePath.startsWith("data:") || /^https?:\/\//i.test(imagePath)
-        ? imagePath
-        : fileUrlForPath(imagePath),
-      filename: readString(item.filename || item.name) || "attachment",
-    };
+function imageItemToPromptPart(item, { attachmentStore = null, attachmentsEnabled = true } = {}) {
+  if (!attachmentsEnabled) {
+    return null;
   }
+
+  const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
+  if (!imagePath) {
+    return null;
+  }
+
+  if (imagePath.startsWith("data:") && attachmentStore?.storeFromDataUrl) {
+    try {
+      const stored = attachmentStore.storeFromDataUrl(imagePath, {
+        filename: readString(item.filename || item.name) || "attachment",
+      });
+      return {
+        type: "file",
+        mime: stored.mime,
+        url: fileUrlForPath(stored.path),
+        filename: stored.filename,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   return {
-    type: "text",
-    text: "[image attached — OpenCode receives a text placeholder until multimodal parts are verified on device]",
+    type: "file",
+    mime: readString(item.mime || item.contentType) || "application/octet-stream",
+    url: /^https?:\/\//i.test(imagePath) ? imagePath : fileUrlForPath(imagePath),
+    filename: readString(item.filename || item.name) || "attachment",
   };
 }
 
-function buildPromptFromTurnInput(input) {
+function buildPromptFromTurnInput(input, options = {}) {
   if (typeof input === "string") {
     const text = input.trim();
     return {
@@ -269,7 +285,10 @@ function buildPromptFromTurnInput(input) {
       continue;
     }
     if (type.includes("image")) {
-      parts.push(imageItemToPromptPart(item));
+      const part = imageItemToPromptPart(item, options);
+      if (part) {
+        parts.push(part);
+      }
       const imagePath = resolvedParam(item, "path", "url", "image_url", "dataURL");
       appendNonEmpty(textParts, imagePath ? `[image attached: ${imagePath}]` : "[image attached]");
       continue;
@@ -533,6 +552,7 @@ module.exports = {
   slimModelForMobileList,
   buildPromptFromTurnInput,
   mentionItemToPromptPart,
+  imageItemToPromptPart,
   skillItemToPromptPart,
   compareThreadsByUpdatedAt,
   displayNameForOpenCodeModel,

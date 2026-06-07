@@ -147,6 +147,19 @@ async function handleHTTPRequest(req, res, {
     return handleJSONRoute(req, res, async (body) => pushSessionService.notifyCompletion(body));
   }
 
+  if (req.method === "POST" && pathname === "/v1/push/session/notify-permission") {
+    if (!pushEnabled) {
+      return writeJSON(res, 404, {
+        ok: false,
+        error: "Not found",
+      });
+    }
+    if (!pushRateLimiter.allow(`${requestKey}:notify-permission`)) {
+      return writeRateLimitResponse(res);
+    }
+    return handleJSONRoute(req, res, async (body) => pushSessionService.notifyPermission(body));
+  }
+
   if (req.method === "POST" && isRelayHTTPAPIPath(pathname, "/v1/trusted/session/resolve")) {
     return handleJSONRoute(req, res, async (body) => resolveTrustedMacSession(body));
   }

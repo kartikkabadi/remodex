@@ -322,41 +322,89 @@ async function createOpenCodeClient({
     );
   }
 
-  function subscribeToEvents(handler) {
+  function subscribeToEvents(handler, options = {}) {
     let active = true;
     let releaseStream = null;
+    const reconnectEnabled = options.reconnectEnabled !== false;
+    const maxAttempts = Number.isFinite(options.maxReconnectAttempts)
+      ? options.maxReconnectAttempts
+      : 8;
+    const baseDelayMs = Number.isFinite(options.reconnectBaseDelayMs)
+      ? options.reconnectBaseDelayMs
+      : 500;
 
     const streamTask = (async () => {
-      try {
-        const sseClient = await client.event.subscribe();
-        releaseStream =
-          typeof sseClient.close === "function"
-            ? () => sseClient.close()
-            : typeof sseClient.abort === "function"
-              ? () => sseClient.abort()
-              : null;
-        const subscription = sseClient.stream;
+      let attempt = 0;
+      while (active) {
         try {
-          for await (const event of subscription) {
-            if (!active) {
-              break;
+          const sseClient = await client.event.subscribe();
+          releaseStream =
+            typeof sseClient.close === "function"
+              ? () => sseClient.close()
+              : typeof sseClient.abort === "function"
+                ? () => sseClient.abort()
+                : null;
+          const subscription = sseClient.stream;
+          try {
+            for await (const event of subscription) {
+              if (!active) {
+                break;
+              }
+              dispatchEvent(event, handler);
             }
-            dispatchEvent(event, handler);
-          }
-        } finally {
-          if (typeof subscription?.return === "function") {
-            try {
-              await subscription.return();
-            } catch {
-              // Stream may already be closed when unsubscribing.
+          } finally {
+            if (typeof subscription?.return === "function") {
+              try {
+                await subscription.return();
+              } catch {
+                // Stream may already be closed when unsubscribing.
+              }
             }
           }
-        }
-      } catch (error) {
-        if (active) {
+
+          if (!active) {
+            break;
+          }
+        } catch (error) {
+          if (!active) {
+            break;
+          }
           console.error(`${logPrefix} OpenCode event stream error: ${error.message}`);
-          handler("event/streamError", { message: error.message });
+          handler("event/streamError", { message: error.message, attempt });
+          if (!reconnectEnabled || attempt >= maxAttempts) {
+            break;
+          }
+          attempt += 1;
+          const delayMs = Math.min(baseDelayMs * Math.pow(2, attempt - 1), 15_000);
+          console.log(
+            JSON.stringify({
+              event: "opencode_sse_resubscribe",
+              attempt,
+              delayMs,
+              message: error.message,
+            }),
+          );
+          await sleep(delayMs);
+          continue;
         }
+
+        if (!active || !reconnectEnabled) {
+          break;
+        }
+        attempt += 1;
+        if (attempt > maxAttempts) {
+          break;
+        }
+        const delayMs = Math.min(baseDelayMs * Math.pow(2, attempt - 1), 15_000);
+        console.log(
+          JSON.stringify({
+            event: "opencode_sse_resubscribe",
+            attempt,
+            delayMs,
+            reason: "stream_closed",
+          }),
+        );
+        await sleep(delayMs);
       }
     })();
 
@@ -1217,6 +1265,10 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeoutPromise]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+function sleep(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function resolveProviderAuthPayload(response) {

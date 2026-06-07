@@ -1509,7 +1509,10 @@ extension CodexService {
             messageId: pendingMessageId
         )
 
-        var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
+        var includeStructuredSkillItems = (
+            supportsSkillFileInjection(forThreadId: threadId)
+                || supportsStructuredSkillInput(forThreadId: threadId)
+        ) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
         // When includeStructuredSkillItems, the input[] will contain type:"skill" items; bridge (for OC)
         // will conditionally include top-level "skills:[]" in the SDK prompt payload (see RP-SKILL-3,
@@ -1807,7 +1810,10 @@ extension CodexService {
             throw error
         }
 
-        var includeStructuredSkillItems = supportsStructuredSkillInput(forThreadId: threadId) && !skillMentions.isEmpty
+        var includeStructuredSkillItems = (
+            supportsSkillFileInjection(forThreadId: threadId)
+                || supportsStructuredSkillInput(forThreadId: threadId)
+        ) && !skillMentions.isEmpty
         var includeStructuredMentionItems = supportsStructuredMentionInput && !mentionMentions.isEmpty
         // When includeStructuredSkillItems, the input[] will contain type:"skill" items; bridge (for OC)
         // will conditionally include top-level "skills:[]" in the SDK prompt payload (see RP-SKILL-3,

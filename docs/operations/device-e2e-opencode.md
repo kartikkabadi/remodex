@@ -7,7 +7,8 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **603/603** green. If a run shows issues, re-run once before blocking (harness "1..590" + suites detail; see testing/strategy.md + PR1 capture). (Note: full count 603; a subset of workspace/readImage tests may report failures on some macOS configurations due to sips/CleanShot media handling — these are unrelated to bridge logic or OpenCode/Codex regression paths. Re-run once and confirm opencode-*.test.js + router paths green.) |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **696/696** green |
+| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **283/283** green (CI gate on `opencode-*` touches) |
 | Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
@@ -16,7 +17,7 @@ Before Kartik runs steps O0–O17 on device:
 
 | Step | When |
 |------|------|
-| **O12** (toolbar “Continue on Desktop”) | **Blocked** until PR8 catalog flip (`supportsDesktopHandoff: true` after device sign-off). UI stays hidden while catalog is `false`. |
+| **O12** (toolbar “Continue on Desktop”) | **Unblocked** — catalog advertises `supportsDesktopHandoff: true`; verify on device with `REMODEX_OPENCODE_HANDOFF=1`. |
 | **O13**, **O16** (handoff RPC + env-off regression) | Can run **before** PR8 with `REMODEX_OPENCODE_HANDOFF=1` on Mac — validates bridge RPC and error taxonomy without catalog advertisement. |
 | **O14–O15** | After O13; O15 anytime on Codex-only thread |
 
@@ -62,6 +63,7 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 | O4 | `runtime/catalog` | OpenCode runtime `enabled: true`, agents listed, `capabilities.supportsSlashCommands` true; `supportsDesktopHandoff` false until step **8c** passes |
 | O5 | Model picker | Codex and OpenCode groups; select OpenCode model; agent submenu visible |
 | O6 | New thread + turn | Send prompt; streaming text and tool cards render; Stop works mid-turn |
+| **O6b** | Permission sheet | Tool turn triggers OpenCode permission sheet < 3s; Allow now / Allow always / Deny all work; turn resumes or fails clearly |
 | O7 | Bridge restart | Stop/start bridge; resume same OpenCode thread; send another turn (rehydration) |
 
 ## Composer parity (PR3 / PR4)
@@ -100,3 +102,38 @@ Record in PR or release notes:
 5. Any failed step number + first error string (relay vs catalog vs composer).
 
 When all steps pass, update [release-compatibility.md](release-compatibility.md) parity matrix and ship with `REMODEX_OPENCODE_HANDOFF=1` on operator Mac bridges that offer OpenCode handoff.
+
+---
+
+## WP-15 device sign-off checklist (G4 — Kartik iPhone)
+
+| Step | Check | Evidence to capture |
+|------|--------|---------------------|
+| O0 | Bridge + relay ≥10 min | Terminal screenshot + `lsof` |
+| O1 | OpenCode enabled (no `REMODEX_DISABLE_OPENCODE`) | Settings/runtime catalog |
+| O2 | `REMODEX_OPENCODE_HANDOFF=1` on Mac | `launchctl`/`run-local-remodex` env |
+| O3 | 696/696 + 283/283 automated | CI log or local run |
+| O4 | `runtime/catalog` OpenCode enabled | Screenshot |
+| O5 | Model picker + All Models sheet | Find model beyond 120 cap |
+| O6 | Streaming + Stop mid-turn | Screen recording |
+| **O6b** | Permission sheet UX | Allow now / always / deny |
+| O7 | Bridge restart rehydration | Same thread resumes |
+| O8 | Slash commands | `/` picker |
+| O9 | Skills `$` → SKILL.md files | Multi-skill turn |
+| O10 | Greyed voice/plan; fork if enabled | Screenshot |
+| O11 | Queue works; steer greyed | Screenshot |
+| O12 | Continue on Desktop visible | Screenshot |
+| O13 | Handoff RPC success | `handoffMode` in payload |
+| O14 | TUI session selected | Screenshot |
+| O15 | Codex thread blocks handoff | Error/hidden |
+| O16 | Handoff env-off regression | `opencode_handoff_disabled` |
+| O17 | `REMODEX_DISABLE_OPENCODE=1` Codex regression | Screenshot |
+
+**Rollback smoke on device (optional but recommended):**
+
+| Flag | Expected |
+|------|----------|
+| `REMODEX_OPENCODE_PERMISSIONS_UI=0` | Auto-deny < 30s |
+| `REMODEX_OPENCODE_SSE_RECONNECT=0` | Turn completes via poll |
+| `REMODEX_OPENCODE_ATTACHMENTS=0` | Image button greyed |
+| `REMODEX_DISABLE_OPENCODE=1` | O17 pass |

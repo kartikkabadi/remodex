@@ -444,6 +444,10 @@ final class CodexService {
     var terminalStateByTurnID: [String: CodexTurnTerminalState] = [:]
     // Ordered pending runtime approvals keyed by request id so concurrent prompts do not overwrite each other.
     var pendingApprovals: [CodexApprovalRequest] = []
+    // OpenCode SDK permission queue — separate from Codex pendingApprovals (D16).
+    var pendingOpenCodePermissions: [OpenCodePermissionRequest] = []
+    var sessionGrantedOpenCodeTools: Set<String> = []
+    @ObservationIgnored var openCodePermissionsUIEnabledOverride: Bool?
     var lastRawMessage: String?
     var lastErrorMessage: String?
     var keepMacAwakeWhileBridgeRuns = false

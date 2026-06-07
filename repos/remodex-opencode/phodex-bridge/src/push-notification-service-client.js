@@ -40,6 +40,24 @@ function createPushNotificationServiceClient({
     });
   }
 
+  async function notifyPermissionNeeded({
+    threadId,
+    turnId,
+    title,
+    body,
+    dedupeKey,
+  } = {}) {
+    return postJSON("/v1/push/session/notify-permission", {
+      sessionId,
+      notificationSecret,
+      threadId,
+      turnId,
+      title,
+      body,
+      dedupeKey,
+    });
+  }
+
   async function notifyCompletion({
     threadId,
     turnId,
@@ -134,6 +152,7 @@ function createPushNotificationServiceClient({
   return {
     hasConfiguredBaseUrl: Boolean(normalizedBaseUrl),
     registerDevice,
+    notifyPermissionNeeded,
     notifyCompletion,
     logUnavailable() {
       if (!normalizedBaseUrl) {

@@ -93,6 +93,15 @@ function resolvePreferredProviders(inventory, options = {}) {
   );
 
   if (preferredProviderIDs.size > 0) {
+    const hasEnvConnected = connectedProviders.some(
+      (provider) => readString(provider?.source) === "env",
+    );
+    const hasNonEnvConnected = connectedProviders.some(
+      (provider) => readString(provider?.source) !== "env",
+    );
+    if (hasEnvConnected && hasNonEnvConnected) {
+      return connectedProviders;
+    }
     return connectedProviders.filter((provider) => preferredProviderIDs.has(readString(provider.id)));
   }
 

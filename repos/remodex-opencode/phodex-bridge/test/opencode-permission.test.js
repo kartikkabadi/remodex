@@ -80,6 +80,18 @@ function makeProvider(opts = {}) {
   });
 }
 
+test("permission/reply rejects unknown permissionId", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_missing", allow: true },
+  });
+  assert.equal(result.success, false);
+  assert.match(result.reason, /unknown|expired/i);
+  await provider.shutdown();
+});
+
 test("permission/reply allows a permission", async () => {
   let receivedId = null;
   let receivedAllow = null;
@@ -89,6 +101,7 @@ test("permission/reply allows a permission", async () => {
     return { success: true };
   });
   const provider = makeProvider({ clientFactory: () => replyClient });
+  provider.testSeedPendingPermission("perm_abc123", { threadId: "thread-1" });
 
   const result = await provider.handleRequest({
     id: 1,
@@ -112,6 +125,7 @@ test("permission/reply denies a permission", async () => {
     return { success: true };
   });
   const provider = makeProvider({ clientFactory: () => replyClient });
+  provider.testSeedPendingPermission("perm_deny", { threadId: "thread-1" });
 
   const result = await provider.handleRequest({
     id: 1,
@@ -144,6 +158,7 @@ test("permission/reply handles client error", async () => {
     throw new Error("SDK permission error");
   });
   const provider = makeProvider({ clientFactory: () => errorClient });
+  provider.testSeedPendingPermission("perm_err", { threadId: "thread-1" });
 
   const result = await provider.handleRequest({
     id: 1,
@@ -164,6 +179,7 @@ test("permission/reply accepts permission_id snake_case", async () => {
     return { success: true };
   });
   const provider = makeProvider({ clientFactory: () => replyClient });
+  provider.testSeedPendingPermission("perm_snake", { threadId: "thread-1" });
 
   const result = await provider.handleRequest({
     id: 1,

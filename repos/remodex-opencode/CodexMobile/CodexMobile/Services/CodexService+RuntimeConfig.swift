@@ -278,6 +278,37 @@ extension CodexService {
         }
     }
 
+    func fetchFullOpenCodeModelList(threadId: String?) async throws -> [CodexModelOption] {
+        let response = try await sendRequest(
+            method: "model/list",
+            params: .object([
+                "full": .bool(true),
+                "provider": .string("opencode"),
+                "refreshProviders": .bool(true),
+            ]),
+            timeoutNanoseconds: RuntimeConfigLoadingPolicy.modelListTimeoutNanoseconds,
+            timeoutMessage: "model/list full timed out."
+        )
+
+        guard let resultObject = response.result?.objectValue else {
+            throw CodexServiceError.invalidResponse("model/list full response missing payload")
+        }
+
+        let items =
+            resultObject["items"]?.arrayValue
+            ?? resultObject["data"]?.arrayValue
+            ?? resultObject["models"]?.arrayValue
+            ?? []
+
+        return items
+            .compactMap { decodeModel(CodexModelOption.self, from: $0) }
+            .filter { CodexModelOption.normalizedProvider($0.modelProvider) == "opencode" }
+            .sorted {
+                TurnComposerMetaMapper.modelTitle(for: $0)
+                    .localizedCaseInsensitiveCompare(TurnComposerMetaMapper.modelTitle(for: $1)) == .orderedAscending
+            }
+    }
+
     func resetOpenCodeModelsRetry() {
         openCodeModelsRetryTask?.cancel()
         openCodeModelsRetryTask = nil
@@ -617,6 +648,17 @@ extension CodexService {
 
     func supportsStructuredSkillInput(forThreadId threadId: String?) -> Bool {
         providerCapabilitiesForTurn(threadId: threadId).supportsStructuredSkillInput
+    }
+
+    func supportsSkillFileInjection(forThreadId threadId: String?) -> Bool {
+        providerCapabilitiesForTurn(threadId: threadId).supportsSkillFileInjection
+    }
+
+    func supportsImageAttachments(forThreadId threadId: String?) -> Bool {
+        if let env = ProcessInfo.processInfo.environment["REMODEX_OPENCODE_ATTACHMENTS"], env == "0" {
+            return false
+        }
+        return providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
     }
 
     func providerCapabilitiesForTurn(threadId: String?) -> ProviderCapabilities {

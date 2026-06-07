@@ -4301,8 +4301,8 @@ extension CodexService {
         updateCurrentOutput(for: threadId)
     }
 
-    // Converts all pending streaming bubbles to completed state after transport failures.
-    func finalizeAllStreamingState() {
+    // Clears in-flight streaming presentation without wiping turn/running markers (transport-only reconnect).
+    func finalizeStreamingPresentationOnly() {
         flushAllPendingStreamingDeltas()
         var didMutate = false
 
@@ -4321,6 +4321,18 @@ extension CodexService {
             }
         }
 
+        if didMutate {
+            persistCurrentMacMessages()
+            if let activeThreadId {
+                updateCurrentOutput(for: activeThreadId)
+            }
+        }
+    }
+
+    // Converts all pending streaming bubbles to completed state after transport failures.
+    func finalizeAllStreamingState() {
+        finalizeStreamingPresentationOnly()
+
         activeTurnId = nil
         activeTurnIdByThread.removeAll()
         threadsPendingCompletionHaptic.removeAll()
@@ -4334,13 +4346,6 @@ extension CodexService {
         pendingAssistantDeltaFlushTask?.cancel()
         pendingAssistantDeltaFlushTask = nil
         threadIdByTurnID.removeAll()
-
-        if didMutate {
-            persistCurrentMacMessages()
-            if let activeThreadId {
-                updateCurrentOutput(for: activeThreadId)
-            }
-        }
     }
 }
 

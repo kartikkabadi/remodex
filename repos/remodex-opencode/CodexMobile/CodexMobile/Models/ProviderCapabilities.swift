@@ -23,6 +23,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsWorktree: Bool
     let supportsSkillAutocomplete: Bool
     let supportsStructuredSkillInput: Bool
+    let supportsSkillFileInjection: Bool
+    let supportsImageAttachments: Bool
     let supportsSteer: Bool
     let supportsQueue: Bool
 
@@ -42,6 +44,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsWorktree: Bool,
         supportsSkillAutocomplete: Bool,
         supportsStructuredSkillInput: Bool = false,
+        supportsSkillFileInjection: Bool = false,
+        supportsImageAttachments: Bool = false,
         supportsSteer: Bool,
         supportsQueue: Bool
     ) {
@@ -60,6 +64,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         self.supportsWorktree = supportsWorktree
         self.supportsSkillAutocomplete = supportsSkillAutocomplete
         self.supportsStructuredSkillInput = supportsStructuredSkillInput
+        self.supportsSkillFileInjection = supportsSkillFileInjection
+        self.supportsImageAttachments = supportsImageAttachments
         self.supportsSteer = supportsSteer
         self.supportsQueue = supportsQueue
     }
@@ -80,6 +86,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         case supportsWorktree
         case supportsSkillAutocomplete
         case supportsStructuredSkillInput
+        case supportsSkillFileInjection
+        case supportsImageAttachments
         case supportsSteer
         case supportsQueue
     }
@@ -103,6 +111,10 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsSkillAutocomplete = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillAutocomplete)) ?? false
         supportsStructuredSkillInput =
             (try? container.decodeIfPresent(Bool.self, forKey: .supportsStructuredSkillInput)) ?? false
+        supportsSkillFileInjection =
+            (try? container.decodeIfPresent(Bool.self, forKey: .supportsSkillFileInjection)) ?? false
+        supportsImageAttachments =
+            (try? container.decodeIfPresent(Bool.self, forKey: .supportsImageAttachments)) ?? false
         supportsSteer = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSteer)) ?? false
         supportsQueue = (try? container.decodeIfPresent(Bool.self, forKey: .supportsQueue)) ?? true
     }
@@ -124,6 +136,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         try container.encode(supportsWorktree, forKey: .supportsWorktree)
         try container.encode(supportsSkillAutocomplete, forKey: .supportsSkillAutocomplete)
         try container.encode(supportsStructuredSkillInput, forKey: .supportsStructuredSkillInput)
+        try container.encode(supportsSkillFileInjection, forKey: .supportsSkillFileInjection)
+        try container.encode(supportsImageAttachments, forKey: .supportsImageAttachments)
         try container.encode(supportsSteer, forKey: .supportsSteer)
         try container.encode(supportsQueue, forKey: .supportsQueue)
     }
@@ -144,6 +158,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsWorktree: true,
         supportsSkillAutocomplete: true,
         supportsStructuredSkillInput: true,
+        supportsSkillFileInjection: true,
+        supportsImageAttachments: true,
         supportsSteer: true,
         supportsQueue: true
     )
@@ -164,6 +180,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsWorktree: false,
         supportsSkillAutocomplete: true,
         supportsStructuredSkillInput: false,
+        supportsSkillFileInjection: true,
+        supportsImageAttachments: true,
         supportsSteer: false,
         supportsQueue: true
     )

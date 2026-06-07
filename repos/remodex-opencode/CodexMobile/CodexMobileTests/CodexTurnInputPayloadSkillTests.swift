@@ -14,6 +14,36 @@ import XCTest
 final class CodexTurnInputPayloadSkillTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
+    func testMakeTurnInputPayloadIncludesMultipleSkillFilePathsWhenEnabled() {
+        let service = makeService()
+        let payload = service.makeTurnInputPayload(
+            userInput: "Run skills",
+            attachments: [],
+            imageURLKey: "url",
+            skillMentions: [
+                CodexTurnSkillMention(
+                    id: "review",
+                    name: "review",
+                    path: "/Users/me/.agents/skills/review/SKILL.md"
+                ),
+                CodexTurnSkillMention(
+                    id: "lint",
+                    name: "lint",
+                    path: "/Users/me/.agents/skills/lint/SKILL.md"
+                ),
+            ],
+            includeStructuredSkillItems: true
+        )
+
+        let skillItems = payload
+            .compactMap(\.objectValue)
+            .filter { $0["type"]?.stringValue == "skill" }
+
+        XCTAssertEqual(skillItems.count, 2)
+        XCTAssertEqual(skillItems[0]["path"]?.stringValue, "/Users/me/.agents/skills/review/SKILL.md")
+        XCTAssertEqual(skillItems[1]["path"]?.stringValue, "/Users/me/.agents/skills/lint/SKILL.md")
+    }
+
     func testMakeTurnInputPayloadIncludesStructuredSkillItemsWhenEnabled() {
         let service = makeService()
         let payload = service.makeTurnInputPayload(

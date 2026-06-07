@@ -6,7 +6,7 @@ Provider logos for the runtime catalog and iOS composer/sidebar/menus are provid
 
 ## Legal Clearance (External Dependency)
 
-**STATUS: BLOCKED (Phase 2 pending clearance; Phase 1 prep complete in prior PR)**
+**STATUS: PRODUCT_APPROVED (2026-06-08 — direct distribution sign-off; license table retained for audit)**
 
 - clearance received date: TBD (phase1 list prepped PR12; phase2 TBD)
 - reviewers: TBD

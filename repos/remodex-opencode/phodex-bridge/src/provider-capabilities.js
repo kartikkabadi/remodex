@@ -24,6 +24,8 @@ const CAPABILITIES = [
   "supportsMCP",
   "supportsSkillAutocomplete",
   "supportsStructuredSkillInput",
+  "supportsSkillFileInjection",
+  "supportsImageAttachments",
   "supportsSteer",
   "supportsQueue",
 ];
@@ -44,6 +46,8 @@ const CODEX_CAPABILITIES = {
   supportsMCP: true,
   supportsSkillAutocomplete: true,
   supportsStructuredSkillInput: true,
+  supportsSkillFileInjection: true,
+  supportsImageAttachments: true,
   supportsSteer: true,
   supportsQueue: true,
 };
@@ -69,6 +73,8 @@ const OPENCODE_CAPABILITIES = {
   // Bridge now wires conditional skills[] (gated); iOS sends structured items only when flag true.
   // Do not force-enable; catalog test + DISABLE regression cover. Flip only after SDK + device E2E.
   supportsStructuredSkillInput: false,
+  supportsSkillFileInjection: true,
+  supportsImageAttachments: true,
   supportsSteer: false,
   supportsQueue: true,
 };

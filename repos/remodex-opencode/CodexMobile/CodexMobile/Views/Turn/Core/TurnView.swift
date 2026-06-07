@@ -37,6 +37,8 @@ struct TurnView: View {
     @State private var assistantRevertSheetState: AssistantRevertSheetState?
     @State private var alertApprovalRequest: CodexApprovalRequest?
     @State private var isApprovalAlertPresented = false
+    @State private var openCodePermissionRequest: OpenCodePermissionRequest?
+    @State private var isSubmittingOpenCodePermission = false
     @State private var isShowingMacHandoffConfirm = false
     @State private var worktreeOverlayRoute: TurnWorktreeOverlayRoute?
     @State private var macHandoffErrorMessage: String?
@@ -423,6 +425,7 @@ struct TurnView: View {
             },
             onApprovalRequestChanged: {
                 syncApprovalAlertPresentation()
+                syncOpenCodePermissionPresentation()
             }
         )
         .onDisappear {
@@ -517,6 +520,22 @@ struct TurnView: View {
                     }
                 )
             }
+        }
+        .sheet(item: $openCodePermissionRequest) { request in
+            OpenCodePermissionSheet(
+                request: request,
+                threadTitle: currentResolvedThread.title,
+                isSubmitting: isSubmittingOpenCodePermission,
+                onAllowNow: {
+                    submitOpenCodePermissionReply(request, allow: true, scope: .once)
+                },
+                onAllowAlways: {
+                    submitOpenCodePermissionReply(request, allow: true, scope: .session)
+                },
+                onDeny: {
+                    submitOpenCodePermissionReply(request, allow: false, scope: .once)
+                }
+            )
         }
         .turnViewAlerts(
             alertApprovalRequest: $alertApprovalRequest,
@@ -1018,6 +1037,7 @@ struct TurnView: View {
 
     private func handleInitialAppear(activeTurnID: String?) {
         syncApprovalAlertPresentation()
+        syncOpenCodePermissionPresentation()
         if initialShouldAnchorToAssistantResponse && !hasConsumedInitialAssistantAnchor {
             hasConsumedInitialAssistantAnchor = true
             viewModel.shouldAnchorToAssistantResponse = true
@@ -1376,14 +1396,47 @@ struct TurnView: View {
         codex.pendingApproval(for: thread.id)
     }
 
+    private var openCodePermissionForThread: OpenCodePermissionRequest? {
+        codex.pendingOpenCodePermission(for: thread.id)
+    }
+
+    private func syncOpenCodePermissionPresentation() {
+        guard codex.isOpenCodePermissionsUIEnabled else {
+            openCodePermissionRequest = nil
+            return
+        }
+        openCodePermissionRequest = openCodePermissionForThread
+    }
+
+    private func submitOpenCodePermissionReply(
+        _ request: OpenCodePermissionRequest,
+        allow: Bool,
+        scope: CodexService.OpenCodePermissionReplyScope
+    ) {
+        guard !isSubmittingOpenCodePermission else { return }
+        isSubmittingOpenCodePermission = true
+        Task { @MainActor in
+            defer { isSubmittingOpenCodePermission = false }
+            do {
+                try await codex.replyToOpenCodePermission(request, allow: allow, scope: scope)
+                syncOpenCodePermissionPresentation()
+            } catch {
+                codex.lastErrorMessage = error.localizedDescription
+                openCodePermissionRequest = openCodePermissionForThread ?? request
+            }
+        }
+    }
+
     private var approvalRequestChangeToken: String? {
+        let openCodeToken = openCodePermissionForThread.map { "\($0.permissionId):\($0.tool)" }
         guard let request = approvalForThread else {
-            return nil
+            return openCodeToken
         }
 
         let reason = request.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let command = request.command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return [request.id, reason, command].joined(separator: "|")
+        let codexToken = [request.id, reason, command].joined(separator: "|")
+        return [codexToken, openCodeToken].compactMap { $0 }.joined(separator: "||")
     }
 
     private func syncApprovalAlertPresentation() {

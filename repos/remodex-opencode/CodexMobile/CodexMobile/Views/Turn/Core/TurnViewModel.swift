@@ -1482,12 +1482,11 @@ final class TurnViewModel {
     }
 
     private func allowsComposerImageAttachments(codex: CodexService, threadID: String) -> Bool {
-        let provider = CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: threadID))
-        guard provider == "opencode" else {
-            return true
+        guard codex.supportsImageAttachments(forThreadId: threadID) else {
+            codex.lastErrorMessage = ComposerCapabilityCopy.capabilityReason(for: .imageAttachments)
+            return false
         }
-        codex.lastErrorMessage = ComposerCapabilityCopy.capabilityReason(for: .imageAttachments)
-        return false
+        return true
     }
 
     func openCamera(codex: CodexService, threadID: String) {

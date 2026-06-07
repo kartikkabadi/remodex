@@ -163,17 +163,47 @@ extension CodexService {
         catalogRefetchDebounceTask?.cancel()
         catalogRefetchDebounceTask = nil
         lastOpenCodeCatalogRevision = nil
-        clearPendingApprovals()
-        finalizeAllStreamingState()
         messagePersistenceDebounceTask?.cancel()
         messagePersistenceDebounceTask = nil
         if !suspendAutomaticMacScopedPersistence {
             persistCurrentMacMessages()
         }
-        assistantCompletionFingerprintByThread.removeAll()
-        assistantCompletionFingerprintByTurn.removeAll()
         deferredSyncTasks.values.forEach { $0.cancel() }
         deferredSyncTasks.removeAll()
+        endBackgroundRunGraceTask(reason: "disconnect")
+        clearConnectionSyncState()
+        resetSecureTransportState()
+        cancelTrustedSessionResolve()
+
+        if preserveReconnectIntent {
+            teardownTransportOnly()
+        } else {
+            teardownFullSessionOnDisconnect()
+        }
+
+        failAllPendingRequests(with: CodexServiceError.disconnected)
+    }
+
+    // Transport-only path: preserve turn maps, running markers, timeline, and approval queues (Bug A1 fix).
+    private func teardownTransportOnly() {
+        finalizeStreamingPresentationOnly()
+        clearHydrationCachesPreservingRunningThreads()
+        // Catalog snapshot is stale until reconnect; per-thread capability gates remain authoritative.
+        supportsStructuredSkillInput = false
+        supportsStructuredMentionInput = true
+        supportsTurnCollaborationMode = false
+        hasResolvedRateLimitsSnapshot = false
+        bridgeInstalledVersion = nil
+        latestBridgePackageVersion = nil
+    }
+
+    // Full session reset on explicit logout, server switch, or preserveReconnectIntent: false.
+    private func teardownFullSessionOnDisconnect() {
+        clearPendingApprovals()
+        clearPendingOpenCodePermissions()
+        finalizeAllStreamingState()
+        assistantCompletionFingerprintByThread.removeAll()
+        assistantCompletionFingerprintByTurn.removeAll()
         recentActivityLineByThread.removeAll()
         removeAllThreadTimelineState()
         assistantRevertStateCacheByThread.removeAll()
@@ -193,25 +223,16 @@ extension CodexService {
         failedThreadIDs.removeAll()
         runningThreadWatchByID.removeAll()
         clearTransientConnectionPrompts()
-        endBackgroundRunGraceTask(reason: "disconnect")
-        if !preserveReconnectIntent {
-            shouldAutoReconnectOnForeground = false
-            connectionRecoveryState = .idle
-        }
-        // Disconnect clears cached catalog; per-thread gates use supportsStructuredSkillInput(forThreadId:).
+        shouldAutoReconnectOnForeground = false
+        connectionRecoveryState = .idle
         supportsStructuredSkillInput = false
         supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
         hasResolvedRateLimitsSnapshot = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
-        clearConnectionSyncState()
         clearHydrationCaches()
         resumedThreadIDs.removeAll()
-        resetSecureTransportState()
-        cancelTrustedSessionResolve()
-
-        failAllPendingRequests(with: CodexServiceError.disconnected)
     }
 
     func setKeepMacAwakeWhileBridgeRunsPreference(_ enabled: Bool) {

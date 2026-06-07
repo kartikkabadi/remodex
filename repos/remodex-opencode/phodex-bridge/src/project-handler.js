@@ -14,6 +14,7 @@ const DEFAULT_DIRECTORY_SEARCH_LIMIT = 80;
 const DEFAULT_DIRECTORY_SEARCH_MAX_DEPTH = 8;
 const DEFAULT_DIRECTORY_SEARCH_MAX_VISITED = 5000;
 const DEFAULT_HIDDEN_DIRECTORY_NAMES = new Set(["Library"]);
+const DEFAULT_KNOWN_PROJECT_LIMIT = 100;
 
 // Rootless chat slug rules mirror Codex Desktop's `~/Documents/Codex/<DATE>/<slug>`
 // convention so iOS-created Quick Chats land in the same bucket Desktop classifies
@@ -79,6 +80,10 @@ async function handleProjectMethod(method, params, options = {}) {
       return projectCreateDirectory(params, options);
     case "project/createRootlessChatRoot":
       return projectCreateRootlessChatRoot(params, options);
+    case "project/knownProjects":
+      return projectKnownProjects(options);
+    case "project/rememberKnownProject":
+      return projectRememberKnownProject(params, options);
     default:
       throw projectError("unknown_method", `Unknown project method: ${method}`);
   }
@@ -221,6 +226,94 @@ async function projectCreateDirectory(params, options = {}) {
 // `thread/start`. Without an explicit cwd the app-server falls back to its own
 // process working directory (often the user's home), which would otherwise show
 // up in the sidebar as a project named after the user account.
+function projectKnownProjectsRegistry(options = {}) {
+  if (options.knownProjectsRegistry && typeof options.knownProjectsRegistry.list === "function") {
+    return options.knownProjectsRegistry;
+  }
+  if (!projectKnownProjectsRegistry._default) {
+    projectKnownProjectsRegistry._default = createKnownProjectsRegistry();
+  }
+  return projectKnownProjectsRegistry._default;
+}
+
+function createKnownProjectsRegistry() {
+  const projects = new Map();
+  return {
+    remember(pathValue, metadata = {}) {
+      const normalized = readString(pathValue);
+      if (!normalized) {
+        return null;
+      }
+      const resolved = path.resolve(normalized);
+      const existing = projects.get(resolved) || {
+        path: resolved,
+        name: path.basename(resolved),
+        rememberedAt: new Date().toISOString(),
+      };
+      const next = {
+        ...existing,
+        ...metadata,
+        path: resolved,
+        name: readString(metadata.name) || existing.name || path.basename(resolved),
+        rememberedAt: metadata.rememberedAt || existing.rememberedAt || new Date().toISOString(),
+        lastSeenAt: metadata.lastSeenAt || new Date().toISOString(),
+      };
+      projects.set(resolved, next);
+      return next;
+    },
+    list(limit = DEFAULT_KNOWN_PROJECT_LIMIT) {
+      return [...projects.values()]
+        .sort((left, right) =>
+          (readString(right.lastSeenAt) || "").localeCompare(readString(left.lastSeenAt) || ""))
+        .slice(0, limit);
+    },
+  };
+}
+
+async function projectKnownProjects(options = {}) {
+  const registry = projectKnownProjectsRegistry(options);
+  const projects = registry.list(DEFAULT_KNOWN_PROJECT_LIMIT).map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    rememberedAt: entry.rememberedAt,
+    lastSeenAt: entry.lastSeenAt,
+    provider: readString(entry.provider) || null,
+    source: readString(entry.source) || null,
+  }));
+  return { projects };
+}
+
+async function projectRememberKnownProject(params = {}, options = {}) {
+  const projectPath = readString(params.path || params.cwd || params.projectPath);
+  if (!projectPath) {
+    throw projectError("missing_path", "A project path is required.");
+  }
+
+  const validation = await validateDirectory(projectPath, options).catch(() => null);
+  if (!validation?.exists || !validation.isDirectory || !validation.isAllowed) {
+    throw projectError("missing_directory", "That project folder does not exist on this Mac.");
+  }
+
+  const registry = projectKnownProjectsRegistry(options);
+  const remembered = registry.remember(validation.path, {
+    name: readString(params.name || params.title),
+    provider: readString(params.provider),
+    source: readString(params.source) || "project/rememberKnownProject",
+    lastSeenAt: new Date().toISOString(),
+  });
+
+  return {
+    project: {
+      path: remembered.path,
+      name: remembered.name,
+      rememberedAt: remembered.rememberedAt,
+      lastSeenAt: remembered.lastSeenAt,
+      provider: readString(remembered.provider) || null,
+      source: readString(remembered.source) || null,
+    },
+  };
+}
+
 async function projectCreateRootlessChatRoot(params = {}, options = {}) {
   const homeDir = resolveHomeDir(options);
   const desktopDocumentsRoot = path.join(homeDir, "Documents", "Codex");
@@ -649,6 +742,9 @@ module.exports = {
   projectValidatePath,
   projectCreateDirectory,
   projectCreateRootlessChatRoot,
+  projectKnownProjects,
+  projectRememberKnownProject,
+  createKnownProjectsRegistry,
   validateDirectory,
   rootlessChatSlugFromPromptHint,
 };

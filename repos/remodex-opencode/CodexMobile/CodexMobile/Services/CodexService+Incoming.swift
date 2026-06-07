@@ -315,6 +315,9 @@ extension CodexService {
         case "runtime/catalog/updated":
             handleRuntimeCatalogUpdated(paramsObject)
 
+        case "permission/request":
+            handleOpenCodePermissionRequest(paramsObject: paramsObject)
+
         default:
             if method.hasPrefix("codex/event/"),
                handleLegacyCodexNamedEvent(method: method, paramsObject: paramsObject) {

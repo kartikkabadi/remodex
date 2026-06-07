@@ -56,6 +56,10 @@ jobs:
         working-directory: phodex-bridge
         run: npm test
 
+      - name: Run OpenCode test suite
+        working-directory: phodex-bridge
+        run: npm run test:opencode
+
       - name: Install relay dependencies
         working-directory: relay
         run: sfw npm ci

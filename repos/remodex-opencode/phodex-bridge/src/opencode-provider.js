@@ -48,6 +48,7 @@ const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
 const { resolveOpenCodeVariantForPrompt } = require("./opencode-variant-resolve");
 const { createOpenCodeAuthErrorNotifier } = require("./opencode-auth-error-handler");
 const { mapOpenCodeSessionToContextUsage } = require("./opencode-usage-mapper");
+const { createAttachmentStore, isAttachmentsEnabled } = require("./attachment-store");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -151,6 +152,13 @@ function createOpenCodeProvider({
     sendApplicationMessage,
     logPrefix,
   });
+  const attachmentStore = isAttachmentsEnabled(env) ? createAttachmentStore() : null;
+  let sseReconnectCount = 0;
+  /** @type {Map<string, { permissionId: string, threadId: string, turnId?: string, sessionId?: string, tool: string, requestedAt: string, watchdog?: ReturnType<typeof setTimeout> }>} */
+  const pendingPermissions = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const sessionPermissionGrants = new Map();
+  const PERMISSION_WATCHDOG_MS = 30_000;
 
   function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
     const tid = readString(threadId);
@@ -1133,7 +1141,10 @@ function createOpenCodeProvider({
     }
 
     const model = normalizeOpenCodeModel(params.model || thread.model);
-    const { inputText, prompt, parts, skills: structuredSkills = [] } = buildPromptFromTurnInput(params.input);
+    const { inputText, prompt, parts, skills: structuredSkills = [] } = buildPromptFromTurnInput(params.input, {
+      attachmentStore,
+      attachmentsEnabled: isAttachmentsEnabled(env),
+    });
     if (!prompt && (!Array.isArray(parts) || parts.length === 0)) {
       const error = new Error("OpenCode turn/start requires text input.");
       error.errorCode = "opencode_input_required";
@@ -1490,6 +1501,7 @@ function createOpenCodeProvider({
         }
       };
 
+      const sseReconnectEnabled = readString(env.REMODEX_OPENCODE_SSE_RECONNECT) !== "0";
       const unsubscribe = client.subscribeToEvents((method, params) => {
         if (active.completed) return;
 
@@ -1600,8 +1612,13 @@ function createOpenCodeProvider({
           return;
         }
 
+        if (method === "permission/request") {
+          handlePermissionRequestEvent(active, enriched);
+          return;
+        }
+
         emit(method, enriched);
-      });
+      }, { reconnectEnabled: sseReconnectEnabled });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
 
       const parsedModel = parseOpenCodeModelSlug(model);
@@ -1764,19 +1781,167 @@ function createOpenCodeProvider({
     return true;
   }
 
+  function isOpenCodePermissionsUIEnabled(currentEnv = env) {
+    const raw = readString(currentEnv?.REMODEX_OPENCODE_PERMISSIONS_UI);
+    return raw !== "0" && raw?.toLowerCase() !== "false";
+  }
+
+  function redactPermissionArgs(args) {
+    if (!args || typeof args !== "object") {
+      return "";
+    }
+    const lines = Object.entries(args).map(([key, value]) => {
+      const rendered = typeof value === "string" ? value : JSON.stringify(value);
+      if (/^[A-Z0-9_]+$/.test(key)) {
+        return `${key}=***`;
+      }
+      return `${key}=${rendered}`;
+    });
+    let summary = lines.join("\n");
+    if (summary.length > 500) {
+      summary = `${summary.slice(0, 500)}…(truncated)`;
+    }
+    return summary;
+  }
+
+  function clearPermissionWatchdog(entry) {
+    if (entry?.watchdog) {
+      clearTimeout(entry.watchdog);
+      entry.watchdog = null;
+    }
+  }
+
+  function handlePermissionRequestEvent(active, params) {
+    const permissionId = readString(params.permissionId || params.permission_id || params.requestId);
+    const tool = readString(params.tool || params.toolName) || "tool";
+    const sessionId = readString(params.sessionId || params.session_id || active.sessionId);
+    if (!permissionId) {
+      return;
+    }
+
+    if (sessionId) {
+      const grants = sessionPermissionGrants.get(sessionId);
+      if (grants?.has(tool)) {
+        void (async () => {
+          try {
+            await ensureStarted();
+            await client.replyToPermission(permissionId, true);
+          } catch (error) {
+            console.error(`${logPrefix} auto-allow permission failed: ${error.message}`);
+          }
+        })();
+        return;
+      }
+    }
+
+    const requestedAt = new Date().toISOString();
+    const payload = {
+      permissionId,
+      threadId: readString(params.threadId || active.thread.id),
+      turnId: readString(params.turnId || active.turn.id),
+      sessionId: sessionId || null,
+      tool,
+      args: params.args && typeof params.args === "object" ? params.args : {},
+      cwd: readString(params.cwd || active.thread.cwd) || null,
+      requestedAt,
+    };
+
+    const existing = pendingPermissions.get(permissionId);
+    clearPermissionWatchdog(existing);
+    const entry = { ...payload, watchdog: null };
+    pendingPermissions.set(permissionId, entry);
+
+    if (!isOpenCodePermissionsUIEnabled()) {
+      entry.watchdog = setTimeout(() => {
+        void (async () => {
+          pendingPermissions.delete(permissionId);
+          try {
+            await ensureStarted();
+            await client.replyToPermission(permissionId, false);
+            emit("turn/failed", {
+              threadId: payload.threadId,
+              turnId: payload.turnId,
+              message: "Permission required — update Remodex to respond.",
+              errorCode: ERROR_CODES.OPENCODE_PERMISSION_TIMEOUT.errorCode,
+            });
+          } catch (error) {
+            console.error(`${logPrefix} permission auto-deny failed: ${error.message}`);
+          }
+        })();
+      }, PERMISSION_WATCHDOG_MS);
+      if (readString(process.env.REMODEX_TEST) === "1" && typeof entry.watchdog?.unref === "function") {
+        entry.watchdog.unref();
+      }
+      return;
+    }
+
+    emit("permission/request", {
+      ...payload,
+      argsSummary: redactPermissionArgs(payload.args),
+    });
+  }
+
+  function testSeedPendingPermission(permissionId, fields = {}) {
+    pendingPermissions.set(permissionId, {
+      permissionId,
+      threadId: readString(fields.threadId) || "test-thread",
+      turnId: readString(fields.turnId) || null,
+      sessionId: readString(fields.sessionId) || null,
+      tool: readString(fields.tool) || "bash",
+      requestedAt: new Date().toISOString(),
+      watchdog: null,
+    });
+  }
+
+  function getObservabilityMetrics() {
+    return {
+      sseReconnectCount,
+      permissionPendingCount: pendingPermissions.size,
+      catalogRefreshMs: lastModelListMeta?.refreshMs ?? null,
+    };
+  }
+
   async function permissionReply(request) {
     const params = request.params || {};
     const permissionId = readString(
       params.permissionId || params.permission_id || params.requestId,
     );
     const allow = params.allow === true || params.approved === true || params.accept === true;
+    const scope = readString(params.scope) || "once";
+    const sessionId = readString(params.sessionId || params.session_id);
     if (!permissionId) {
       return { success: false, reason: "Missing permission ID" };
     }
+
+    const pending = pendingPermissions.get(permissionId);
+    if (!pending) {
+      console.log(
+        JSON.stringify({
+          event: "permission_reply_rejected",
+          permissionId,
+          reason: "unknown_or_expired",
+        }),
+      );
+      return { success: false, reason: "Unknown or expired permission ID" };
+    }
+
+    clearPermissionWatchdog(pending);
+    pendingPermissions.delete(permissionId);
+
+    if (allow && scope === "session") {
+      const resolvedSessionId = sessionId || pending.sessionId;
+      const tool = readString(pending.tool);
+      if (resolvedSessionId && tool) {
+        const grants = sessionPermissionGrants.get(resolvedSessionId) || new Set();
+        grants.add(tool);
+        sessionPermissionGrants.set(resolvedSessionId, grants);
+      }
+    }
+
     try {
       await ensureStarted();
       await client.replyToPermission(permissionId, allow);
-      return { success: true, permissionId, allow };
+      return { success: true, permissionId, allow, scope };
     } catch (error) {
       return { success: false, reason: error.message };
     }
@@ -2365,6 +2530,8 @@ function createOpenCodeProvider({
     discoverProjects,
     getUsageStatsForThread,
     pushThreadUsageUpdate,
+    getObservabilityMetrics,
+    testSeedPendingPermission,
   };
 }
 
