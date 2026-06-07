@@ -228,6 +228,7 @@ struct TurnComposerHostView: View {
             isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             modelsErrorMessage: codex.modelsErrorMessage(forThreadId: thread.id),
             openCodeProviderDiscoveryReasonCode: codex.openCodeProviderDiscoveryReasonCode,
+            threadId: thread.id,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,
             voiceButtonPresentation: voiceButtonPresentation,
@@ -399,6 +400,7 @@ struct TurnComposerHostView: View {
             OpenCodeAllModelsSheet(
                 threadId: thread.id,
                 onSelect: { model in
+                    isShowingAllModels = false
                     runtimeActions.selectModel(model.selectionKey)
                 }
             )

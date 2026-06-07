@@ -51,6 +51,7 @@ struct TurnComposerView: View {
     let modelsErrorMessage: String?
     let openCodeProviderDiscoveryReasonCode: String?
 
+    let threadId: String?
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
     let voiceButtonPresentation: TurnComposerVoiceButtonPresentation
@@ -230,6 +231,7 @@ struct TurnComposerView: View {
                     }
 
                     ComposerBottomBar(
+                        threadId: threadId,
                         orderedModelOptions: orderedModelOptions,
                         selectedModelID: selectedModelID,
                         selectedModelTitle: selectedModelTitle,
@@ -732,6 +734,7 @@ private struct ComposerPreviewContent: View {
             isRuntimeSelectionLoading: false,
             modelsErrorMessage: nil,
             openCodeProviderDiscoveryReasonCode: nil,
+            threadId: nil,
             runtimeState: TurnComposerRuntimeState(
                 reasoningDisplayOptions: reasoningOptions,
                 effectiveReasoningEffort: "high",

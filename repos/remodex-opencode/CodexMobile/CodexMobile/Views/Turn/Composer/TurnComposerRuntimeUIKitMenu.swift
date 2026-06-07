@@ -57,44 +57,44 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
 
         let modelChildren: [UIMenuElement] = {
             if input.openCodeProviderDiscoveryReasonCode == "no_connected_providers" {
-                return [
+                return modelMenuChildrenWithOptionalBrowse([
                     disabledInfoAction(title: "No providers connected on your Mac"),
                     disabledInfoAction(title: "Connect providers in OpenCode on your Mac, then tap Retry"),
                     UIAction(title: "Retry loading models") { _ in
                         HapticFeedback.shared.triggerImpactFeedback(style: .light)
                         input.runtimeActions.refreshModels()
                     },
-                ]
+                ], input: input)
             }
             if input.isLoadingOpenCodeProvider,
                input.openCodeProviderDiscoveryReasonCode == nil {
-                return [
+                return modelMenuChildrenWithOptionalBrowse([
                     disabledInfoAction(title: "OpenCode models are still loading"),
-                ]
+                ], input: input)
             }
             if input.isLoadingModels {
-                return [
+                return modelMenuChildrenWithOptionalBrowse([
                     disabledInfoAction(title: "Loading models..."),
-                ]
+                ], input: input)
             }
             if input.orderedModelOptions.isEmpty {
                 if let errorMessage = input.modelsErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !errorMessage.isEmpty {
-                    return [
+                    return modelMenuChildrenWithOptionalBrowse([
                         disabledInfoAction(title: errorMessage),
                         UIAction(title: "Retry loading models") { _ in
                             HapticFeedback.shared.triggerImpactFeedback(style: .light)
                             input.runtimeActions.refreshModels()
                         },
-                    ]
+                    ], input: input)
                 }
-                return [
+                return modelMenuChildrenWithOptionalBrowse([
                     disabledInfoAction(title: "No models available"),
                     UIAction(title: "Retry loading models") { _ in
                         HapticFeedback.shared.triggerImpactFeedback(style: .light)
                         input.runtimeActions.refreshModels()
                     },
-                ]
+                ], input: input)
             }
 
             return providerMenus(input)
@@ -247,17 +247,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
             return "No models available"
         }()
 
+        var children: [UIMenuElement] = [
+            disabledInfoAction(title: statusTitle),
+            UIAction(title: "Retry loading models") { _ in
+                HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                input.runtimeActions.refreshModels()
+            },
+        ]
+        if normalizedProvider == "opencode" {
+            children.append(browseAllModelsAction(input))
+        }
+
         return UIMenu(
             title: providerTitle,
             image: RuntimeProviderLogo.menuUIImage(provider: provider, catalogProviders: input.openCodeCatalogProviders),
             options: [],
-            children: [
-                disabledInfoAction(title: statusTitle),
-                UIAction(title: "Retry loading models") { _ in
-                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                    input.runtimeActions.refreshModels()
-                },
-            ]
+            children: children
         )
     }
 
@@ -480,6 +485,22 @@ enum TurnComposerRuntimeUIKitMenuBuilder {
         let action = UIAction(title: title) { _ in }
         action.attributes.insert(.disabled)
         return action
+    }
+
+    private static func shouldOfferBrowseAllModels(_ input: Input) -> Bool {
+        input.runtimeState.catalogProviderIDs.contains("opencode")
+            || input.openCodeProviderDiscoveryReasonCode != nil
+            || input.isLoadingOpenCodeProvider
+    }
+
+    private static func modelMenuChildrenWithOptionalBrowse(
+        _ children: [UIMenuElement],
+        input: Input
+    ) -> [UIMenuElement] {
+        guard shouldOfferBrowseAllModels(input) else { return children }
+        var result = children
+        result.append(browseAllModelsAction(input))
+        return result
     }
 
     private static func browseAllModelsAction(_ input: Input) -> UIAction {

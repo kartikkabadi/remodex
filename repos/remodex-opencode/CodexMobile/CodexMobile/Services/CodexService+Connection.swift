@@ -171,7 +171,7 @@ extension CodexService {
         deferredSyncTasks.values.forEach { $0.cancel() }
         deferredSyncTasks.removeAll()
         endBackgroundRunGraceTask(reason: "disconnect")
-        clearConnectionSyncState()
+        clearConnectionSyncState(preservingRunningThreads: preserveReconnectIntent)
         resetSecureTransportState()
         cancelTrustedSessionResolve()
 
@@ -704,6 +704,7 @@ extension CodexService {
         refreshAllThreadTimelineStates()
         threadIdByTurnID.removeAll()
         clearPendingApprovals()
+        clearPendingOpenCodePermissions()
         currentOutput = ""
         lastErrorMessage = nil
         isLoadingModels = false

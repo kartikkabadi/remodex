@@ -403,6 +403,7 @@ struct TurnView: View {
                 // Defer the observable-model mutation out of the .onChange action
                 // to avoid AttributeGraph cycles when the parent re-renders.
                 DispatchQueue.main.async { [viewModel] in
+                    syncOpenCodePermissionPresentation()
                     viewModel.flushQueueIfPossible(codex: codex, threadID: thread.id)
                     guard showsGitControls else { return }
                     viewModel.refreshGitBranchTargets(

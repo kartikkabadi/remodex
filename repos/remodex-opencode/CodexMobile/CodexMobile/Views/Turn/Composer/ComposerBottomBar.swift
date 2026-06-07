@@ -8,9 +8,11 @@ import SwiftUI
 
 struct ComposerBottomBar: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(CodexService.self) private var codex
     @AppStorage(UserBubbleColor.storageKey) private var userBubbleColorRawValue = UserBubbleColor.defaultStoredRawValue
 
     // Data
+    let threadId: String?
     let orderedModelOptions: [CodexModelOption]
     let selectedModelID: String?
     let selectedModelTitle: String
@@ -345,7 +347,7 @@ struct ComposerBottomBar: View {
     }
 
     private var supportsImageAttachments: Bool {
-        runtimeState.capabilities.supportsImageAttachments
+        codex.supportsImageAttachments(forThreadId: threadId)
     }
 
     private var queueBadge: some View {
