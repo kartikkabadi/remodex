@@ -168,6 +168,24 @@ test("permission/reply handles client error", async () => {
 
   assert.equal(result.success, false);
   assert.equal(result.reason, "SDK permission error");
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+
+  await provider.shutdown();
+});
+
+test("permission/reply rejects threadId mismatch", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  provider.testSeedPendingPermission("perm_thread", { threadId: "thread-1" });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_thread", allow: true, threadId: "thread-2" },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.reason, /thread id does not match/i);
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
 
   await provider.shutdown();
 });

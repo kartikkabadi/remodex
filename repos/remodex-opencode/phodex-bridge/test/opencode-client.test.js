@@ -695,6 +695,57 @@ test("buildModelFromAny omits logoProviderId for generic OpenCode upstream", () 
   assert.equal(model.logoProviderId, undefined);
 });
 
+test("subscribeToEvents resets attempt after first event", async () => {
+  let subscribeCalls = 0;
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: () => ({
+      event: {
+        subscribe: async () => {
+          subscribeCalls += 1;
+          if (subscribeCalls === 1) {
+            return {
+              stream: (async function* failingStream() {
+                yield { type: "turn.started", turnID: "turn-1" };
+                throw new Error("stream dropped");
+              })(),
+              close: () => {},
+            };
+          }
+          return {
+            stream: (async function* stableStream() {
+              yield { type: "turn.started", turnID: "turn-2" };
+              await new Promise(() => {});
+            })(),
+            close: () => {},
+          };
+        },
+      },
+    }),
+  });
+
+  const resubscribes = [];
+  const unsubscribe = client.subscribeToEvents(
+    () => {},
+    {
+      reconnectBaseDelayMs: 1,
+      maxReconnectAttempts: 2,
+      onResubscribe: (details) => {
+        resubscribes.push(details);
+      },
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  unsubscribe();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(resubscribes.length, 1);
+  assert.equal(resubscribes[0].attempt, 1);
+  assert.equal(resubscribes[0].reason, "error");
+  assert.equal(subscribeCalls, 2);
+});
+
 test("buildModelFromAny sets logoProviderId for OpenCode Go upstream", () => {
   const goModel = buildModelFromAny(
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },

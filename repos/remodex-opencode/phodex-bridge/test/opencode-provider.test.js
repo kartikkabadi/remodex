@@ -2178,6 +2178,39 @@ test("sse foreign itemId is normalized before hydrate and completeTurn paths run
   assert.equal(messages.filter((entry) => entry.method === "turn/completed").length, 1);
 });
 
+test("REMODEX_OPENCODE_SSE_RECONNECT=0 disables SSE reconnect", async () => {
+  let reconnectEnabled;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+      REMODEX_OPENCODE_SSE_RECONNECT: "0",
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler, options = {}) => {
+        reconnectEnabled = options.reconnectEnabled;
+        return () => {};
+      },
+      prompt: async () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello" },
+  });
+
+  const subscribeDeadline = Date.now() + 500;
+  while (reconnectEnabled === undefined && Date.now() < subscribeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(reconnectEnabled, false);
+});
+
 test("getHandoffContext ignores untrusted client sessionId and directory", async () => {
   const provider = makeProvider();
   const start = await provider.handleRequest({

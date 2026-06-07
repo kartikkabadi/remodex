@@ -1462,10 +1462,16 @@ function startBridge({
     const opencodeProvider = runtimeProviderRouter.providers.find(
       (provider) => provider.id === "opencode",
     );
-    const opencode =
+    let opencode =
       typeof opencodeProvider?.getRuntimeStatus === "function"
         ? opencodeProvider.getRuntimeStatus(process.env)
         : undefined;
+    if (opencode && typeof opencodeProvider?.getObservabilityMetrics === "function") {
+      opencode = {
+        ...opencode,
+        ...opencodeProvider.getObservabilityMetrics(),
+      };
+    }
     bridgeStatusPublisher.publish(
       opencode ? { ...status, opencode } : status,
     );

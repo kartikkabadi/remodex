@@ -1617,8 +1617,26 @@ function createOpenCodeProvider({
           return;
         }
 
+        if (method === "event/streamError") {
+          console.log(
+            JSON.stringify({
+              event: "opencode_sse_stream_error",
+              threadId: active.thread.id,
+              turnId: active.turn.id,
+              message: readString(params.message),
+              attempt: params.attempt,
+            }),
+          );
+          return;
+        }
+
         emit(method, enriched);
-      }, { reconnectEnabled: sseReconnectEnabled });
+      }, {
+        reconnectEnabled: sseReconnectEnabled,
+        onResubscribe: () => {
+          sseReconnectCount += 1;
+        },
+      });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
 
       const parsedModel = parseOpenCodeModelSlug(model);
@@ -1925,24 +1943,40 @@ function createOpenCodeProvider({
       return { success: false, reason: "Unknown or expired permission ID" };
     }
 
-    clearPermissionWatchdog(pending);
-    pendingPermissions.delete(permissionId);
-
-    if (allow && scope === "session") {
-      const resolvedSessionId = sessionId || pending.sessionId;
-      const tool = readString(pending.tool);
-      if (resolvedSessionId && tool) {
-        const grants = sessionPermissionGrants.get(resolvedSessionId) || new Set();
-        grants.add(tool);
-        sessionPermissionGrants.set(resolvedSessionId, grants);
-      }
+    const replyThreadId = readThreadId(params);
+    if (replyThreadId && replyThreadId !== pending.threadId) {
+      console.log(
+        JSON.stringify({
+          event: "permission_reply_rejected",
+          permissionId,
+          reason: "thread_id_mismatch",
+          expectedThreadId: pending.threadId,
+          replyThreadId,
+        }),
+      );
+      return { success: false, reason: "Permission thread ID does not match" };
     }
+
+    clearPermissionWatchdog(pending);
 
     try {
       await ensureStarted();
       await client.replyToPermission(permissionId, allow);
+
+      if (allow && scope === "session") {
+        const resolvedSessionId = sessionId || pending.sessionId;
+        const tool = readString(pending.tool);
+        if (resolvedSessionId && tool) {
+          const grants = sessionPermissionGrants.get(resolvedSessionId) || new Set();
+          grants.add(tool);
+          sessionPermissionGrants.set(resolvedSessionId, grants);
+        }
+      }
+
+      pendingPermissions.delete(permissionId);
       return { success: true, permissionId, allow, scope };
     } catch (error) {
+      pendingPermissions.set(permissionId, pending);
       return { success: false, reason: error.message };
     }
   }

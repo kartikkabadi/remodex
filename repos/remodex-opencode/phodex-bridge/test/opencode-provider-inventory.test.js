@@ -102,6 +102,32 @@ describe("resolvePreferredProviders — MVP credentialProviderIDs: []", () => {
     assert.deepEqual(preferred.map((p) => p.id), ["opencode"]);
   });
 
+  test("mixed env and api connected returns all connected providers", () => {
+    const inventory = {
+      connected: ["openai", "anthropic"],
+      all: [
+        makeProvider({
+          id: "openai",
+          name: "OpenAI",
+          source: "env",
+          models: { "gpt-4": { id: "gpt-4", name: "GPT-4" } },
+        }),
+        makeProvider({
+          id: "anthropic",
+          name: "Anthropic",
+          source: "api",
+          models: { "claude-sonnet": { id: "claude-sonnet", name: "Claude Sonnet" } },
+        }),
+      ],
+    };
+
+    const preferred = resolvePreferredProviders(inventory, {
+      credentialProviderIDs: ["openai", "anthropic"],
+    });
+    assert.deepEqual(preferred.map((provider) => provider.id).sort(), ["anthropic", "openai"]);
+    assert.equal(flattenConnectedProviderModels(preferred).length, 2);
+  });
+
   test("falls back to non-env connected when no opencode-managed", () => {
     const inventory = {
       connected: ["cloudflare-ai-gateway", "openai"],

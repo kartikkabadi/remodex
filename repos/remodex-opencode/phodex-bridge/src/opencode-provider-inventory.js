@@ -350,6 +350,7 @@ async function refreshProviderInventory(client, options = {}) {
     };
   }
 
+  const refreshStartedAt = Date.now();
   try {
     const inventory = await loadProviderListInventory(client);
     const preferred = resolvePreferredProviders(inventory, {
@@ -361,6 +362,7 @@ async function refreshProviderInventory(client, options = {}) {
 
     if (reasonCode === "no_connected_providers" || reasonCode === "unknown") {
       const meta = buildInventoryMeta({ inventory, models: [], fetchedAt: new Date().toISOString() });
+      meta.refreshMs = Date.now() - refreshStartedAt;
       if (reasonCode === "unknown") {
         meta.reasonCode = "unknown";
       }
@@ -380,6 +382,7 @@ async function refreshProviderInventory(client, options = {}) {
       models,
       fetchedAt: new Date().toISOString(),
     });
+    meta.refreshMs = Date.now() - refreshStartedAt;
     meta.reasonCode = reasonCode;
     const providerInventory = buildProviderInventory(inventory, { credentialProviderIDs });
     console.log(
@@ -411,6 +414,7 @@ async function refreshProviderInventory(client, options = {}) {
           ...(cached.meta || buildInventoryMeta({ inventory: cached.inventory, models: cached.models })),
           reasonCode: "provider_list_failed",
           stale: true,
+          refreshMs: Date.now() - refreshStartedAt,
         },
         connectedProviders: cached.connectedProviders || [],
         providerInventory: cached.providerInventory || [],
@@ -431,6 +435,7 @@ async function refreshProviderInventory(client, options = {}) {
         stale: false,
         modelCountBeforeCap: 0,
         modelCountAfterCap: 0,
+        refreshMs: Date.now() - refreshStartedAt,
       },
       connectedProviders: [],
       providerInventory: [],

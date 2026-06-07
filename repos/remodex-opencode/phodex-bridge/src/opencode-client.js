@@ -335,6 +335,31 @@ async function createOpenCodeClient({
 
     const streamTask = (async () => {
       let attempt = 0;
+      let stableConnectionTimer = null;
+      const clearStableConnectionTimer = () => {
+        if (stableConnectionTimer) {
+          clearTimeout(stableConnectionTimer);
+          stableConnectionTimer = null;
+        }
+      };
+      const resetAttemptAfterStableConnection = () => {
+        attempt = 0;
+        clearStableConnectionTimer();
+      };
+      const scheduleStableConnectionReset = () => {
+        clearStableConnectionTimer();
+        stableConnectionTimer = setTimeout(() => {
+          resetAttemptAfterStableConnection();
+        }, 30_000);
+        if (typeof stableConnectionTimer?.unref === "function") {
+          stableConnectionTimer.unref();
+        }
+      };
+      const notifyResubscribe = (details = {}) => {
+        if (typeof options.onResubscribe === "function") {
+          options.onResubscribe(details);
+        }
+      };
       while (active) {
         try {
           const sseClient = await client.event.subscribe();
@@ -345,10 +370,16 @@ async function createOpenCodeClient({
                 ? () => sseClient.abort()
                 : null;
           const subscription = sseClient.stream;
+          let receivedFirstEvent = false;
+          scheduleStableConnectionReset();
           try {
             for await (const event of subscription) {
               if (!active) {
                 break;
+              }
+              if (!receivedFirstEvent) {
+                receivedFirstEvent = true;
+                resetAttemptAfterStableConnection();
               }
               dispatchEvent(event, handler);
             }
@@ -384,6 +415,7 @@ async function createOpenCodeClient({
               message: error.message,
             }),
           );
+          notifyResubscribe({ attempt, delayMs, reason: "error", message: error.message });
           await sleep(delayMs);
           continue;
         }
@@ -404,8 +436,10 @@ async function createOpenCodeClient({
             reason: "stream_closed",
           }),
         );
+        notifyResubscribe({ attempt, delayMs, reason: "stream_closed" });
         await sleep(delayMs);
       }
+      clearStableConnectionTimer();
     })();
 
     return () => {
