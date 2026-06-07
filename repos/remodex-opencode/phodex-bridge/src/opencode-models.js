@@ -6,6 +6,7 @@
 // Exports: OpenCode provider constants plus model/provider parsing, serialization, and sort helpers.
 // Depends on: ./normalize
 
+const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { readString, resolvedParam } = require("./normalize");
@@ -224,12 +225,24 @@ function imageItemToPromptPart(item, { attachmentStore = null, attachmentsEnable
     }
   }
 
-  return {
-    type: "file",
-    mime: readString(item.mime || item.contentType) || "application/octet-stream",
-    url: /^https?:\/\//i.test(imagePath) ? imagePath : fileUrlForPath(imagePath),
-    filename: readString(item.filename || item.name) || "attachment",
-  };
+  if (!attachmentStore?.resolveExistingPath) {
+    return null;
+  }
+
+  try {
+    const storedPath = attachmentStore.resolveExistingPath(imagePath);
+    if (!storedPath || !fs.existsSync(storedPath)) {
+      return null;
+    }
+    return {
+      type: "file",
+      mime: readString(item.mime || item.contentType) || "application/octet-stream",
+      url: fileUrlForPath(storedPath),
+      filename: readString(item.filename || item.name) || "attachment",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function buildPromptFromTurnInput(input, options = {}) {

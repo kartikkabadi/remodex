@@ -198,6 +198,54 @@ test("push service defaults to a durable state file in the remodex home dir", ()
   assert.equal(resolved, path.join("/tmp/codex-home", "remodex", "push-state.json"));
 });
 
+test("push service stores device registration and sends one permission alert", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-push-state-"));
+  const sent = [];
+  const service = createPushSessionService({
+    apnsClient: {
+      isConfigured: () => true,
+      async sendNotification(payload) {
+        sent.push(payload);
+      },
+    },
+    canRegisterSession: () => true,
+    stateStore: createFileBackedPushStateStore({
+      stateFilePath: path.join(tempDir, "push-state.json"),
+    }),
+  });
+
+  await service.registerDevice({
+    sessionId: "session-perm",
+    notificationSecret: "secret-perm",
+    deviceToken: "11 22 33",
+    alertsEnabled: true,
+    apnsEnvironment: "development",
+  });
+
+  await service.notifyPermission({
+    sessionId: "session-perm",
+    notificationSecret: "secret-perm",
+    threadId: "thread-perm",
+    turnId: "turn-perm",
+    dedupeKey: "permission:thread-perm:perm-1",
+    title: "Deploy fix",
+    body: "OpenCode needs approval for bash.",
+  });
+  await service.notifyPermission({
+    sessionId: "session-perm",
+    notificationSecret: "secret-perm",
+    threadId: "thread-perm",
+    turnId: "turn-perm",
+    dedupeKey: "permission:thread-perm:perm-1",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].deviceToken, "112233");
+  assert.equal(sent[0].payload.threadId, "thread-perm");
+  assert.equal(sent[0].payload.result, "permission");
+  assert.equal(sent[0].payload.source, "codex.structuredUserInput");
+});
+
 test("push service keeps working when state persistence fails", async () => {
   const sent = [];
   const service = createPushSessionService({

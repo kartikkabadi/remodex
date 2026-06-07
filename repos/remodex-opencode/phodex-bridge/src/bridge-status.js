@@ -32,6 +32,7 @@ function createBridgeStatusPublisher({
   function startHeartbeat({
     shouldPublish = () => true,
     getLastRelayActivityAt = () => 0,
+    refreshStatus = null,
   } = {}) {
     if (heartbeatTimer) {
       return;
@@ -42,8 +43,12 @@ function createBridgeStatusPublisher({
         return;
       }
 
+      const heartbeatStatus = typeof refreshStatus === "function"
+        ? refreshStatus(lastPublishedBridgeStatus)
+        : lastPublishedBridgeStatus;
+
       onBridgeStatus?.(buildHeartbeatBridgeStatus(
-        lastPublishedBridgeStatus,
+        heartbeatStatus,
         getLastRelayActivityAt(),
         { now: now() }
       ));

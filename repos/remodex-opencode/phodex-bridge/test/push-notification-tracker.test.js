@@ -399,6 +399,48 @@ test("push tracker expires old sent dedupe keys", async () => {
   assert.equal(notifications.length, 2);
 });
 
+test("push tracker sends permission push on permission/request", async () => {
+  const notifications = [];
+  const tracker = createPushNotificationTracker({
+    sessionId: "session-perm",
+    pushServiceClient: {
+      hasConfiguredBaseUrl: true,
+      async notifyPermissionNeeded(payload) {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    },
+  });
+
+  tracker.handleOutbound(JSON.stringify({
+    method: "thread/started",
+    params: {
+      thread: {
+        id: "thread-perm",
+        title: "Deploy fix",
+      },
+    },
+  }));
+  tracker.handleOutbound(JSON.stringify({
+    method: "permission/request",
+    params: {
+      threadId: "thread-perm",
+      turnId: "turn-perm",
+      permissionId: "perm-1",
+      tool: "bash",
+    },
+  }));
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].threadId, "thread-perm");
+  assert.equal(notifications[0].turnId, "turn-perm");
+  assert.equal(notifications[0].title, "Deploy fix");
+  assert.match(notifications[0].body, /bash/i);
+  assert.equal(notifications[0].dedupeKey, "permission:thread-perm:perm-1");
+});
+
 test("notifications handler forwards device registration to the push service client", async () => {
   const registrations = [];
   const handler = createNotificationsHandler({

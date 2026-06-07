@@ -95,6 +95,7 @@ extension CodexService {
                     threadId: request.threadId,
                     text: "Permission required — update Remodex to respond."
                 )
+                enqueuePendingOpenCodePermission(request)
                 _ = try? await replyToOpenCodePermission(request, allow: false, scope: .once)
             }
             return
@@ -104,7 +105,12 @@ extension CodexService {
            sessionGrantedOpenCodeTools.contains(Self.sessionGrantKey(sessionId: sessionId, tool: request.tool)) {
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                _ = try? await replyToOpenCodePermission(request, allow: true, scope: .session)
+                _ = try? await replyToOpenCodePermission(
+                    request,
+                    allow: true,
+                    scope: .session,
+                    bypassPendingQueueCheck: true
+                )
             }
             return
         }
@@ -120,10 +126,11 @@ extension CodexService {
     func replyToOpenCodePermission(
         _ request: OpenCodePermissionRequest,
         allow: Bool,
-        scope: OpenCodePermissionReplyScope
+        scope: OpenCodePermissionReplyScope,
+        bypassPendingQueueCheck: Bool = false
     ) async throws {
-        guard pendingOpenCodePermissions.contains(where: { $0.permissionId == request.permissionId })
-            || allow == false else {
+        let isQueued = pendingOpenCodePermissions.contains(where: { $0.permissionId == request.permissionId })
+        guard isQueued || (allow && bypassPendingQueueCheck) else {
             return
         }
 

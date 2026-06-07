@@ -95,6 +95,52 @@ test("buildOpenCodeBridgeStatusSection merges observability metrics", () => {
   assert.equal(opencode.catalogRefreshMs, 42);
 });
 
+test("status publisher heartbeat refreshes opencode observability metrics", async () => {
+  const published = [];
+  let metrics = { sseReconnectCount: 0, permissionPendingCount: 0, catalogRefreshMs: null };
+  const publisher = createBridgeStatusPublisher({
+    heartbeatIntervalMs: 1,
+    onBridgeStatus(status) {
+      published.push(status);
+    },
+    getCodexLaunchState() {
+      return "connected";
+    },
+  });
+
+  publisher.publish({
+    state: "running",
+    connectionStatus: "connected",
+    pid: 123,
+    lastError: "",
+    opencode: {
+      enabled: true,
+      sseReconnectCount: 0,
+      permissionPendingCount: 0,
+      catalogRefreshMs: null,
+    },
+  });
+
+  metrics = { sseReconnectCount: 2, permissionPendingCount: 1, catalogRefreshMs: 88 };
+  publisher.startHeartbeat({
+    getLastRelayActivityAt: () => Date.now(),
+    refreshStatus: (status) => ({
+      ...status,
+      opencode: {
+        ...status.opencode,
+        ...metrics,
+      },
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  publisher.stopHeartbeat();
+
+  assert.equal(published.at(-1).opencode.sseReconnectCount, 2);
+  assert.equal(published.at(-1).opencode.permissionPendingCount, 1);
+  assert.equal(published.at(-1).opencode.catalogRefreshMs, 88);
+  assert.equal(publisher.latest().opencode.sseReconnectCount, 0);
+});
+
 test("bridge status publisher accepts opencode subsection on publish payload", () => {
   const published = [];
   const publisher = createBridgeStatusPublisher({

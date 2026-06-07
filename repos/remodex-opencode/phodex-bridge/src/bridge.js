@@ -272,6 +272,13 @@ function startBridge({
   bridgeStatusPublisher.startHeartbeat({
     shouldPublish: () => !isShuttingDown,
     getLastRelayActivityAt: () => lastRelayActivityAt,
+    refreshStatus: (status) => {
+      const opencodeProvider = runtimeProviderRouter.providers.find(
+        (provider) => provider.id === "opencode",
+      );
+      const opencode = buildOpenCodeBridgeStatusSection(opencodeProvider, process.env);
+      return opencode ? { ...status, opencode } : status;
+    },
   });
   publishBridgeStatus({
     state: "starting",

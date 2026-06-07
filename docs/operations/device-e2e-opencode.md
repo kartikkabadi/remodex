@@ -120,6 +120,7 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | O7 | Bridge restart rehydration | Same thread resumes |
 | O8 | Slash commands | `/` picker |
 | O9 | Skills `$` → SKILL.md files | Multi-skill turn |
+| **O9b** | Plugin `@` N/A (DoD 13) | On OpenCode thread, `@` autocomplete does **not** offer Codex `plugin/list` entries — greyed/hidden per `runtimeModelProviderForTurn === opencode`; document N/A in sign-off notes |
 | O10 | Greyed voice/plan; fork if enabled | Screenshot |
 | O11 | Queue works; steer greyed | Screenshot |
 | O12 | Continue on Desktop visible | Screenshot |

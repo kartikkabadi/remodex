@@ -258,6 +258,68 @@ All fields optional. Omit for first page.
 
 **For OpenCode:** Calls `client.session.abort()` then emits `turn/completed` with status `"stopped"`.
 
+### permission/request
+
+**Routing:** bridge → iPhone notification (no request id). Emitted by `opencode-provider.js` when OpenCode SDK surfaces `permission.asked`.
+
+**Params:**
+```json
+{
+  "permissionId": "perm-abc123",
+  "threadId": "opencode-thread-…",
+  "turnId": "opencode-turn-…",
+  "sessionId": "ses-…",
+  "tool": "bash",
+  "argsSummary": "command=*** note=safe",
+  "cwd": "/Users/me/project",
+  "requestedAt": "2026-06-08T12:00:00.000Z"
+}
+```
+
+**Notes:**
+- Raw `args` are **not** forwarded to iPhone — only `argsSummary` (redacted/truncated) for the permission sheet.
+- When `REMODEX_OPENCODE_PERMISSIONS_UI=0`, the bridge auto-denies via watchdog without emitting this notification.
+- Outbound relay also feeds `pushNotificationTracker` → relay `POST /v1/push/session/notify-permission` when push is configured.
+
+### permission/reply
+
+**Routing:** `router` — top-level (not in `ROUTABLE_THREAD_METHODS` ownership list); handled by `opencode-provider.permissionReply` via `runtime-provider-router.js`.
+
+**Params:**
+```json
+{
+  "permissionId": "perm-abc123",
+  "threadId": "opencode-thread-…",
+  "sessionId": "ses-…",
+  "allow": true,
+  "scope": "once"
+}
+```
+
+`permission_id` is accepted as a snake_case alias. `scope` may be `"once"` or `"session"` (in-memory grant for this bridge process only).
+
+**Result (success):**
+```json
+{
+  "success": true,
+  "permissionId": "perm-abc123",
+  "allow": true,
+  "scope": "once"
+}
+```
+
+**Routing behavior:** Bridge validates `permissionId` against `pendingPermissions` before calling SDK `replyToPermission`. Unknown, expired, or mismatched `threadId`/`sessionId` replies are rejected.
+
+**Errors:**
+
+| errorCode | When |
+|-----------|------|
+| `permission_id_required` | `permissionId` omitted |
+| `permission_unknown` | `permissionId` not in `pendingPermissions` |
+| `permission_thread_mismatch` | `threadId` does not match pending entry |
+| `permission_session_mismatch` | `sessionId` does not match pending entry |
+| `opencode_permission_denied` | SDK reply failed or auto-deny watchdog fired |
+
 ### thread/turns/list
 
 **Routing:** `router` — dispatched by thread ownership

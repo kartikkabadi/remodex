@@ -58,6 +58,22 @@ final class OpenCodePermissionQueueTests: XCTestCase {
         XCTAssertEqual(service.pendingOpenCodePermissions.count, 1)
     }
 
+    func testDenyReplyRequiresPendingQueueEntry() async {
+        let service = makeService()
+        service.isConnected = true
+        var requestCount = 0
+        service.requestTransportOverride = { _, _ in
+            requestCount += 1
+            return RPCMessage(id: .string("1"), result: .object(["success": .bool(true)]), includeJSONRPC: false)
+        }
+
+        let request = makePermission(id: "perm-deny", threadId: "thread-deny")
+        try? await service.replyToOpenCodePermission(request, allow: false, scope: .once)
+
+        XCTAssertEqual(requestCount, 0)
+        XCTAssertTrue(service.pendingOpenCodePermissions.isEmpty)
+    }
+
     func testPermissionsUIDisabledAutoDeniesWithoutQueueing() async {
         let service = makeService()
         service.isConnected = true

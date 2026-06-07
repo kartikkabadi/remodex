@@ -23,6 +23,11 @@ The bridge publishes status updates via `bridge-status.js`. The status object:
 **OpenCode subsection** (`bridge-status.json` → `opencode`, same object as `runtime/catalog` → `runtimes[].opencode`):
 - `enabled`, `serveUrl`, `version`, `minVersion`, `versionBelowMinimum`
 - `sessionCount`, `lastError`, `command`, `handoffEnvEnabled`, `authConfigured`
+- `sseReconnectCount` — increments when the OpenCode event stream resubscribes after `streamError` (watch for reconnect churn during long turns)
+- `permissionPendingCount` — size of the bridge `pendingPermissions` map (non-zero while a tool approval is waiting)
+- `catalogRefreshMs` — milliseconds for the last `model/list` upstream refresh (`null` until the first warm fetch completes)
+
+Heartbeat ticks refresh these three fields from `getObservabilityMetrics()` without mutating the persisted `latest()` snapshot (same pattern as stale-relay downgrade).
 
 ### Push notifications (OpenCode)
 

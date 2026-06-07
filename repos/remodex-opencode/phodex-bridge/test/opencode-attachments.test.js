@@ -137,6 +137,37 @@ test("ensureStarted schedules throttled attachment cleanup", async () => {
   await provider.shutdown();
 });
 
+test("imageItemToPromptPart rejects paths outside the attachment store", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const store = createAttachmentStore({ rootDir });
+  const outsidePath = path.join(os.tmpdir(), "outside-store.png");
+  fs.writeFileSync(outsidePath, "outside");
+
+  const rejected = imageItemToPromptPart(
+    { type: "image", path: outsidePath, filename: "outside-store.png" },
+    { attachmentStore: store, attachmentsEnabled: true },
+  );
+
+  assert.equal(rejected, null);
+});
+
+test("imageItemToPromptPart accepts files stored in the attachment store", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const store = createAttachmentStore({ rootDir });
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const stored = store.storeImageBuffer(png, { filename: "stored.png" });
+  const part = imageItemToPromptPart(
+    { type: "image", path: stored.path, filename: "stored.png" },
+    { attachmentStore: store, attachmentsEnabled: true },
+  );
+
+  assert.equal(part.type, "file");
+  assert.match(part.url, /^file:\/\//);
+});
+
 test("imageItemToPromptPart stores data URLs via attachment store", () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
   const store = createAttachmentStore({ rootDir });
