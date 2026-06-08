@@ -7,8 +7,8 @@ Manual evidence gate **before PR 7 stage 3** (handoff production-default-on). Re
 | Check | Requirement |
 |-------|-------------|
 | Git branch | `brownfield/4a40fcfa-5-discovery-hardening` or later merge tip |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **778/778** green |
-| OpenCode suite | `npm run test:opencode` — **352/352** green |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **796/796** green |
+| OpenCode suite | `npm run test:opencode` — **370/370** green |
 | iOS compile (simulator) | `xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` |
 
 ## Mac bridge setup
