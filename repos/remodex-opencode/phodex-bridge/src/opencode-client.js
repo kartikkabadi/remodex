@@ -225,33 +225,47 @@ async function createOpenCodeClient({
   }
 
   async function listSessions({ directory, limit, cursor, archived } = {}) {
-    if (typeof client.session?.list !== "function") {
-      return { data: [], limited: false, limit: 0, nextCursor: null };
-    }
-
-    const query = {};
     const normalizedDirectory = readString(directory);
-    if (normalizedDirectory) {
-      query.directory = normalizedDirectory;
-    }
+    const pagination = resolveSessionListCursor(cursor);
+    const baseQuery = {};
     const normalizedLimit = Number(limit);
     if (Number.isFinite(normalizedLimit) && normalizedLimit > 0) {
-      query.limit = Math.floor(normalizedLimit);
-    }
-    const normalizedCursor = Number(cursor);
-    if (Number.isFinite(normalizedCursor) && normalizedCursor >= 0) {
-      query.cursor = Math.floor(normalizedCursor);
+      baseQuery.limit = Math.floor(normalizedLimit);
     }
     if (archived === true) {
-      query.archived = true;
+      baseQuery.archived = true;
     }
 
     try {
+      if (!normalizedDirectory && typeof client.experimental?.session?.list === "function") {
+        const query = { ...baseQuery };
+        if (pagination.numeric !== null) {
+          query.cursor = pagination.numeric;
+        }
+        const response = await withTimeout(
+          client.experimental.session.list(query),
+          REQUEST_TIMEOUT_MS,
+        );
+        return resolveSessionList(response);
+      }
+
+      if (typeof client.session?.list !== "function") {
+        return emptySessionListResult();
+      }
+
+      const query = { ...baseQuery };
+      if (normalizedDirectory) {
+        query.directory = normalizedDirectory;
+      }
+      if (pagination.numeric !== null) {
+        query.start = pagination.numeric;
+      }
+
       const response = await withTimeout(client.session.list(query), REQUEST_TIMEOUT_MS);
       return resolveSessionList(response);
     } catch (error) {
       console.warn(`${logPrefix} OpenCode session.list() failed: ${error.message}`);
-      return { data: [], limited: false, limit: 0, nextCursor: null };
+      return emptySessionListResult();
     }
   }
 
@@ -1179,12 +1193,40 @@ function resolveProjectList(response) {
   return [];
 }
 
+function emptySessionListResult() {
+  return { data: [], limited: false, limit: 0, nextCursor: null };
+}
+
+function resolveSessionListCursor(cursor) {
+  if (cursor === null || cursor === undefined || cursor === "") {
+    return { numeric: null, opaque: "" };
+  }
+  const numeric = Number(cursor);
+  if (Number.isFinite(numeric) && numeric >= 0 && String(cursor).trim() === String(Math.floor(numeric))) {
+    return { numeric: Math.floor(numeric), opaque: "" };
+  }
+  return { numeric: null, opaque: readString(cursor) };
+}
+
+function resolveSessionListNextCursor(response) {
+  if (response?.cursor && typeof response.cursor === "object" && !Array.isArray(response.cursor)) {
+    return readString(response.cursor.next) || null;
+  }
+  const direct = response?.nextCursor ?? response?.cursor;
+  if (typeof direct === "number" && Number.isFinite(direct)) {
+    return direct;
+  }
+  return readString(direct) || null;
+}
+
 function resolveSessionList(response) {
   const rows = [];
   if (Array.isArray(response)) {
     rows.push(...response);
   } else if (Array.isArray(response?.data)) {
     rows.push(...response.data);
+  } else if (Array.isArray(response?.items)) {
+    rows.push(...response.items);
   } else if (Array.isArray(response?.sessions)) {
     rows.push(...response.sessions);
   }
@@ -1199,7 +1241,7 @@ function resolveSessionList(response) {
     data: discovered,
     limited: Boolean(response?.limited),
     limit: Number(response?.limit) || discovered.length,
-    nextCursor: response?.cursor ?? response?.nextCursor ?? null,
+    nextCursor: resolveSessionListNextCursor(response),
   };
 }
 

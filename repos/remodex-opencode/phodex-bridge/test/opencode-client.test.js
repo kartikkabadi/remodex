@@ -812,9 +812,119 @@ test("sessionV2InfoToDiscoveredThread includes fresh TUI sessions with created t
   assert.equal(discovered.cwd, "/Users/me/work/fresh");
 });
 
-test("listSessions wraps SDK session.list", async () => {
-  const client = await createTestClient();
-  const result = await client.listSessions({ limit: 10 });
+test("sessionV2InfoToDiscoveredThread includes SDK numeric millis and session.path cwd", () => {
+  const createdMillis = Date.parse("2026-06-08T12:34:56.789Z");
+  const discovered = sessionV2InfoToDiscoveredThread({
+    id: "ses_numeric",
+    path: "/Users/me/work/from-path",
+    model: { providerID: "anthropic", id: "claude-sonnet-4" },
+    time: { created: createdMillis },
+  });
+
+  assert.equal(discovered.id, "opencode-session-ses_numeric");
+  assert.equal(discovered.title, "OpenCode chat");
+  assert.equal(discovered.cwd, "/Users/me/work/from-path");
+  assert.equal(discovered.model, "anthropic/claude-sonnet-4");
+  assert.equal(discovered.createdAt, new Date(createdMillis).toISOString());
+});
+
+test("resolveSessionList parses V2 response.items and cursor.next", () => {
+  const result = resolveSessionList({
+    items: [
+      {
+        id: "ses_items",
+        title: "Items fixture",
+        path: "/Users/me/work/items",
+        time: { created: Date.parse("2026-06-08T13:00:00.000Z") },
+      },
+    ],
+    cursor: { next: "opaque-cursor-2" },
+  });
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-session-ses_items");
+  assert.equal(result.data[0].cwd, "/Users/me/work/items");
+  assert.equal(result.nextCursor, "opaque-cursor-2");
+});
+
+test("listSessions uses experimental.session.list for global discovery", async () => {
+  let experimentalCalled = false;
+  let sessionCalled = false;
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: function createOpencodeClient() {
+      return {
+        experimental: {
+          session: {
+            list: async (query) => {
+              experimentalCalled = true;
+              assert.equal(query.limit, 10);
+              assert.equal(query.cursor, 5);
+              return [
+                {
+                  id: "ses_global",
+                  title: "Global session",
+                  path: "/Users/me/work/global",
+                  time: { created: Date.parse("2026-06-08T14:00:00.000Z") },
+                },
+              ];
+            },
+          },
+        },
+        session: {
+          list: async () => {
+            sessionCalled = true;
+            return { data: [] };
+          },
+        },
+      };
+    },
+  });
+
+  const result = await client.listSessions({ limit: 10, cursor: 5 });
+  assert.equal(experimentalCalled, true);
+  assert.equal(sessionCalled, false);
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-session-ses_global");
+});
+
+test("listSessions wraps SDK session.list with directory and start cursor", async () => {
+  let sessionQuery = null;
+  const client = await createOpenCodeClient({
+    baseUrl: TEST_BASE_URL,
+    createOpencodeClientImpl: function createOpencodeClient() {
+      return {
+        session: {
+          list: async (query) => {
+            sessionQuery = query;
+            return {
+              data: [
+                {
+                  id: "ses_external",
+                  title: "Mac CLI session",
+                  location: { directory: "/Users/me/work/repo" },
+                  time: { created: "2026-06-08T10:00:00.000Z", updated: "2026-06-08T11:00:00.000Z" },
+                },
+              ],
+              limit: 50,
+              limited: false,
+            };
+          },
+        },
+      };
+    },
+  });
+
+  const result = await client.listSessions({
+    directory: "/Users/me/work/repo",
+    limit: 10,
+    cursor: 3,
+  });
+  assert.deepEqual(sessionQuery, {
+    limit: 10,
+    directory: "/Users/me/work/repo",
+    start: 3,
+  });
   assert.equal(result.data.length, 1);
   assert.equal(result.data[0].id, "opencode-session-ses_external");
 });

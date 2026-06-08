@@ -101,6 +101,15 @@ function parseOpenCodeModelsOutput(output) {
 }
 
 function normalizeOpenCodeModelReference(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const providerId = readString(value.providerID || value.providerId || value.provider);
+    const modelId = readString(value.id || value.modelID || value.modelId);
+    if (providerId && modelId) {
+      value = `${providerId}/${modelId}`;
+    } else {
+      return "";
+    }
+  }
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized || normalized.startsWith("{") || normalized.startsWith("[")) {
     return "";
@@ -172,7 +181,11 @@ function readSessionTimestamp(session, field) {
   if (!time || typeof time !== "object") {
     return "";
   }
-  return readString(time[field]);
+  const value = time[field];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  return readString(value);
 }
 
 function sessionHasDiscoverySignal(session) {
@@ -203,7 +216,7 @@ function sessionV2InfoToDiscoveredThread(session) {
   }
 
   const cwd = readString(
-    session.location?.directory || session.directory || session.cwd,
+    session.location?.directory || session.directory || session.path || session.cwd,
   );
   const createdAt =
     readSessionTimestamp(session, "created") || new Date().toISOString();
