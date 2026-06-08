@@ -21,7 +21,11 @@ const {
   readModelProvider,
   readThreadId,
 } = require("./opencode-models");
-const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
+const { isOpenCodeRuntimeDisabled, isOpenCodeRuntimeEnabled } = require("./opencode-runtime-policy");
+const {
+  resolveDiscoverProjectsEnabled,
+  resolveDiscoverSessionsEnabled,
+} = require("./opencode-discovery-policy");
 const { START_TIMEOUT_MS, HEALTH_TIMEOUT_MS } = require("./opencode-server");
 const {
   CODEX_CAPABILITIES,
@@ -179,11 +183,13 @@ function createRuntimeProviderRouter({
           source: "provider-thread-list",
         });
         const merged = mergeThreadListResult(codexResult, providerThreads);
+        const threadListParams = parsed.params || {};
         maybeDiscoverOpenCodeProjects({
           opencodeProvider,
           projectRegistry,
           homeDir: resolvedHomeDir,
           env: process.env,
+          params: threadListParams,
           logPrefix,
         });
         const wallMs = Date.now() - startedAt;
@@ -191,7 +197,10 @@ function createRuntimeProviderRouter({
           JSON.stringify({
             event: "thread_list_wall_ms",
             wallMs,
-            discoverProjectsEnabled: isOpenCodeDiscoverProjectsEnabled(process.env),
+            discoverProjectsEnabled: resolveDiscoverProjectsEnabled(
+              process.env,
+              threadListParams,
+            ),
           }),
         );
         return merged;
@@ -432,9 +441,8 @@ function readDiscoverProjectTtlMs(env = process.env) {
   return Math.floor(numeric);
 }
 
-function isOpenCodeDiscoverProjectsEnabled(env = process.env) {
-  const raw = readString(env?.REMODEX_OPENCODE_DISCOVER_PROJECTS).toLowerCase();
-  return raw === "1" || raw === "true";
+function isOpenCodeDiscoverProjectsEnabled(env = process.env, params = {}) {
+  return resolveDiscoverProjectsEnabled(env, params);
 }
 
 function maybeDiscoverOpenCodeProjects({
@@ -442,9 +450,10 @@ function maybeDiscoverOpenCodeProjects({
   projectRegistry,
   homeDir,
   env = process.env,
+  params = {},
   logPrefix = "[remodex]",
 } = {}) {
-  if (!isOpenCodeDiscoverProjectsEnabled(env)) {
+  if (!resolveDiscoverProjectsEnabled(env, params)) {
     return false;
   }
   if (isOpenCodeRuntimeDisabled(env)) {
@@ -710,10 +719,6 @@ function normalizeExplicitRequestedProvider(params = {}) {
   return isOpenCodeProvider(readModelProvider(params)) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID;
 }
 
-function isDiscoverSessionsEnabled(env = process.env) {
-  return readString(env?.REMODEX_OPENCODE_DISCOVER_SESSIONS) === "1";
-}
-
 function isDiscoveredExternalThreadId(threadId) {
   const normalized = readString(threadId);
   return Boolean(normalized && normalized.startsWith(DISCOVERED_THREAD_ID_PREFIX));
@@ -796,7 +801,7 @@ function providerForRequest(request, providers, ownershipStore = null) {
   let matchReason = resolved ? "owns_thread_match" : "no_owning_provider";
   if (
     !resolved &&
-    isDiscoverSessionsEnabled() &&
+    isOpenCodeRuntimeEnabled(process.env) &&
     isDiscoveredExternalThreadId(threadId)
   ) {
     resolved = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID) || null;

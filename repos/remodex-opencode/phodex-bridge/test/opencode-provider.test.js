@@ -2342,6 +2342,18 @@ function externalDiscoveredRow({
   };
 }
 
+test("listThreads includes external sessions when Remodex app discover param is on", async () => {
+  const provider = makeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1" },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  const list = await provider.listThreads({ discoverOpenCodeSessions: true });
+  const row = list.data.find((thread) => thread.id === "opencode-session-ses_external_mac");
+  assert.ok(row, "external session should appear when app sends discoverOpenCodeSessions");
+});
+
 test("listThreads includes external sessions when discover flag is on", async () => {
   const provider = makeProvider({
     env: {

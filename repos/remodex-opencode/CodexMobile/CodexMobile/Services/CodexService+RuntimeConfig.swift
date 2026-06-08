@@ -661,6 +661,14 @@ extension CodexService {
         return providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
     }
 
+    // Remodex app drives Mac-started OpenCode session/project discovery via thread/list params.
+    var openCodeExternalDiscoveryEnabled: Bool {
+        if defaults.object(forKey: Self.openCodeExternalDiscoveryDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: Self.openCodeExternalDiscoveryDefaultsKey)
+    }
+
     func providerCapabilitiesForTurn(threadId: String?) -> ProviderCapabilities {
         let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
         if let model = selectedModelOption(threadId: threadId),

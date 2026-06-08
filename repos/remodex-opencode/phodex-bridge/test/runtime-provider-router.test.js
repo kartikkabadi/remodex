@@ -1906,11 +1906,15 @@ function withDiscoverEnv(overrides = {}, fn) {
     });
 }
 
-test("isOpenCodeDiscoverProjectsEnabled defaults off and honors REMODEX_OPENCODE_DISCOVER_PROJECTS=1", () => {
-  assert.equal(isOpenCodeDiscoverProjectsEnabled({}), false);
-  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "0" }), false);
-  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "1" }), true);
-  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "true" }), true);
+test("isOpenCodeDiscoverProjectsEnabled honors client params and env overrides", () => {
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({}, {}), false);
+  assert.equal(
+    isOpenCodeDiscoverProjectsEnabled({}, { discoverOpenCodeProjects: true }),
+    true,
+  );
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "0" }, {}), false);
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "1" }, {}), true);
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "true" }, {}), true);
 });
 
 test("readDiscoverProjectTtlMs defaults to 120s and honors env override", () => {
@@ -1944,7 +1948,11 @@ test("thread/list skips hot-path project discover when REMODEX_OPENCODE_DISCOVER
     });
 
     router.handleApplicationMessage(
-      JSON.stringify({ id: "discover-flag-off", method: "thread/list", params: {} }),
+      JSON.stringify({
+        id: "discover-flag-off",
+        method: "thread/list",
+        params: { discoverOpenCodeProjects: false },
+      }),
     );
     await responsePromise;
     await waitOneTick();
@@ -1975,7 +1983,11 @@ test("thread/list debounces project discover within TTL and remembers projects",
       ],
     });
 
-    const request = JSON.stringify({ id: "discover-debounce", method: "thread/list", params: {} });
+    const request = JSON.stringify({
+      id: "discover-debounce",
+      method: "thread/list",
+      params: { discoverOpenCodeProjects: true },
+    });
     router.handleApplicationMessage(request);
     await waitOneTick();
     router.handleApplicationMessage(request);
@@ -2016,7 +2028,11 @@ test("thread/list returns before slow project discover completes", async () => {
 
     const startedAt = Date.now();
     router.handleApplicationMessage(
-      JSON.stringify({ id: "discover-nonblocking", method: "thread/list", params: {} }),
+      JSON.stringify({
+        id: "discover-nonblocking",
+        method: "thread/list",
+        params: { discoverOpenCodeProjects: true },
+      }),
     );
     await responsePromise;
 
@@ -2058,7 +2074,11 @@ test("thread/list logs thread_list_wall_ms and opencode_discover_on_list when di
       });
 
       router.handleApplicationMessage(
-        JSON.stringify({ id: "discover-logs", method: "thread/list", params: {} }),
+        JSON.stringify({
+          id: "discover-logs",
+          method: "thread/list",
+          params: { discoverOpenCodeProjects: true },
+        }),
       );
       await responsePromise;
 
@@ -2202,10 +2222,22 @@ test("auth inventory change via model/list pushes runtime/catalog/updated once",
   );
 });
 
-test("providerForRequest routes discovered external thread ids when discover flag is on", () => {
-  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
+function withOpenCodeRuntimeEnabled(fn) {
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  delete process.env.REMODEX_DISABLE_OPENCODE;
   try {
+    return fn();
+  } finally {
+    if (previousDisable === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+    }
+  }
+}
+
+test("providerForRequest routes discovered external thread ids when OpenCode runtime is enabled", () => {
+  withOpenCodeRuntimeEnabled(() => {
     const provider = makeProvider([]);
     withMutedConsole(() => {
       assert.equal(
@@ -2224,19 +2256,11 @@ test("providerForRequest routes discovered external thread ids when discover fla
         provider,
       );
     });
-  } finally {
-    if (previous === undefined) {
-      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-    } else {
-      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
-    }
-  }
+  });
 });
 
 test("thread/read routes providerless discovered external ids to OpenCode provider", async () => {
-  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
-  try {
+  await withOpenCodeRuntimeEnabled(async () => {
     let handledMethod = null;
     let responsePayload = null;
     let resolveResponse;
@@ -2283,19 +2307,11 @@ test("thread/read routes providerless discovered external ids to OpenCode provid
     assert.equal(handledMethod, "thread/read");
     assert.equal(responsePayload.id, "discovered-read");
     assert.equal(responsePayload.result.thread.id, "opencode-session-ses_router_read");
-  } finally {
-    if (previous === undefined) {
-      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-    } else {
-      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
-    }
-  }
+  });
 });
 
 test("thread/resume routes providerless discovered external ids to OpenCode provider", async () => {
-  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
-  try {
+  await withOpenCodeRuntimeEnabled(async () => {
     let handledMethod = null;
     let responsePayload = null;
     let resolveResponse;
@@ -2342,11 +2358,5 @@ test("thread/resume routes providerless discovered external ids to OpenCode prov
     assert.equal(handledMethod, "thread/resume");
     assert.equal(responsePayload.id, "discovered-resume");
     assert.equal(responsePayload.result.thread.id, "opencode-session-ses_router_resume");
-  } finally {
-    if (previous === undefined) {
-      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
-    } else {
-      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
-    }
-  }
+  });
 });

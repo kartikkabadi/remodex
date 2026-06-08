@@ -1103,6 +1103,10 @@ extension CodexService {
             if let limit {
                 params["limit"] = .integer(limit)
             }
+            if openCodeExternalDiscoveryEnabled {
+                params["discoverOpenCodeSessions"] = .bool(true)
+                params["discoverOpenCodeProjects"] = .bool(true)
+            }
 
             let response = try await sendRequest(
                 method: "thread/list",

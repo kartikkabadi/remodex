@@ -50,6 +50,7 @@ const { createOpenCodeAuthErrorNotifier } = require("./opencode-auth-error-handl
 const { mapOpenCodeSessionToContextUsage } = require("./opencode-usage-mapper");
 const { createAttachmentStore, isAttachmentsEnabled } = require("./attachment-store");
 const { validateDirectory } = require("./project-path-policy");
+const { resolveDiscoverSessionsEnabled } = require("./opencode-discovery-policy");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -80,10 +81,6 @@ function resolveListThreadsValidateCap(env = process.env) {
     return boundedPositiveInteger(fromEnv, LIST_THREADS_SESSION_VALIDATE_CAP);
   }
   return LIST_THREADS_SESSION_VALIDATE_CAP;
-}
-
-function isDiscoverSessionsEnabled(env = process.env) {
-  return readString(env?.REMODEX_OPENCODE_DISCOVER_SESSIONS) === "1";
 }
 
 function resolveDiscoverSessionsCap(env = process.env) {
@@ -995,9 +992,6 @@ function createOpenCodeProvider({
   }
 
   async function discoverExternalSessions() {
-    if (!isDiscoverSessionsEnabled(env)) {
-      return [];
-    }
     return refreshDiscoveredSessionsCache();
   }
 
@@ -1386,7 +1380,7 @@ function createOpenCodeProvider({
     }
 
     let discoveredRows = [];
-    if (isDiscoverSessionsEnabled(env)) {
+    if (resolveDiscoverSessionsEnabled(env, params)) {
       try {
         discoveredRows = await discoverExternalSessions();
         discoveredExternal = discoveredRows.length;

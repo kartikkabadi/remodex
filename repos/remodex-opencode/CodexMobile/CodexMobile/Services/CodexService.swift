@@ -807,6 +807,7 @@ final class CodexService {
     static let threadHistoryPaginationStateDefaultsKey = "codex.threadHistoryPaginationState"
     static let notificationsPromptedDefaultsKey = "codex.notifications.prompted"
     static let keepMacAwakeWhileBridgeRunsDefaultsKey = "codex.keepMacAwakeWhileBridgeRuns"
+    static let openCodeExternalDiscoveryDefaultsKey = "codex.openCodeExternalDiscoveryEnabled"
 
     init(
         encoder: JSONEncoder = JSONEncoder(),
