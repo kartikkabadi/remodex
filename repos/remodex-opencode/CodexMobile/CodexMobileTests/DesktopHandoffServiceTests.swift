@@ -340,6 +340,162 @@ final class DesktopHandoffServiceTests: XCTestCase {
         )
     }
 
+    func testDesktopHandoffVisibilityUsesCapabilityNotProviderIdentity() {
+        let service = makeService()
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "codex",
+                label: "Codex",
+                enabled: true,
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: false,
+                capabilities: .defaultCodex,
+                agents: []
+            ),
+        ]
+        service.availableModels = [
+            CodexModelOption(
+                id: "gpt-5",
+                model: "gpt-5",
+                modelProvider: "codex",
+                displayName: "GPT-5",
+                description: "",
+                capabilities: .defaultCodex
+            ),
+        ]
+        service.upsertThread(
+            CodexThread(id: "thread-codex-handoff", title: "Codex", modelProvider: "codex")
+        )
+
+        XCTAssertTrue(service.supportsDesktopHandoffForTurn(threadId: "thread-codex-handoff"))
+    }
+
+    func testDesktopHandoffActionUnavailableWhenHandoffEnvDisabled() {
+        let service = makeService()
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "opencode",
+                label: "OpenCode",
+                enabled: true,
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: true,
+                capabilities: handoffCapabilities(),
+                agents: [],
+                opencode: OpenCodeRuntimeDetails(
+                    enabled: true,
+                    serveUrl: nil,
+                    version: "1.0.0",
+                    minVersion: nil,
+                    versionBelowMinimum: false,
+                    sessionCount: 1,
+                    lastError: nil,
+                    command: nil,
+                    handoffEnvEnabled: false,
+                    authConfigured: true,
+                    connectedProviders: nil,
+                    providerInventory: nil,
+                    providerDiscoveryReasonCode: nil
+                )
+            ),
+        ]
+        service.availableModels = [
+            CodexModelOption(
+                id: "openai/gpt-5.5",
+                model: "openai/gpt-5.5",
+                modelProvider: "opencode",
+                displayName: "GPT-5.5",
+                description: "",
+                capabilities: handoffCapabilities()
+            ),
+        ]
+        service.upsertThread(
+            CodexThread(
+                id: "thread-opencode-handoff-env-off",
+                title: "OpenCode",
+                modelProvider: "opencode"
+            )
+        )
+
+        XCTAssertTrue(service.supportsDesktopHandoffForTurn(threadId: "thread-opencode-handoff-env-off"))
+        XCTAssertFalse(service.isDesktopHandoffActionAvailable(forThreadId: "thread-opencode-handoff-env-off"))
+    }
+
+    func testDesktopHandoffActionAvailableWhenHandoffEnvEnabled() {
+        let service = makeService()
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "opencode",
+                label: "OpenCode",
+                enabled: true,
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: true,
+                capabilities: handoffCapabilities(),
+                agents: [],
+                opencode: OpenCodeRuntimeDetails(
+                    enabled: true,
+                    serveUrl: nil,
+                    version: "1.0.0",
+                    minVersion: nil,
+                    versionBelowMinimum: false,
+                    sessionCount: 1,
+                    lastError: nil,
+                    command: nil,
+                    handoffEnvEnabled: true,
+                    authConfigured: true,
+                    connectedProviders: nil,
+                    providerInventory: nil,
+                    providerDiscoveryReasonCode: nil
+                )
+            ),
+        ]
+        service.availableModels = [
+            CodexModelOption(
+                id: "openai/gpt-5.5",
+                model: "openai/gpt-5.5",
+                modelProvider: "opencode",
+                displayName: "GPT-5.5",
+                description: "",
+                capabilities: handoffCapabilities()
+            ),
+        ]
+        service.upsertThread(
+            CodexThread(
+                id: "thread-opencode-handoff-env-on",
+                title: "OpenCode",
+                modelProvider: "opencode"
+            )
+        )
+
+        XCTAssertTrue(service.isDesktopHandoffActionAvailable(forThreadId: "thread-opencode-handoff-env-on"))
+    }
+
+    private func handoffCapabilities() -> ProviderCapabilities {
+        ProviderCapabilities(
+            supportsAgentSelection: true,
+            supportsReasoningEffort: false,
+            supportsFastMode: false,
+            supportsPlanMode: false,
+            supportsStreamingTools: true,
+            supportsApprovals: true,
+            supportsFork: true,
+            supportsVoice: false,
+            supportsDesktopHandoff: true,
+            supportsSlashCommands: true,
+            supportsSlashCommandExecute: true,
+            supportsMCP: false,
+            supportsWorktree: false,
+            supportsSkillAutocomplete: true,
+            supportsStructuredSkillInput: false,
+            supportsSkillFileInjection: true,
+            supportsImageAttachments: true,
+            supportsSteer: false,
+            supportsQueue: true
+        )
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "DesktopHandoffServiceTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard

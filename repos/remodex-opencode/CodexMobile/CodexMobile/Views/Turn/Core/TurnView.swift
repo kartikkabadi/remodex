@@ -116,7 +116,7 @@ struct TurnView: View {
             gitWorkingDirectory: gitWorkingDirectory
         )
         let disabledGitActions: Set<TurnGitActionKind> = viewModel.disabledGitActions
-        let onTapMacHandoff: (() -> Void)? = codex.isConnected && codex.supportsDesktopAppHandoff ? {
+        let onTapMacHandoff: (() -> Void)? = canPerformDesktopHandoff ? {
             isShowingMacHandoffConfirm = true
         } : nil
         let onTapWorktreeHandoff: (() -> Void)? = showsGitControls ? {
@@ -659,7 +659,22 @@ struct TurnView: View {
 
     private var showsComposerDesktopHandoff: Bool {
         supportsDesktopHandoff
-            && CodexModelOption.normalizedProvider(codex.runtimeModelProviderForTurn(threadId: thread.id)) == "opencode"
+    }
+
+    private var canPerformDesktopHandoff: Bool {
+        guard codex.isConnected,
+              codex.isDesktopHandoffActionAvailable(forThreadId: thread.id) else {
+            return false
+        }
+
+        let provider = CodexModelOption.normalizedProvider(
+            codex.runtimeModelProviderForTurn(threadId: thread.id)
+        )
+        if provider == "opencode" {
+            return true
+        }
+
+        return codex.supportsDesktopAppHandoff
     }
 
     private var openCodeVersionSkewBanner: AnyView? {
@@ -1562,7 +1577,7 @@ struct TurnView: View {
                 onSend: handleSend,
                 showsComposerDesktopHandoff: showsComposerDesktopHandoff,
                 isDesktopHandoffLoading: isHandingOffToMac,
-                onContinueOnDesktop: showsComposerDesktopHandoff && codex.isConnected
+                onContinueOnDesktop: canPerformDesktopHandoff
                     ? { isShowingMacHandoffConfirm = true }
                     : nil
             )

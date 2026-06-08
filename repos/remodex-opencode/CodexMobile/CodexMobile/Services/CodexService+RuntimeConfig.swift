@@ -666,10 +666,7 @@ extension CodexService {
     }
 
     func supportsImageAttachments(forThreadId threadId: String?) -> Bool {
-        if let env = ProcessInfo.processInfo.environment["REMODEX_OPENCODE_ATTACHMENTS"], env == "0" {
-            return false
-        }
-        return providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
+        providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
     }
 
     // Remodex app drives Mac-started OpenCode session/project discovery via thread/list params.
@@ -709,6 +706,20 @@ extension CodexService {
 
     func supportsDesktopHandoffForTurn(threadId: String?) -> Bool {
         providerCapabilitiesForTurn(threadId: threadId).supportsDesktopHandoff
+    }
+
+    /// True when catalog advertises handoff and the Mac bridge reports handoff RPC is available.
+    func isDesktopHandoffActionAvailable(forThreadId threadId: String?) -> Bool {
+        guard supportsDesktopHandoffForTurn(threadId: threadId) else {
+            return false
+        }
+
+        let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        guard provider == "opencode" else {
+            return true
+        }
+
+        return openCodeRuntimeDetails?.handoffEnvEnabled == true
     }
 
     func selectedModelOption() -> CodexModelOption? {

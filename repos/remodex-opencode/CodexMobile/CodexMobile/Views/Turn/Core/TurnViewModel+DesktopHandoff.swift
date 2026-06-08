@@ -17,7 +17,8 @@ extension TurnViewModel {
         thread: CodexThread,
         handoffService: DesktopHandoffService? = nil
     ) async throws -> DesktopHandoffRouteOutcome? {
-        guard codex.supportsDesktopHandoffForTurn(threadId: thread.id) else {
+        guard codex.supportsDesktopHandoffForTurn(threadId: thread.id),
+              codex.isDesktopHandoffActionAvailable(forThreadId: thread.id) else {
             return nil
         }
 
