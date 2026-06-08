@@ -1177,7 +1177,25 @@ function createOpenCodeProvider({
       sessions.entries().length > 0;
     if ((!healthy || !client) && hasOwnedThreadState) {
       try {
-        await ensureStarted();
+        const wakeResult = await ensureStartedWithCap({
+          onTimeout: () => {
+            console.log(
+              JSON.stringify({
+                event: "opencode_list_threads_wake_timeout",
+                capMs: resolveEnsureStartedCapMs(env),
+              }),
+            );
+          },
+        });
+        if (!wakeResult.started) {
+          console.log(
+            JSON.stringify({
+              event: "opencode_list_threads_wake_failed",
+              message: "OpenCode could not start for thread/list within cap",
+              ms: wakeResult.ms,
+            }),
+          );
+        }
       } catch (error) {
         console.log(
           JSON.stringify({

@@ -170,11 +170,41 @@ function createRuntimeProviderRouter({
     if (method === "thread/list") {
       respondAsync(parsed, async () => {
         const startedAt = Date.now();
-        const codexResult = await sendCodexRequest("thread/list", parsed.params || {});
-        const shouldIncludeProviders = !hasCursor(parsed.params);
-        const providerThreads = shouldIncludeProviders
-          ? await listProviderThreads(runtimeProviders, parsed.params || {})
-          : [];
+        const threadListParams = parsed.params || {};
+        const shouldIncludeProviders = !hasCursor(threadListParams);
+        const codexLegPromise = (async () => {
+          const legStarted = Date.now();
+          const result = await withThreadListBudget(
+            sendCodexRequest("thread/list", threadListParams).catch((error) => {
+              console.warn(
+                `${logPrefix} Codex thread/list failed: ${error?.message || error}`,
+              );
+              return { data: [] };
+            }),
+            codexThreadListBudgetMs(process.env),
+            { data: [] },
+          );
+          return { result, ms: Date.now() - legStarted };
+        })();
+        const opencodeLegPromise = shouldIncludeProviders
+          ? (async () => {
+              const legStarted = Date.now();
+              const result = await listProviderThreadsForThreadList(
+                runtimeProviders,
+                threadListParams,
+                logPrefix,
+              );
+              return { result, ms: Date.now() - legStarted };
+            })()
+          : Promise.resolve({ result: [], ms: 0 });
+        const [codexLeg, opencodeLeg] = await Promise.all([
+          codexLegPromise,
+          opencodeLegPromise,
+        ]);
+        const codexResult = codexLeg.result;
+        const providerThreads = opencodeLeg.result;
+        const codexMs = codexLeg.ms;
+        const opencodeMs = opencodeLeg.ms;
         registerThreadProjects(projectRegistry, threadsFromListResult(codexResult), {
           source: "codex-thread-list",
           provider: CODEX_PROVIDER_ID,
@@ -183,7 +213,6 @@ function createRuntimeProviderRouter({
           source: "provider-thread-list",
         });
         const merged = mergeThreadListResult(codexResult, providerThreads);
-        const threadListParams = parsed.params || {};
         maybeDiscoverOpenCodeProjects({
           opencodeProvider,
           projectRegistry,
@@ -193,14 +222,19 @@ function createRuntimeProviderRouter({
           logPrefix,
         });
         const wallMs = Date.now() - startedAt;
+        const discoverProjectsEnabled = resolveDiscoverProjectsEnabled(
+          process.env,
+          threadListParams,
+        );
+        console.log(JSON.stringify({ event: "thread_list_codex_ms", ms: codexMs }));
+        console.log(JSON.stringify({ event: "thread_list_opencode_ms", ms: opencodeMs }));
         console.log(
           JSON.stringify({
             event: "thread_list_wall_ms",
             wallMs,
-            discoverProjectsEnabled: resolveDiscoverProjectsEnabled(
-              process.env,
-              threadListParams,
-            ),
+            codexMs,
+            opencodeMs,
+            discoverProjectsEnabled,
           }),
         );
         return merged;
@@ -337,6 +371,9 @@ async function listProviderModels(providers) {
 
 const CODEX_MODEL_LIST_BUDGET_MS = 3_000;
 const MODEL_LIST_PROVIDER_BUDGET_MS = 3_000;
+const CODEX_THREAD_LIST_BUDGET_MS = 10_000;
+const THREAD_LIST_PROVIDER_BUDGET_MS = 10_000;
+const DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS = 10_000;
 // Cold `opencode serve` can take START_TIMEOUT_MS + health polling; 8s was too short on device.
 const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
   START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
@@ -511,6 +548,22 @@ function opencodeModelListBudgetMs(env = process.env) {
   );
 }
 
+function codexThreadListBudgetMs(env = process.env) {
+  return readModelListBudgetMs(
+    env,
+    "REMODEX_THREAD_LIST_CODEX_BUDGET_MS",
+    CODEX_THREAD_LIST_BUDGET_MS,
+  );
+}
+
+function opencodeThreadListBudgetMs(env = process.env) {
+  return readModelListBudgetMs(
+    env,
+    "REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS",
+    DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS,
+  );
+}
+
 // Caps one leg of model/list so Codex and OpenCode discovery stay within mobile budgets.
 function withModelListBudget(promise, budgetMs, fallback) {
   let timeoutId;
@@ -521,6 +574,11 @@ function withModelListBudget(promise, budgetMs, fallback) {
   return Promise.race([promise, budget]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+// Alias for thread/list per-leg budgets (same race semantics as model/list).
+function withThreadListBudget(promise, budgetMs, fallback) {
+  return withModelListBudget(promise, budgetMs, fallback);
 }
 
 // OpenCode model discovery can take several seconds; never block Codex on it.
@@ -613,9 +671,30 @@ async function listProviderModelsForModelList(
   return { models, opencodeMeta };
 }
 
-async function listProviderThreads(providers, params) {
+async function listProviderThreadsForThreadList(
+  providers,
+  params,
+  logPrefix = "[remodex]",
+  options = {},
+) {
+  const env = options.env || process.env;
   const settled = await Promise.allSettled(
-    providers.map((provider) => provider.listThreads(params)),
+    providers.map((provider) => {
+      const budgetMs =
+        provider.id === OPENCODE_PROVIDER_ID
+          ? opencodeThreadListBudgetMs(env)
+          : THREAD_LIST_PROVIDER_BUDGET_MS;
+      return withThreadListBudget(
+        provider.listThreads(params).catch((error) => {
+          console.warn(
+            `${logPrefix} ${provider.id} thread/list failed: ${error?.message || error}`,
+          );
+          return { data: [] };
+        }),
+        budgetMs,
+        { data: [] },
+      );
+    }),
   );
   return settled.flatMap((result) => {
     if (result.status !== "fulfilled") {
@@ -1447,14 +1526,20 @@ module.exports = {
   computeCatalogRevision,
   countAuthenticated,
   CODEX_MODEL_LIST_BUDGET_MS,
+  CODEX_THREAD_LIST_BUDGET_MS,
   DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
+  DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS,
   MODEL_LIST_PROVIDER_BUDGET_MS,
+  THREAD_LIST_PROVIDER_BUDGET_MS,
+  codexThreadListBudgetMs,
+  opencodeThreadListBudgetMs,
   maybeEmitCatalogUpdated,
   opencodeModelListBudgetMs,
   createRuntimeProviderRouter,
   capOpenCodeModelsForMobileList,
   catalogOpenCodeSnapshotForModelList,
   listProviderModelsForModelList,
+  listProviderThreadsForThreadList,
   resetCatalogPushState,
   resetOpenCodeProjectDiscoverState,
   isOpenCodeDiscoverProjectsEnabled,
@@ -1463,6 +1548,7 @@ module.exports = {
   shouldWarmProviderInventory,
   shortHash,
   withModelListBudget,
+  withThreadListBudget,
   mergeModelListResult,
   mergeSkillsAcrossProviders,
   mergeSkillsListResult,

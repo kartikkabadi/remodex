@@ -194,7 +194,24 @@ Phased rollout uses dual feature flags (both default **`0`** until device matrix
 | `thread/list` p99 (any) | **< 11s** | Must not exceed transport timeout |
 | `ensureStarted` on discover path | **< 4s** | On timeout: serve stale discovery cache + schedule async refresh |
 
-Router emits `thread_list_wall_ms` histogram logs. When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
+Router runs Codex `thread/list` and OpenCode `provider.listThreads()` **in parallel** (`Promise.all`), mirroring `model/list`. Each leg has an independent race budget; Codex failures are isolated via `.catch()` and return an empty `data` array.
+
+| Env knob | Default | Purpose |
+|----------|---------|---------|
+| `REMODEX_THREAD_LIST_CODEX_BUDGET_MS` | `10000` | Cap blocking Codex leg |
+| `REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS` | `10000` | Cap blocking OpenCode leg |
+
+**Telemetry** (JSON logs per `thread/list` response):
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `thread_list_codex_ms` | `ms` | Codex leg wall time |
+| `thread_list_opencode_ms` | `ms` | OpenCode leg wall time (0 when paginated with cursor) |
+| `thread_list_wall_ms` | `wallMs`, `codexMs`, `opencodeMs`, `discoverProjectsEnabled` | End-to-end merge time |
+
+See also `docs/operations/performance-limits.md`.
+
+When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
 
 **Cold-serve / first-poll:** If `ensureStarted` exceeds `REMODEX_OPENCODE_ENSURE_STARTED_MS`, return immediately with last-known discovered rows (TTL may be expired) + owned threads; log `discover_refresh_async`. O18 “≤10s visible” accepts **second poll** on cold serve; first poll must not block >12s.
 
