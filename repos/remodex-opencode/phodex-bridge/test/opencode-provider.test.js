@@ -3067,6 +3067,103 @@ test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t)
   assert.deepEqual(read.thread.turns, []);
 });
 
+test("listThreads surfaces materializationBlocked in response meta", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  for (let index = 0; index < 6; index += 1) {
+    const threadId = `opencode-thread-meta-${index}`;
+    sessionStore.set(threadId, `ses_meta_${index}`);
+    ownershipStore.setOwnership(threadId, "opencode");
+  }
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_LIST_THREADS_VALIDATE_CAP: "2",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => ({}),
+      getMessages: async () => [{ role: "assistant", text: "activity" }],
+    }),
+  });
+  await provider.warmup();
+
+  const list = await provider.listThreads();
+  assert.equal(list.meta.materializationBlocked, 4);
+  assert.equal(list.meta.sdkValidationsCap, 2);
+  assert.equal(list.meta.sdkValidations, 2);
+  assert.equal(list.data.length, 2);
+});
+
+test("listThreads validation cache avoids repeat SDK calls within TTL", async () => {
+  let getSessionCalls = 0;
+  let getMessagesCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-cache", "ses_cache", { title: "Cached stub" });
+  ownershipStore.setOwnership("opencode-thread-cache", "opencode");
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS: "60000",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+      getMessages: async () => {
+        getMessagesCalls += 1;
+        return [{ role: "assistant", text: "activity" }];
+      },
+    }),
+  });
+  await provider.warmup();
+
+  await provider.listThreads();
+  await provider.listThreads();
+
+  assert.equal(getSessionCalls, 1);
+  assert.equal(getMessagesCalls, 1);
+});
+
+test("discover refresh coalesces concurrent listThreads polls", async () => {
+  let listCalls = 0;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_DISCOVER_TTL_MS: "1",
+    },
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      listSessions: async () => {
+        listCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return { data: [externalDiscoveredRow()] };
+      },
+    }),
+  });
+  await provider.warmup();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const [first, second] = await Promise.all([
+    provider.listThreads({ discoverOpenCodeSessions: true }),
+    provider.listThreads({ discoverOpenCodeSessions: true }),
+  ]);
+
+  assert.equal(first.data.length, 1);
+  assert.equal(second.data.length, 1);
+  assert.equal(listCalls, 1, "concurrent discover refresh should share one in-flight mutex");
+});
+
 test("ownership stub includes cwd for sidebar grouping", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();

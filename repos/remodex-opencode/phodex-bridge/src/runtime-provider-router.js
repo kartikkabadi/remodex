@@ -206,7 +206,16 @@ function createRuntimeProviderRouter({
           opencodeLegPromise,
         ]);
         const codexResult = codexLeg.result;
-        const providerThreads = opencodeLeg.result;
+        const providerLeg = opencodeLeg.result;
+        const providerThreads = Array.isArray(providerLeg?.threads)
+          ? providerLeg.threads
+          : Array.isArray(providerLeg)
+            ? providerLeg
+            : [];
+        const providerMeta =
+          providerLeg && typeof providerLeg === "object" && !Array.isArray(providerLeg)
+            ? providerLeg.meta
+            : null;
         const codexMs = codexLeg.ms;
         const opencodeMs = opencodeLeg.ms;
         registerThreadProjects(projectRegistry, threadsFromListResult(codexResult), {
@@ -216,7 +225,7 @@ function createRuntimeProviderRouter({
         registerThreadProjects(projectRegistry, providerThreads, {
           source: "provider-thread-list",
         });
-        const merged = mergeThreadListResult(codexResult, providerThreads);
+        const merged = mergeThreadListResult(codexResult, providerThreads, { meta: providerMeta });
         maybeDiscoverOpenCodeProjects({
           opencodeProvider,
           projectRegistry,
@@ -738,9 +747,14 @@ async function listProviderThreadsForThreadList(
             message: readString(error?.message) || `${provider.id} thread/list failed`,
           }),
         );
-        return { data: [] };
+        return { data: [], meta: null };
       });
-      const listPromise = withThreadListBudget(listWork, budgetMs, { data: [] }, { leg: provider.id });
+      const listPromise = withThreadListBudget(
+        listWork,
+        budgetMs,
+        { data: [], meta: null },
+        { leg: provider.id },
+      );
 
       if (inFlightKey) {
         const shared = listPromise.finally(() => {
@@ -755,13 +769,21 @@ async function listProviderThreadsForThreadList(
       return listPromise;
     }),
   );
-  return settled.flatMap((result) => {
+  const threads = [];
+  let meta = null;
+  for (const result of settled) {
     if (result.status !== "fulfilled") {
-      return [];
+      continue;
     }
     const payload = result.value;
-    return Array.isArray(payload?.data) ? payload.data : [];
-  });
+    if (Array.isArray(payload?.data)) {
+      threads.push(...payload.data);
+    }
+    if (payload?.meta && typeof payload.meta === "object") {
+      meta = { ...(meta || {}), ...payload.meta };
+    }
+  }
+  return { threads, meta };
 }
 
 function logBridgeTurnStartAudit(request, ownershipStore) {
@@ -993,18 +1015,24 @@ function mergeModelListResult(codexResult, providerModels, extras = {}) {
   return merged;
 }
 
-function mergeThreadListResult(codexResult, providerThreads) {
+function mergeThreadListResult(codexResult, providerThreads, extras = {}) {
   const result = codexResult && typeof codexResult === "object" ? codexResult : {};
   const key = firstArrayKey(result, ["data", "items", "threads"]) || "data";
   const codexThreads = Array.isArray(result[key]) ? result[key] : [];
   const merged = dedupeMergedThreads(codexThreads, providerThreads).toSorted(
     compareThreadsByUpdatedAt,
   );
-
-  return {
+  const mergedResult = {
     ...result,
     [key]: merged,
   };
+  if (extras.meta && typeof extras.meta === "object") {
+    mergedResult.meta = {
+      ...(result.meta && typeof result.meta === "object" ? result.meta : {}),
+      ...extras.meta,
+    };
+  }
+  return mergedResult;
 }
 
 function readThreadSessionId(thread) {
@@ -1035,29 +1063,78 @@ function parseDiscoveredThreadSessionId(threadId) {
   return readString(normalized.slice(DISCOVERED_THREAD_ID_PREFIX.length));
 }
 
+function threadMergePreferenceScore(thread) {
+  const threadId = readThreadIdentifier(thread);
+  let score = 0;
+  if (threadId && threadId.startsWith("opencode-thread-")) {
+    score += 4;
+  }
+  if (hasProviderThreadMetadata(thread)) {
+    score += 2;
+  }
+  if (isDiscoveredExternalThreadRow(thread)) {
+    score -= 8;
+  }
+  const updatedAt = Date.parse(readString(thread?.updatedAt) || "") || 0;
+  return { score, updatedAt };
+}
+
+function shouldReplaceThreadForSessionId(existingThread, candidateThread) {
+  const existing = threadMergePreferenceScore(existingThread);
+  const candidate = threadMergePreferenceScore(candidateThread);
+  if (candidate.score !== existing.score) {
+    return candidate.score > existing.score;
+  }
+  return candidate.updatedAt >= existing.updatedAt;
+}
+
 function dedupeMergedThreads(codexThreads, providerThreads) {
   const mergedById = new Map();
   const ownedSessionIds = new Set();
+  const sessionIdToThreadId = new Map();
 
-  for (const thread of codexThreads) {
+  const rememberOwnedSession = (thread) => {
+    const sessionId = readThreadSessionId(thread);
+    if (!sessionId || isDiscoveredExternalThreadRow(thread)) {
+      return;
+    }
+    ownedSessionIds.add(sessionId);
     const threadId = readThreadIdentifier(thread);
     if (threadId) {
-      mergedById.set(threadId, thread);
-      const sessionId = readThreadSessionId(thread);
-      if (sessionId && !isDiscoveredExternalThreadRow(thread)) {
-        ownedSessionIds.add(sessionId);
-      }
+      sessionIdToThreadId.set(sessionId, threadId);
     }
+  };
+
+  const upsertThread = (thread) => {
+    const threadId = readThreadIdentifier(thread);
+    if (!threadId) {
+      return;
+    }
+    const sessionId = readThreadSessionId(thread);
+    if (sessionId && !isDiscoveredExternalThreadRow(thread)) {
+      const existingThreadId = sessionIdToThreadId.get(sessionId);
+      if (existingThreadId && existingThreadId !== threadId) {
+        const existingThread = mergedById.get(existingThreadId);
+        if (existingThread && !shouldReplaceThreadForSessionId(existingThread, thread)) {
+          return;
+        }
+        mergedById.delete(existingThreadId);
+      }
+      sessionIdToThreadId.set(sessionId, threadId);
+      ownedSessionIds.add(sessionId);
+    }
+    if (!mergedById.has(threadId) || hasProviderThreadMetadata(thread)) {
+      mergedById.set(threadId, thread);
+    }
+  };
+
+  for (const thread of codexThreads) {
+    upsertThread(thread);
+    rememberOwnedSession(thread);
   }
 
   for (const thread of providerThreads) {
-    if (isDiscoveredExternalThreadRow(thread)) {
-      continue;
-    }
-    const sessionId = readThreadSessionId(thread);
-    if (sessionId) {
-      ownedSessionIds.add(sessionId);
-    }
+    rememberOwnedSession(thread);
   }
 
   for (const thread of providerThreads) {
@@ -1073,9 +1150,7 @@ function dedupeMergedThreads(codexThreads, providerThreads) {
       }
     }
 
-    if (!mergedById.has(threadId) || hasProviderThreadMetadata(thread)) {
-      mergedById.set(threadId, thread);
-    }
+    upsertThread(thread);
   }
   return Array.from(mergedById.values());
 }

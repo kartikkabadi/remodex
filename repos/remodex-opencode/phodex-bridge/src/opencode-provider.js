@@ -70,6 +70,7 @@ const LIST_THREADS_SESSION_VALIDATE_CAP = 20;
 const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
 const DEFAULT_DISCOVER_SESSIONS_CAP = 30;
 const DEFAULT_DISCOVER_SESSIONS_TTL_MS = 60_000;
+const DEFAULT_LIST_THREADS_VALIDATE_CACHE_TTL_MS = 60_000;
 const DEFAULT_ENSURE_STARTED_CAP_MS = 4_000;
 const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
@@ -106,6 +107,14 @@ function resolveEnsureStartedCapMs(env = process.env) {
     return fromEnv;
   }
   return DEFAULT_ENSURE_STARTED_CAP_MS;
+}
+
+function resolveListThreadsValidateCacheTtlMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_LIST_THREADS_VALIDATE_CACHE_TTL_MS;
 }
 
 function parseDiscoveredThreadSessionId(threadId) {
@@ -223,7 +232,39 @@ function createOpenCodeProvider({
   const MAX_PENDING_PERMISSIONS = 20;
   let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
   let discoverRefreshInFlight = null;
+  /** @type {Map<string, { valid?: boolean, hasActivity?: boolean, fetchedAt: number }>} */
+  const sessionValidationCache = new Map();
   const adoptMutexes = new Map();
+
+  function readSessionValidationCache(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return null;
+    }
+    const entry = sessionValidationCache.get(normalizedSessionId);
+    if (!entry) {
+      return null;
+    }
+    const ttlMs = resolveListThreadsValidateCacheTtlMs(env);
+    if (Date.now() - entry.fetchedAt >= ttlMs) {
+      sessionValidationCache.delete(normalizedSessionId);
+      return null;
+    }
+    return entry;
+  }
+
+  function writeSessionValidationCache(sessionId, patch = {}) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return;
+    }
+    const previous = readSessionValidationCache(sessionId) || {};
+    sessionValidationCache.set(normalizedSessionId, {
+      ...previous,
+      ...patch,
+      fetchedAt: Date.now(),
+    });
+  }
 
   function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
     const tid = readString(threadId);
@@ -279,11 +320,17 @@ function createOpenCodeProvider({
   }
 
   async function validateOwnedThreadSession(sessionId) {
+    const cached = readSessionValidationCache(sessionId);
+    if (cached?.valid !== undefined) {
+      return cached.valid;
+    }
     try {
       await client.getSession(sessionId);
+      writeSessionValidationCache(sessionId, { valid: true });
       return true;
     } catch (error) {
       if (isInvalidOpenCodeSessionError(error)) {
+        writeSessionValidationCache(sessionId, { valid: false, hasActivity: false });
         return false;
       }
       throw error;
@@ -653,12 +700,19 @@ function createOpenCodeProvider({
     if (threadHasActiveTurn(threadId)) {
       return true;
     }
+    const cached = readSessionValidationCache(sessionId);
+    if (cached?.hasActivity !== undefined) {
+      return cached.hasActivity;
+    }
     try {
       const messages = normalizeSessionMessagesResponse(
         await client.getMessages(sessionId, { limit: 1 }),
       );
-      return Array.isArray(messages) && messages.length > 0;
+      const hasActivity = Array.isArray(messages) && messages.length > 0;
+      writeSessionValidationCache(sessionId, { hasActivity });
+      return hasActivity;
     } catch {
+      writeSessionValidationCache(sessionId, { hasActivity: false });
       return false;
     }
   }
@@ -876,14 +930,10 @@ function createOpenCodeProvider({
     if (discoverRefreshInFlight) {
       return;
     }
-    discoverRefreshInFlight = refreshDiscoveredSessionsCache({
+    void refreshDiscoveredSessionsCache({
       force: true,
       background: true,
-    })
-      .catch(() => {})
-      .finally(() => {
-        discoverRefreshInFlight = null;
-      });
+    }).catch(() => {});
   }
 
   async function ensureStartedWithCap({ onTimeout } = {}) {
@@ -956,56 +1006,69 @@ function createOpenCodeProvider({
       return rows;
     }
 
-    const started = await ensureStartedWithDiscoverCap();
-    if (!started && discoveredSessionsCache.rows.length > 0) {
-      return filterDiscoveredRows(discoveredSessionsCache.rows);
-    }
-    if (!healthy || !client || typeof client.listSessions !== "function") {
-      return filterDiscoveredRows(discoveredSessionsCache.rows);
+    if (discoverRefreshInFlight) {
+      return discoverRefreshInFlight;
     }
 
-    const listResult = await client.listSessions({ limit: cap });
-    const ownedSessionIds = collectOwnedSessionIds();
-    const rows = [];
-
-    for (const thread of listResult.data || []) {
-      const sessionId = readString(thread.metadata?.sessionId || thread.sessionId);
-      if (!sessionId) {
-        continue;
+    const refreshPromise = (async () => {
+      const started = await ensureStartedWithDiscoverCap();
+      if (!started && discoveredSessionsCache.rows.length > 0) {
+        return filterDiscoveredRows(discoveredSessionsCache.rows);
       }
-      if (ownedSessionIds.has(sessionId)) {
-        continue;
-      }
-      if (threads.has(thread.id)) {
-        continue;
+      if (!healthy || !client || typeof client.listSessions !== "function") {
+        return filterDiscoveredRows(discoveredSessionsCache.rows);
       }
 
-      if (typeof sessions.setDiscovered === "function") {
-        sessions.setDiscovered(sessionId, {
-          threadId: thread.id,
-          cwd: readString(thread.cwd),
-          title: readString(thread.title),
-          model: readString(thread.model),
-          agent: readString(thread.agent),
-        });
+      const listResult = await client.listSessions({ limit: cap });
+      const ownedSessionIds = collectOwnedSessionIds();
+      const rows = [];
+
+      for (const thread of listResult.data || []) {
+        const sessionId = readString(thread.metadata?.sessionId || thread.sessionId);
+        if (!sessionId) {
+          continue;
+        }
+        if (ownedSessionIds.has(sessionId)) {
+          continue;
+        }
+        if (threads.has(thread.id)) {
+          continue;
+        }
+
+        if (typeof sessions.setDiscovered === "function") {
+          sessions.setDiscovered(sessionId, {
+            threadId: thread.id,
+            cwd: readString(thread.cwd),
+            title: readString(thread.title),
+            model: readString(thread.model),
+            agent: readString(thread.agent),
+          });
+        }
+
+        rows.push(thread);
+        if (rows.length >= cap) {
+          break;
+        }
       }
 
-      rows.push(thread);
-      if (rows.length >= cap) {
-        break;
-      }
-    }
+      discoveredSessionsCache = { rows, fetchedAt: Date.now() };
+      console.log(
+        JSON.stringify({
+          event: "opencode_discover_sessions",
+          listed: rows.length,
+          cache_hit: false,
+          background,
+        }),
+      );
+      return rows;
+    })();
 
-    discoveredSessionsCache = { rows, fetchedAt: Date.now() };
-    console.log(
-      JSON.stringify({
-        event: "opencode_discover_sessions",
-        listed: rows.length,
-        cache_hit: false,
-        background,
-      }),
-    );
-    return rows;
+    discoverRefreshInFlight = refreshPromise.finally(() => {
+      if (discoverRefreshInFlight === refreshPromise) {
+        discoverRefreshInFlight = null;
+      }
+    });
+    return discoverRefreshInFlight;
   }
 
   async function discoverExternalSessions() {
@@ -1476,7 +1539,15 @@ function createOpenCodeProvider({
       .toSorted(compareThreadsByUpdatedAt)
       .slice(0, limit);
 
-    return { data, nextCursor: null };
+    return {
+      data,
+      nextCursor: null,
+      meta: {
+        materializationBlocked,
+        sdkValidations,
+        sdkValidationsCap: sdkCap,
+      },
+    };
   }
 
   async function handleRequest(request) {

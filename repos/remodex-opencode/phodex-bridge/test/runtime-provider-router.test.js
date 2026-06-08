@@ -203,6 +203,53 @@ test("mergeThreadListResult omits discovered stub when owned thread shares sessi
   assert.equal(result.data[0].id, "opencode-thread-owned");
 });
 
+test("mergeThreadListResult passes through provider meta", () => {
+  const result = mergeThreadListResult(
+    { data: [{ id: "thread-1", title: "Codex", modelProvider: "codex" }] },
+    [],
+    {
+      meta: {
+        materializationBlocked: 3,
+        sdkValidationsCap: 20,
+      },
+    },
+  );
+
+  assert.equal(result.meta.materializationBlocked, 3);
+  assert.equal(result.meta.sdkValidationsCap, 20);
+});
+
+test("mergeThreadListResult keeps owned thread when duplicate sessionId stubs collide", () => {
+  const result = mergeThreadListResult(
+    { data: [] },
+    [
+      {
+        id: "opencode-thread-owned",
+        title: "Owned copy",
+        modelProvider: "opencode",
+        updatedAt: "2026-06-08T10:00:00.000Z",
+        metadata: {
+          provider: "opencode",
+          sessionId: "ses_dup",
+        },
+      },
+      {
+        id: "opencode-thread-stale",
+        title: "Stale duplicate",
+        modelProvider: "opencode",
+        updatedAt: "2026-06-08T09:00:00.000Z",
+        metadata: {
+          provider: "opencode",
+          sessionId: "ses_dup",
+        },
+      },
+    ],
+  );
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-thread-owned");
+});
+
 test("mergeThreadListResult deduplicates provider-owned thread copies", () => {
   const result = mergeThreadListResult(
     {
@@ -2747,11 +2794,11 @@ test("thread/list coalesces concurrent OpenCode listThreads calls per provider",
 
   const first = listProviderThreadsForThreadList([provider], {});
   const second = listProviderThreadsForThreadList([provider], {});
-  const [firstRows, secondRows] = await Promise.all([first, second]);
+  const [firstResult, secondResult] = await Promise.all([first, second]);
 
   assert.equal(listThreadsCalls, 1);
-  assert.equal(firstRows.length, 1);
-  assert.equal(secondRows.length, 1);
+  assert.equal(firstResult.threads.length, 1);
+  assert.equal(secondResult.threads.length, 1);
   resetThreadListInFlightState();
 });
 

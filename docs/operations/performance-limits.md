@@ -19,7 +19,15 @@ Router runs Codex and OpenCode legs in **parallel** (`Promise.all`). Leg telemet
 
 The single OpenCode leg budget races the entire `provider.listThreads()` call. Inside that call, owned-thread wake (`ensureStartedWithCap`, ≤4s) and session discover wake (`ensureStartedWithDiscoverCap`, ≤4s) stack with `listSessions` and SDK validation. Production leg budgets default to **10s** (clamped to **11s** max) so cold discover paths stay under the 12s transport timeout when Codex and OpenCode run in parallel.
 
-On leg budget timeout, the router logs `thread_list_leg_abandoned` and returns the fallback (`{ data: [] }` for that leg). Concurrent polls coalesce per-provider `listThreads` via in-flight dedupe.
+On leg budget timeout, the router logs `thread_list_leg_abandoned` and returns the fallback (`{ data: [] }` for that leg). Concurrent polls coalesce per-provider `listThreads` via in-flight dedupe. OpenCode discovery refresh shares one in-flight mutex inside `refreshDiscoveredSessionsCache`.
+
+### Owned stub validation cache (PR 5)
+
+| Knob | Default | Purpose |
+|------|---------|---------|
+| `REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS` | `60000` | TTL for cached `getSession` / `getMessages(limit:1)` validation results per `sessionId` |
+
+`thread/list` response `meta.materializationBlocked` surfaces rows omitted by the validation cap or anti-ghost policy (bridge log: `opencode_list_threads_filtered.materialization_blocked`).
 
 ## `model/list`
 

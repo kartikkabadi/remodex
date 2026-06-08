@@ -16,6 +16,29 @@ final class OpenCodeDiscoveryParamsTests: XCTestCase {
         XCTAssertTrue(service.openCodeExternalDiscoveryEnabled)
     }
 
+    func testFetchServerThreadsCapturesMaterializationBlockedMeta() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+
+        service.requestTransportOverride = { method, _ in
+            XCTAssertEqual(method, "thread/list")
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "data": .array([]),
+                    "meta": .object([
+                        "materializationBlocked": .integer(2),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        _ = try await service.fetchServerThreads(limit: 25)
+        XCTAssertEqual(service.lastThreadListMaterializationBlocked, 2)
+    }
+
     func testListThreadsSendsDiscoverOpenCodeSessionsByDefault() async throws {
         let service = makeService()
         service.isConnected = true

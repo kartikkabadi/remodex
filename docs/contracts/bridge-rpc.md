@@ -126,9 +126,16 @@ All fields optional. Omit for first page.
       }
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "meta": {
+    "materializationBlocked": 0,
+    "sdkValidations": 2,
+    "sdkValidationsCap": 20
+  }
 }
 ```
+
+**`meta` (OpenCode leg, PR 5):** When the OpenCode provider participates, merged responses may include `meta.materializationBlocked` — count of owned stubs omitted by validation cap or anti-ghost policy. iOS records this in `lastThreadListMaterializationBlocked` and logs when >0. Bridge also logs `opencode_list_threads_filtered.materialization_blocked`.
 
 **Routing behavior:** Merged from Codex `thread/list` + OpenCode `provider.listThreads()`. Provider threads only included on first page (no cursor). Deduplicated by thread ID. Sorted by `updatedAt` descending. Provider-owned threads carry `modelProvider` and `metadata.provider` fields for sidebar badges.
 
@@ -184,6 +191,7 @@ Phased rollout uses dual env feature flags (both default **`0`** on the Mac unti
 | `REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS` | `120000` | Debounce hot-path `project/discover` |
 | `REMODEX_OPENCODE_ENSURE_STARTED_MS` | `4000` | Cap blocking `ensureStarted` on discover path |
 | `REMODEX_LIST_THREADS_VALIDATE_CAP` | `20` | Owned stub validation budget only — **not** shared with discover |
+| `REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS` | `60000` | TTL cache for per-`sessionId` SDK validation on owned stubs |
 
 **Wall-clock SLOs** (iOS foreground poll every **10s**; secure transport per-message timeout **12s**):
 
