@@ -8,12 +8,12 @@ Provider logos for the runtime catalog and iOS composer/sidebar/menus are provid
 
 **STATUS: PRODUCT_APPROVED (2026-06-08 — direct distribution sign-off; license table retained for audit)**
 
-- clearance received date: TBD (phase1 list prepped PR12; phase2 TBD)
-- reviewers: TBD
+- clearance received date: **2026-06-08** (phase1 + phase2; TestFlight branding approved)
+- reviewers: **user** (product sign-off per A-025 / KD-8)
 - providers phase1 (PR12): anthropic, openai, google, xai, groq, deepseek, mistral, cohere, perplexity, together, amazon, azure, openrouter, github, bedrock
-- providers phase2 (this PR): alibaba, cerebras, cloudflare, databricks, deepinfra, fireworks, gitlab, google-vertex, huggingface, lmstudio, minimax, nebius, novita, ovhcloud, scaleway
+- providers phase2 (PR12): alibaba, cerebras, cloudflare, databricks, deepinfra, fireworks, gitlab, google-vertex, huggingface, lmstudio, minimax, nebius, novita, ovhcloud, scaleway
 
-**Non-negotiable:** Do not merge any (new) assets without updating this file with actual "clearance received date: YYYY-MM-DD, reviewer: <legal>, providers: list". Bridge catalog now wires `logoAssetId` for all 30 committed external providers (WP-09 / batch 5). SF fallback path (RP-BRAND-5) remains for providers without committed assets.
+**Non-negotiable:** Do not merge any (new) assets without updating this file with actual "clearance received date: YYYY-MM-DD, reviewer: <legal>, providers: list". Bridge catalog wires `logoAssetId` for all 30 committed external providers (WP-09). iOS `ProviderLogoView` resolves committed `Assets.xcassets` imagesets via catalog `logoAssetId` first, then `Resources/ProviderLogos/provider-logo-manifest.json` for bootstrap/offline parity. **Emergency SF Symbol fallback (RP-BRAND-5) is documented in this file only** — not planned TestFlight UI; see §Emergency SF Symbol Fallback below.
 
 Sources for SVGs (Phase 1 + Phase 2):
 - Primarily @lobehub/icons-static-svg (stylized LLM brand icons, public CDN usage; https://github.com/lobehub/lobe-icons ; chosen as many core AI providers like OpenAI/Anthropic are absent from Simple Icons due to trademark policies in their library).
@@ -121,6 +121,40 @@ Same properties/format as phase1. All 30 external providers are PRODUCT_APPROVED
 
 Re-verified pr-12 (phase1) assets + current doc + 4 originals present and unchanged (ls + cat Contents + 19->34 count).
 
+## iOS Logo Resolution (PR 12 / TestFlight)
+
+**Implementation:** `CodexMobile/CodexMobile/Views/Provider/ProviderLogoView.swift`  
+**Local manifest:** `CodexMobile/CodexMobile/Resources/ProviderLogos/provider-logo-manifest.json`  
+**Asset bundles:** `CodexMobile/CodexMobile/Assets.xcassets/provider-*-logo.imageset` (34 total)
+
+Resolution order (fast path first):
+
+1. **Catalog `logoAssetId`** — from `runtime/catalog.opencode.providers[]` (bridge `buildProviderLogoCatalog` / BRAND-1). Authoritative when catalog is loaded.
+2. **Committed manifest** — `provider-logo-manifest.json` maps provider id (and upstream aliases such as `amazon-bedrock` → `bedrock`) to `provider-{logoProviderId}-logo` without waiting for catalog. Covers all 30 external + 4 core providers.
+3. **Emergency SF Symbol fallback** — only when steps 1–2 return no asset (unknown/long-tail provider). See §Emergency SF Symbol Fallback.
+
+`RuntimeProviderLogo` / `RuntimeProviderLogoView` remain as typealiases for existing composer, sidebar, settings, and UIKit menu call sites.
+
+## Emergency SF Symbol Fallback (RP-BRAND-5)
+
+**Policy (KD-8):** TestFlight and production beta **must show committed branded assets** for all 30 approved external providers. SF Symbols are **emergency-only rollback**, not the planned beta experience.
+
+**When it triggers:** Provider id is absent from both catalog `logoAssetId` and the committed manifest (e.g. new upstream provider before assets ship, or asset accidentally removed from bundle).
+
+**Symbols used (iOS `ProviderLogo.emergencySFSymbolName`):**
+
+| Provider (normalized) | SF Symbol |
+|-----------------------|-----------|
+| openai                | cloud     |
+| anthropic             | cpu       |
+| google, gemini        | globe     |
+| groq                  | network   |
+| all others            | globe     |
+
+**Rollback procedure (emergency):** If a committed asset must be removed from the app bundle before replacement ships, revert the offending `provider-*-logo.imageset` and remove its row from `provider-logo-manifest.json` + bridge `COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS`. Affected rows will fall back to SF Symbols until assets are restored. Do **not** ship TestFlight builds that intentionally rely on SF fallback for the 30 approved providers.
+
+**Observability:** Track catalog providers with `logoAssetId` vs manifest coverage; alert when branding coverage drops below 80% (see `observability.md`).
+
 ## Full 30 List (Phase1 + Phase2) + Core
 
 External (30): anthropic, openai, google, xai, groq, deepseek, mistral, cohere, perplexity, together, amazon, azure, openrouter, github, bedrock, alibaba, cerebras, cloudflare, databricks, deepinfra, fireworks, gitlab, google-vertex, huggingface, lmstudio, minimax, nebius, novita, ovhcloud, scaleway.
@@ -133,7 +167,7 @@ Core (always, no external TM): codex, opencode, opencode-go, opencode-zen.
 - [ ] SVGs are from Simple Icons MIT / lobe-icons public or equivalent (documented source + no raw TM w/o clearance)
 - [ ] Visual review: composer bar, sidebar badges, UIKit menus, settings providers list, light + dark + high contrast, tinting works (no color bleed) -- (assets only; full render in BRAND-2)
 - [ ] iOS build succeeds (`xcodebuild ... build` reports SUCCEEDED); asset catalog clean for new 15; no behavior change to Codex path
-- [ ] No fake-enabled UI; catalog (parallel/prior PR) will drive; SF Symbols fallback handles uncleared
+- [ ] No fake-enabled UI; catalog + manifest drive committed assets; emergency SF fallback only for unknown providers (see §Emergency SF Symbol Fallback)
 - [ ] docs/operations/provider-branding.md has the BLOCKED clearance block + full table + quarterly audit + runbook refs + this checklist + rollback note + full 30 list
 - [ ] PR description includes this checklist + "legal blocker per design doc; phase2 pending clearance; assets prepped, doc updated with table+audit+runbook"
 - [ ] Commit is conventional `feat(assets,docs): RP-BRAND-4 Phase 2 + RP-BRAND-6 (15 more + runbook + audit)`
@@ -176,7 +210,7 @@ Ops runbook refs: cross-reference docs/operations/opencode-ipad-repro-runbook.md
 - Design doc (private/tmp/grok-design-doc-bbe8e09d.md): RP-BRAND-4, RP-BRAND-6, BRAND plan, legal + Key Decisions, PR15, re-verify pr-12 + 4 originals.
 - AGENTS.md: capability-driven, no assets w/o clearance.
 - docs/design/master-opencode-integration.md (branding sections).
-- iOS: RuntimeProviderLogo.swift (current 4; catalog driven in RP-BRAND-2).
+- iOS: ProviderLogoView.swift + Resources/ProviderLogos/provider-logo-manifest.json (PR 12; catalog + manifest; emergency SF in this doc only).
 - Bridge: opencode-provider-inventory.js (resolveLogoProviderId), runtime catalog (BRAND-1).
 - This PR: 15 phase2 assets + full doc update (table + audit + refs).
 

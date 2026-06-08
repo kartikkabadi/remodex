@@ -187,7 +187,7 @@ extension CodexService {
     }
 
     /// Catalog-driven providers for logo resolution (id, name, logoAssetId? from BRAND-1).
-    /// Used by catalog resolver stub in RuntimeProviderLogo (SF fallback when no logoAssetId).
+    /// Used by ProviderLogoView catalog resolver; see provider-branding.md for emergency SF fallback.
     var openCodeCatalogProviders: [OpenCodeCatalogProvider] {
         openCodeRuntimeCatalogEntry?.opencode?.providers ?? []
     }

@@ -97,7 +97,7 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
         XCTAssertEqual(details.providers?.last?.logoAssetId, "provider-opencode-go-logo")
     }
 
-    func testRuntimeProviderLogoCatalogResolverKnownIdsAndFallback() {
+    func testProviderLogoCatalogResolverKnownIdsAndFallback() {
         let catalog: [OpenCodeCatalogProvider] = [
             OpenCodeCatalogProvider(id: "opencode-go", name: "Go", logoAssetId: "provider-opencode-go-logo"),
             OpenCodeCatalogProvider(id: "anthropic", name: "Anthropic", logoAssetId: "provider-anthropic-logo"),
@@ -106,36 +106,39 @@ final class OpenCodeProviderInventoryTests: XCTestCase {
 
         // catalog provides logoAssetId -> use it (drives asset render for cleared)
         XCTAssertEqual(
-            RuntimeProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog),
+            ProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog),
             "provider-opencode-go-logo"
         )
         XCTAssertEqual(
-            RuntimeProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog), // also via backcompat path
+            RuntimeProviderLogo.assetName(for: "opencode-go", catalogProviders: catalog),
             "provider-opencode-go-logo"
         )
 
         // catalog provides logoAssetId for cleared providers
         XCTAssertEqual(
-            RuntimeProviderLogo.assetName(for: "anthropic", catalogProviders: catalog),
+            ProviderLogo.assetName(for: "anthropic", catalogProviders: catalog),
             "provider-anthropic-logo"
         )
         XCTAssertEqual(
-            RuntimeProviderLogo.assetName(for: "openai", catalogProviders: catalog),
+            ProviderLogo.assetName(for: "openai", catalogProviders: catalog),
             "provider-openai-logo"
         )
 
-        // no catalog match, falls back to hardcoded assets for the 4
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "codex", catalogProviders: []), "provider-codex-logo")
-        XCTAssertEqual(RuntimeProviderLogo.assetName(for: "opencode", catalogProviders: catalog), "provider-opencode-logo")
+        // committed manifest resolves without catalog (TestFlight branding path)
+        XCTAssertEqual(ProviderLogo.assetName(for: "codex", catalogProviders: []), "provider-codex-logo")
+        XCTAssertEqual(ProviderLogo.assetName(for: "mistral", catalogProviders: []), "provider-mistral-logo")
+        XCTAssertEqual(ProviderLogo.assetName(for: "amazon-bedrock", catalogProviders: []), "provider-bedrock-logo")
+        XCTAssertEqual(ProviderLogo.assetName(for: "github-copilot", catalogProviders: []), "provider-github-logo")
+        XCTAssertEqual(ProviderLogo.assetName(for: "opencode", catalogProviders: []), "provider-opencode-logo")
 
-        // unknown provider -> nil (SF fallback path)
-        XCTAssertNil(RuntimeProviderLogo.assetName(for: "some-long-tail", catalogProviders: catalog))
+        // unknown provider -> nil (emergency SF fallback path; see provider-branding.md)
+        XCTAssertNil(ProviderLogo.assetName(for: "some-long-tail", catalogProviders: catalog))
 
-        // SF symbol names (examples per plan)
-        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "openai"), "cloud")
-        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "anthropic"), "cpu")
-        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "google"), "globe")
-        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "groq"), "network")
-        XCTAssertEqual(RuntimeProviderLogo.sfSymbolName(for: "unknown-foo"), "globe")
+        // Emergency SF symbol names (documented in provider-branding.md only)
+        XCTAssertEqual(ProviderLogo.emergencySFSymbolName(for: "openai"), "cloud")
+        XCTAssertEqual(ProviderLogo.sfSymbolName(for: "anthropic"), "cpu")
+        XCTAssertEqual(ProviderLogo.emergencySFSymbolName(for: "google"), "globe")
+        XCTAssertEqual(ProviderLogo.emergencySFSymbolName(for: "groq"), "network")
+        XCTAssertEqual(ProviderLogo.emergencySFSymbolName(for: "unknown-foo"), "globe")
     }
 }
