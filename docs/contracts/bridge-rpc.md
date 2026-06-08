@@ -132,6 +132,74 @@ All fields optional. Omit for first page.
 
 **Routing behavior:** Merged from Codex `thread/list` + OpenCode `provider.listThreads()`. Provider threads only included on first page (no cursor). Deduplicated by thread ID. Sorted by `updatedAt` descending. Provider-owned threads carry `modelProvider` and `metadata.provider` fields for sidebar badges.
 
+#### Class (e) externally discovered OpenCode sessions
+
+When `REMODEX_OPENCODE_DISCOVER_SESSIONS=1`, the bridge calls SDK `session.list` (metadata-only; no `getMessages` on the hot path) and merges **class (e)** rows into the OpenCode leg of `thread/list`:
+
+| Property | Value |
+|----------|-------|
+| Thread ID | `opencode-session-{sessionId}` (deterministic) |
+| Ownership | **None** until explicit user open |
+| `metadata.discoveredExternally` | `true` |
+| `metadata.sessionId` | serve-native session ID |
+| `modelProvider` | `opencode` |
+| `cwd` | `session.location.directory` when present |
+| Archived | **Excluded** when `time.archived` is set |
+| Child sessions | **Excluded** when `parentID` is set |
+| Inclusion signal | Non-empty `title` OR `time.updated` OR `time.created` |
+| List-time dedup | Omit stub when the same `sessionId` is already owned under `opencode-thread-*` |
+
+**Adopt boundary (IQ-1):** `thread/read` and `thread/resume` share the same OpenCode handler and call `adoptDiscoveredSession()` **only** on explicit user open. `turn/start` and `requireThread` **never** adopt — pre-adopt `turn/start` returns `thread_not_found`. iOS background sync must skip `discoveredExternally` rows (see `CodexService+Sync.swift` §6.5 guard).
+
+**Example class (e) row:**
+```json
+{
+  "id": "opencode-session-ses_mac_cli_01",
+  "title": "Refactor auth module",
+  "name": "Refactor auth module",
+  "model": "openai/gpt-5.5",
+  "modelProvider": "opencode",
+  "provider": "opencode",
+  "cwd": "/Users/me/project",
+  "createdAt": "2026-06-08T10:00:00.000Z",
+  "updatedAt": "2026-06-08T10:05:00.000Z",
+  "metadata": {
+    "provider": "opencode",
+    "discoveredExternally": true,
+    "sessionId": "ses_mac_cli_01"
+  }
+}
+```
+
+#### `thread/list` discovery flags and SLOs
+
+Phased rollout uses dual feature flags (both default **`0`** until device matrix O18–O20 passes):
+
+| Env knob | Default | Purpose |
+|----------|---------|---------|
+| `REMODEX_OPENCODE_DISCOVER_SESSIONS` | `0` → `1` to enable | Merge class (e) rows from SDK `session.list` on each `thread/list` |
+| `REMODEX_OPENCODE_DISCOVER_PROJECTS` | `0` → `1` to enable | Fire-and-forget `project/discover` on `thread/list` (debounced) |
+| `REMODEX_LIST_THREADS_DISCOVER_CAP` | `30` | Max discovered session rows per poll (after filter/sort) |
+| `REMODEX_OPENCODE_DISCOVER_TTL_MS` | `60000` | TTL cache for discovered session metadata |
+| `REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS` | `120000` | Debounce hot-path `project/discover` |
+| `REMODEX_OPENCODE_ENSURE_STARTED_MS` | `4000` | Cap blocking `ensureStarted` on discover path |
+| `REMODEX_LIST_THREADS_VALIDATE_CAP` | `20` | Owned stub validation budget only — **not** shared with discover |
+
+**Wall-clock SLOs** (iOS foreground poll every **10s**; secure transport per-message timeout **12s**):
+
+| Metric | Budget | Notes |
+|--------|--------|-------|
+| `thread/list` p95 (discover flags on, cache hit) | **< 3s** | Steady-state poll |
+| `thread/list` p95 (discover flags on, cache miss) | **< 8s** | O18 contract case; 4s headroom under 12s timeout |
+| `thread/list` p99 (any) | **< 11s** | Must not exceed transport timeout |
+| `ensureStarted` on discover path | **< 4s** | On timeout: serve stale discovery cache + schedule async refresh |
+
+Router emits `thread_list_wall_ms` histogram logs. When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
+
+**Cold-serve / first-poll:** If `ensureStarted` exceeds `REMODEX_OPENCODE_ENSURE_STARTED_MS`, return immediately with last-known discovered rows (TTL may be expired) + owned threads; log `discover_refresh_async`. O18 “≤10s visible” accepts **second poll** on cold serve; first poll must not block >12s.
+
+**Codex regression:** `REMODEX_DISABLE_OPENCODE=1` omits OpenCode provider leg entirely — no session discover, no hot-path project discover.
+
 ### thread/start
 
 **Routing:** `router` — dispatched by `modelProvider` field
@@ -691,10 +759,60 @@ These methods are handled by bridge.js handlers and never reach any agent:
 | `desktop/preferences/read` | `desktop-handler.js` | Read bridge prefs |
 | `voice/transcribe` | `voice-handler.js` | Transcribe audio |
 | `session/getUsageStats` | `opencode-session-usage-handler.js` | OpenCode session token usage (owned threads only) |
-| `project/discover` | `opencode-project-discover-handler.js` | Discover OpenCode projects into registry |
+| `project/discover` | `opencode-project-discover-handler.js` | Discover OpenCode projects into registry (on-demand RPC + hot-path when `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`) |
 | `notifications/push/register` | `notifications-handler.js` | Register push token |
 | `account/status/read` | `bridge.js` (bridge-managed) | Auth status snapshot |
 | `initialize` | `bridge.js` (bridge-managed) | Handshake + version check |
+
+### project/discover
+
+**Routing:** `bridge-local` — `opencode-project-discover-handler.js` (cascade position 6)
+
+**Purpose:** Sync OpenCode `project.list` workspaces into the durable file registry at `~/.codex/remodex/known-projects.json`. Callable on-demand from iOS or invoked fire-and-forget on `thread/list` when `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` (debounced TTL 120s; does not block merge response).
+
+**Params:**
+```json
+{
+  "directory": "/optional/path/to/scope"
+}
+```
+`directory` and `cwd` are aliases. When omitted, discovers all projects visible to the bridge's `opencode serve` instance. When present, `directory` is validated against the home-root allowlist (same policy as `project/listDirectory`) before any SDK call.
+
+**Result (success):**
+```json
+{
+  "projects": [
+    {
+      "id": "proj_abc",
+      "path": "/Users/me/my-app",
+      "name": "my-app"
+    }
+  ],
+  "source": "opencode",
+  "count": 1
+}
+```
+
+**Result (OpenCode disabled):**
+```json
+{
+  "projects": [],
+  "source": "opencode",
+  "disabled": true
+}
+```
+
+**Routing behavior:** Calls `opencodeProvider.discoverProjects()`. Allowlisted paths are written via `projectRegistry.rememberProjectPath` (`source: opencode-project-discover`). iOS `project/knownProjects` reads the same file registry (PR-1). Hot-path discover on `thread/list` logs `opencode_discover_on_list` and respects `REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS`.
+
+**Errors:**
+
+| errorCode | When |
+|-----------|------|
+| `opencode_unavailable` | OpenCode provider not registered or `discoverProjects` missing |
+| `path_not_allowed` | `directory` outside home-root allowlist |
+| `project_discover_failed` | Generic SDK/registry failure |
+
+Skipped when `REMODEX_DISABLE_OPENCODE=1`.
 
 ## Error Response Shape
 

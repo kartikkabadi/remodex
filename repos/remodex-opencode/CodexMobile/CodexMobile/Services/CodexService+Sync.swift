@@ -210,8 +210,21 @@ extension CodexService {
         }
     }
 
+    func shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: String) -> Bool {
+        if let thread = thread(for: threadId) {
+            return thread.isDiscoveredExternalOpenCodeThread
+        }
+
+        return threadId.hasPrefix("opencode-session-")
+    }
+
     func syncThreadHistory(threadId: String, force: Bool = false) async {
         guard isConnected, isInitialized else {
+            return
+        }
+
+        if shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: threadId) {
+            debugSyncLog("sync skip discovered external thread=\(threadId)")
             return
         }
 
@@ -815,6 +828,15 @@ extension CodexService {
             )
         }
 
+        if shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: normalizedThreadID) {
+            debugSyncLog("catch-up skip discovered external thread=\(normalizedThreadID)")
+            return RunningThreadCatchupOutcome(
+                didRefreshTurnState: didRefreshTurnState,
+                isRunning: false,
+                didRunForcedResume: false
+            )
+        }
+
         let refreshGeneration = currentPerThreadRefreshGeneration(for: normalizedThreadID)
         if let existingTask = runningThreadCatchupTaskByThreadID[normalizedThreadID] {
             if shouldForceResume {
@@ -994,6 +1016,11 @@ extension CodexService {
     // Polls the currently displayed thread even while it is running so missed socket events can recover.
     // If the live snapshot fails, fall back to a history refresh instead of trusting stale running state.
     func syncActiveThreadState(threadId: String) async {
+        if shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: threadId) {
+            debugSyncLog("active-thread sync skip discovered external thread=\(threadId)")
+            return
+        }
+
         var wasRunning = threadHasActiveOrRunningTurn(threadId)
         var didRunMirroredCatchup = false
         let shouldPreferDeferredClosedHydration = shouldDeferHeavyDisplayHydration(threadId: threadId)
@@ -1062,6 +1089,7 @@ extension CodexService {
                 threadId != activeThreadId
                     && availableThreadIDs.contains(threadId)
                     && runningThreadIDs.contains(threadId)
+                    && !shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: threadId)
             }
             .prefix(limit)
 

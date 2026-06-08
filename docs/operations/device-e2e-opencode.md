@@ -28,6 +28,8 @@ Before Kartik runs steps O0–O17 on device:
 | *(unset)* `REMODEX_DISABLE_OPENCODE` | Default — OpenCode enabled (step O1) |
 | `REMODEX_OPENCODE_HANDOFF=1` | Mac bridge: **O13/O16** RPC QA anytime; **O12/O14** UI/TUI after PR8 flip; required on operator Macs once handoff is promoted |
 | `REMODEX_DISABLE_OPENCODE=1` | Codex regression only (step O17) |
+| `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` | Mac→iPhone external session parity (steps **O18**) |
+| `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` | Hot-path OpenCode project registry sync (steps **O19**) |
 
 **Start bridge (from remodex-opencode repo):**
 
@@ -91,6 +93,27 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 |------|--------|----------------|
 | O17 | Codex-only bridge | `REMODEX_DISABLE_OPENCODE=1` — existing Codex thread flow unchanged; OpenCode unavailable banner if user had OpenCode threads |
 
+## External discovery parity (PR-3 / PR-4 / PR-6)
+
+**Prerequisites:** `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` and `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` on Mac bridge. Do **not** set `REMODEX_DISABLE_OPENCODE=1`.
+
+| Step | Check | Pass criterion |
+|------|--------|----------------|
+| **O18** | Mac-started OpenCode session on iPhone | On Mac, start a session via `opencode` CLI/TUI in a known project folder. Within **one sync cycle** (≤10s warm path; **second poll** acceptable on cold `opencode serve` wake if first poll returns stale cache without blocking >12s), iPhone sidebar shows the session with `modelProvider: opencode`, title, and project group from `cwd`. Row ID pattern `opencode-session-*`. **Do not tap yet** — verify iOS does not auto-adopt (no composer history, no `turn/start` until explicit open). |
+| **O18b** | Adopt-on-open | Tap the discovered row. `thread/resume` succeeds; history loads; composer enabled. Send a turn — succeeds (proves adopt completed). Second open is idempotent. |
+| **O18c** | Pre-adopt turn blocked | *(Optional negative)* Attempt `turn/start` via debug RPC before tap — expect `thread_not_found` (proves no adopt in `requireThread`). |
+| **O19** | OpenCode projects in picker | Mac has OpenCode workspaces not yet in `known-projects.json`. Within **two** `thread/list` cycles (first may trigger debounced discover; TTL 120s), iPhone project picker / `project/knownProjects` shows the folder. Registry file `~/.codex/remodex/known-projects.json` mode `600`. |
+| **O20** | Discovery flags off regression | Unset both `REMODEX_OPENCODE_DISCOVER_SESSIONS` and `REMODEX_OPENCODE_DISCOVER_PROJECTS` (or set `0`). Restart bridge. Mac-started sessions **not** listed; picker unchanged from pre-discover baseline. `REMODEX_DISABLE_OPENCODE=1` still yields Codex-only (O17). |
+
+**O18 cold vs warm notes:**
+
+| Path | Expected |
+|------|----------|
+| Warm (`opencode serve` already running) | Session visible on first poll ≤10s |
+| Cold (serve idle >10 min) | First poll may return owned threads + stale discovery cache; must complete <12s. Second poll ≤10s later shows fresh Mac session. Bridge logs `discover_refresh_async` acceptable. |
+
+**O18 SLO evidence:** Record `thread_list_wall_ms` from bridge logs; p95 cache miss <8s over 5-minute window with both discover flags on.
+
 ## Evidence bar (sign-off)
 
 Record in PR or release notes:
@@ -129,6 +152,10 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | O15 | Codex thread blocks handoff | Error/hidden |
 | O16 | Handoff env-off regression | `opencode_handoff_disabled` |
 | O17 | `REMODEX_DISABLE_OPENCODE=1` Codex regression | Screenshot |
+| **O18** | Mac CLI session listed ≤10s warm | Sidebar screenshot + bridge log `thread_list_wall_ms` |
+| **O18b** | Tap → adopt → turn succeeds | Screen recording |
+| **O19** | Project picker shows Mac OpenCode folder | Picker screenshot + `known-projects.json` mode |
+| **O20** | Discover flags off → no external rows | Screenshot |
 
 **Rollback smoke on device (optional but recommended):**
 
@@ -138,3 +165,5 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | `REMODEX_OPENCODE_SSE_RECONNECT=0` | Turn completes via poll |
 | `REMODEX_OPENCODE_ATTACHMENTS=0` | Image button greyed |
 | `REMODEX_DISABLE_OPENCODE=1` | O17 pass |
+| `REMODEX_OPENCODE_DISCOVER_SESSIONS=0` | O20 pass (no Mac sessions in list) |
+| `REMODEX_OPENCODE_DISCOVER_PROJECTS=0` | O20 pass (no hot-path registry writes) |

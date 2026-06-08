@@ -16,7 +16,7 @@ A multi-repo workspace containing:
 
 ## Absolute Non-Negotiables
 
-1. **Device E2E signed off on `main`** — see `docs/operations/device-e2e-signoff.md`. Core OpenCode + Codex parity on physical iPhone + Mac is complete. Upstream PRs still need explicit release approval; legal clearance still blocks branded assets.
+1. **Device E2E signed off on `main`** — see `docs/operations/device-e2e-signoff.md`. Core OpenCode + Codex parity on physical iPhone + Mac is complete for phone-originated threads and catalog/composer features. **Mac-started OpenCode folder/session sync** (class (e) external discovery) requires `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` and `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` plus device matrix O18–O20 (`docs/operations/device-e2e-opencode.md`) before claiming full Mac→iPhone OpenCode parity. Upstream PRs still need explicit release approval; legal clearance still blocks branded assets.
 2. **Codex regression**: the existing Codex-only path MUST work identically when `REMODEX_DISABLE_OPENCODE=1` (or legacy `REMODEX_ENABLE_OPENCODE=0`). Every Codex feature that works today must keep working. OpenCode is enabled by default otherwise.
 3. **Capability-driven UI**: never show an enabled control that isn't backed by `runtime/catalog` proof. Grey out with reason string for anything unsupported. No fake-enabled picker rows.
 4. **Bridge is the composition root**: all subsystem wiring happens in `bridge.js`. No service locators, no DI containers, no dynamic module loading.

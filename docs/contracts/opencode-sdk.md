@@ -230,6 +230,40 @@ Body: { sessionID: "ses_abc123" }
 
 **Called at:** `turn/interrupt` RPC from iPhone.
 
+### Session Discovery: `client.session.list()`
+
+**Status:** Implemented in `opencode-client.js` (`listSessions`) — used by bridge class (e) external discovery when `REMODEX_OPENCODE_DISCOVER_SESSIONS=1`.
+
+```
+POST /session/list   (SDK v2)
+
+Body: {
+  directory?: string,   // optional scope; omit for global listing
+  limit?: number,
+  cursor?: string,
+  order?: "asc" | "desc"
+}
+
+→ { sessions: SessionV2Info[], nextCursor?: string }
+```
+
+**Bridge usage (`discoverExternalSessions` in `opencode-provider.js`):**
+
+1. Gated by `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` (default `0`).
+2. Global `session.list` with 60s TTL cache (`REMODEX_OPENCODE_DISCOVER_TTL_MS`).
+3. Maps each row via `sessionV2InfoToDiscoveredThread()` in `opencode-models.js`:
+   - Thread ID: `opencode-session-{sessionId}`
+   - Filters: `parentID` set → exclude; `time.archived` set → exclude
+   - Inclusion: non-empty `title` OR `time.updated` OR `time.created`
+   - Sort: `time.updated` desc (fallback `time.created` desc) before `REMODEX_LIST_THREADS_DISCOVER_CAP` slice (default 30)
+4. **Metadata-only** on hot path — no `getMessages(limit:1)` validation for class (e) rows.
+5. List-time dedup: omit stub when `sessionId` already owned under `opencode-thread-*`.
+6. Cold serve: `ensureStarted` capped at `REMODEX_OPENCODE_ENSURE_STARTED_MS` (4s); on timeout serve stale cache + async refresh (`discover_refresh_async`).
+
+**Adopt:** Listed rows have no ownership. `adoptDiscoveredSession()` runs **only** from `threadRead` (`thread/read` and `thread/resume` share this handler). `turn/start` requires prior adopt.
+
+**Not called from iOS directly** — discovery is bridge-side on `thread/list` per IQ-2.
+
 ### Message History: `client.session.messages()`
 
 ```

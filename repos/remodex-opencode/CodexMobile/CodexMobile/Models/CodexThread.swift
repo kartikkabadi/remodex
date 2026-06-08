@@ -400,6 +400,20 @@ extension CodexThread {
         return nil
     }
 
+    // Class (e) externally discovered OpenCode sessions are list-visible but not adopted
+    // until the user explicitly opens the chat (thread/read or thread/resume).
+    var isDiscoveredExternalOpenCodeThread: Bool {
+        if metadata?["discoveredExternally"]?.boolValue == true {
+            return true
+        }
+
+        guard CodexModelOption.normalizedProvider(modelProvider) == "opencode" else {
+            return false
+        }
+
+        return id.hasPrefix("opencode-session-")
+    }
+
     // Normalized absolute project path used for stable grouping.
     var normalizedProjectPath: String? {
         Self.normalizeProjectPath(cwd)
