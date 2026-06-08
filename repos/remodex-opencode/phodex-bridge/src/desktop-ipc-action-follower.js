@@ -39,6 +39,7 @@ const APPROVAL_DECISIONS = new Set(["accept", "acceptForSession", "decline", "ca
 function createDesktopIpcActionFollower({
   sendApplicationResponse,
   readConversationState = null,
+  getCodexLaunchState = null,
   logPrefix = "[remodex]",
   socketPath = resolveDefaultIpcSocketPath(),
   netModule = net,
@@ -71,6 +72,10 @@ function createDesktopIpcActionFollower({
 
     const method = readString(message?.method);
     if (!DESKTOP_RESUME_METHODS.has(method)) {
+      return false;
+    }
+
+    if (!isCodexDesktopFollowerAvailable(getCodexLaunchState)) {
       return false;
     }
 
@@ -837,6 +842,10 @@ function safeParseJSON(value) {
   } catch {
     return null;
   }
+}
+
+function isCodexDesktopFollowerAvailable(getCodexLaunchState) {
+  return typeof getCodexLaunchState !== "function" || getCodexLaunchState() === "connected";
 }
 
 module.exports = {

@@ -72,6 +72,11 @@ const {
   stripRuntimeProviderFieldsForCodex,
 } = require("./runtime-provider-router");
 const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
+const {
+  formatRuntimePreflightFailureMessage,
+  opencodeCarriesBridge,
+  resolveAvailableRuntimes,
+} = require("./runtime-detection");
 const { createProjectRegistry } = require("./project-registry");
 const { createThreadOwnershipStore } = require("./thread-ownership-store");
 const { readStringOrNull, resolvedParam } = require("./normalize");
@@ -118,6 +123,22 @@ function startBridge({
 } = {}) {
   const config = explicitConfig || readBridgeConfig();
   config.keepMacAwakeEnabled = config.keepMacAwakeEnabled === true;
+  const availableRuntimes = resolveAvailableRuntimes(process.env, {
+    appPath: config.codexAppPath,
+    codexEndpoint: config.codexEndpoint,
+  });
+  if (availableRuntimes.mode === "none") {
+    console.error(`[remodex] ${formatRuntimePreflightFailureMessage(availableRuntimes)}`);
+    process.exit(1);
+  }
+  console.log(
+    JSON.stringify({
+      event: "bridge_runtime_preflight",
+      mode: availableRuntimes.mode,
+      codexAvailable: availableRuntimes.codexAvailable,
+      opencodeAvailable: availableRuntimes.opencodeAvailable,
+    }),
+  );
   const bridgeWakeAssertion = createMacOSBridgeWakeAssertion({
     enabled: config.keepMacAwakeEnabled,
   });
@@ -180,7 +201,11 @@ function startBridge({
   let relayWatchdogTimer = null;
   let lastRelayActivityAt = 0;
   let lastConnectionStatus = null;
-  let codexLaunchState = config.codexEndpoint ? "connected" : "starting";
+  let codexLaunchState = config.codexEndpoint
+    ? "connected"
+    : availableRuntimes.codexAvailable
+      ? "starting"
+      : "degraded";
   let codexHandshakeState = config.codexEndpoint ? "warm" : "cold";
   const forwardedInitializeRequestIds = new Set();
   const bridgeManagedCodexRequestWaiters = new Map();
@@ -231,11 +256,13 @@ function startBridge({
   const rolloutLiveMirror = !config.codexEndpoint
     ? createRolloutLiveMirrorController({
         sendApplicationResponse,
+        getCodexLaunchState: () => codexLaunchState,
       })
     : null;
   const desktopIpcActionFollower = !config.codexEndpoint
     ? createDesktopIpcActionFollower({
         sendApplicationResponse,
+        getCodexLaunchState: () => codexLaunchState,
         readConversationState: async (threadId) =>
           seedConversationStateFromThreadRead(await sendCodexRequest("thread/read", { threadId })),
         socketPath: config.desktopIpcSocketPath || undefined,
@@ -250,6 +277,92 @@ function startBridge({
     appPath: config.codexAppPath,
     logPrefix: "[remodex]",
   });
+
+  codex.onError((error) => {
+    const openCodeCarriesBridge = opencodeCarriesBridge(availableRuntimes);
+    codexLaunchState = openCodeCarriesBridge ? "degraded" : "error";
+    publishBridgeStatus({
+      state: openCodeCarriesBridge ? "running" : "error",
+      connectionStatus: openCodeCarriesBridge ? lastConnectionStatus || "connected" : "error",
+      pid: process.pid,
+      lastError: error.message,
+    });
+    if (config.codexEndpoint) {
+      console.error(`[remodex] Failed to connect to Codex endpoint: ${config.codexEndpoint}`);
+    } else {
+      console.error("[remodex] Failed to start `codex app-server`.");
+      console.error(`[remodex] Launch command: ${codex.describe()}`);
+      if (openCodeCarriesBridge) {
+        console.warn(
+          "[remodex] Codex is unavailable; continuing in degraded mode because OpenCode is available.",
+        );
+      } else {
+        console.error(
+          "[remodex] Make sure the Codex CLI is installed, authenticated, and launchable on this OS.",
+        );
+      }
+    }
+    console.error(error.message);
+    if (!openCodeCarriesBridge) {
+      process.exit(1);
+    }
+  });
+  // Marks the local Codex runtime as launchable before relay/network recovery updates.
+  codex.onStarted(() => {
+    codexLaunchState = "connected";
+    const lastPublishedBridgeStatus = bridgeStatusPublisher.latest();
+    if (!lastPublishedBridgeStatus) {
+      return;
+    }
+
+    publishBridgeStatus(lastPublishedBridgeStatus);
+  });
+  codex.onClose(() => {
+    const wasShuttingDown = isShuttingDown;
+    const openCodeCarriesBridge = !wasShuttingDown && opencodeCarriesBridge(availableRuntimes);
+    if (openCodeCarriesBridge) {
+      codexLaunchState = "degraded";
+      const lastError = "Codex transport closed unexpectedly.";
+      publishBridgeStatus({
+        state: "running",
+        connectionStatus: lastConnectionStatus || "connected",
+        pid: process.pid,
+        lastError,
+      });
+      console.warn(`[remodex] ${lastError} Continuing in degraded mode because OpenCode is available.`);
+      failBridgeManagedCodexRequests(
+        new Error("Codex transport closed before the bridge request completed."),
+      );
+      forwardedRequestMethodsById.clear();
+      desktopRefresher.handleTransportReset();
+      return;
+    }
+
+    clearRelayWatchdog();
+    bridgeStatusPublisher.stopHeartbeat();
+    logConnectionStatus("disconnected");
+    const lastError = wasShuttingDown ? "" : "Codex transport closed unexpectedly.";
+    publishBridgeStatus({
+      state: wasShuttingDown ? "stopped" : "error",
+      connectionStatus: "disconnected",
+      pid: process.pid,
+      lastError,
+    });
+    if (!wasShuttingDown) {
+      console.error(`[remodex] ${lastError}`);
+      process.exitCode = 1;
+    }
+    prepareBridgeShutdown();
+    desktopRefresher.handleTransportReset();
+    failBridgeManagedCodexRequests(
+      new Error("Codex transport closed before the bridge request completed."),
+    );
+    forwardedRequestMethodsById.clear();
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+      socket.close();
+    }
+  });
+
   const projectRegistry = createProjectRegistry();
   const ownershipStore = createThreadOwnershipStore();
   const runtimeProviderRouter = createRuntimeProviderRouter({
@@ -260,6 +373,7 @@ function startBridge({
     ownershipStore,
     providers: isOpenCodeRuntimeDisabled(process.env) ? [] : undefined,
     logPrefix: "[remodex]",
+    getCodexLaunchState: () => codexLaunchState,
   });
   const voiceHandler = createVoiceHandler({
     sendCodexRequest,
@@ -285,37 +399,6 @@ function startBridge({
     connectionStatus: "starting",
     pid: process.pid,
     lastError: "",
-  });
-
-  codex.onError((error) => {
-    codexLaunchState = "error";
-    publishBridgeStatus({
-      state: "error",
-      connectionStatus: "error",
-      pid: process.pid,
-      lastError: error.message,
-    });
-    if (config.codexEndpoint) {
-      console.error(`[remodex] Failed to connect to Codex endpoint: ${config.codexEndpoint}`);
-    } else {
-      console.error("[remodex] Failed to start `codex app-server`.");
-      console.error(`[remodex] Launch command: ${codex.describe()}`);
-      console.error(
-        "[remodex] Make sure the Codex CLI is installed, authenticated, and launchable on this OS.",
-      );
-    }
-    console.error(error.message);
-    process.exit(1);
-  });
-  // Marks the local Codex runtime as launchable before relay/network recovery updates.
-  codex.onStarted(() => {
-    codexLaunchState = "connected";
-    const lastPublishedBridgeStatus = bridgeStatusPublisher.latest();
-    if (!lastPublishedBridgeStatus) {
-      return;
-    }
-
-    publishBridgeStatus(lastPublishedBridgeStatus);
   });
 
   function clearReconnectTimer() {
@@ -464,6 +547,7 @@ function startBridge({
       logConnectionStatus("connected");
       secureTransport.bindLiveSendWireMessage(sendRelayWireMessage);
       sendRelayRegistrationUpdate(deviceState);
+      publishPairingSessionIfNeeded();
     });
 
     nextSocket.on("message", (data) => {
@@ -521,10 +605,17 @@ function startBridge({
     pairingPayload,
     pairingCode: createShortPairingCode({ length: SHORT_PAIRING_CODE_LENGTH }),
   };
-  onPairingSession?.(pairingSession);
-  if (printPairingQr) {
-    writePairingSession(pairingSession);
-    printQR(pairingSession);
+  let pairingSessionPublished = false;
+  function publishPairingSessionIfNeeded() {
+    if (pairingSessionPublished) {
+      return;
+    }
+    pairingSessionPublished = true;
+    onPairingSession?.(pairingSession);
+    if (printPairingQr) {
+      writePairingSession(pairingSession);
+      printQR(pairingSession);
+    }
   }
   pushServiceClient.logUnavailable();
   connectRelay();
@@ -542,33 +633,6 @@ function startBridge({
       sanitizeRelayBoundCodexMessage(message),
       sendRelayWireMessage,
     );
-  });
-
-  codex.onClose(() => {
-    const wasShuttingDown = isShuttingDown;
-    clearRelayWatchdog();
-    bridgeStatusPublisher.stopHeartbeat();
-    logConnectionStatus("disconnected");
-    const lastError = wasShuttingDown ? "" : "Codex transport closed unexpectedly.";
-    publishBridgeStatus({
-      state: wasShuttingDown ? "stopped" : "error",
-      connectionStatus: "disconnected",
-      pid: process.pid,
-      lastError,
-    });
-    if (!wasShuttingDown) {
-      console.error(`[remodex] ${lastError}`);
-      process.exitCode = 1;
-    }
-    prepareBridgeShutdown();
-    desktopRefresher.handleTransportReset();
-    failBridgeManagedCodexRequests(
-      new Error("Codex transport closed before the bridge request completed."),
-    );
-    forwardedRequestMethodsById.clear();
-    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
   });
 
   process.on("SIGINT", () => shutdown(codex, () => socket, prepareBridgeShutdown));
@@ -652,6 +716,22 @@ function startBridge({
       return;
     }
     if (handleBridgeManagedThreadTurnsListRequest(rawMessage, sendApplicationResponse)) {
+      return;
+    }
+    if (codexLaunchState === "degraded" || codexLaunchState === "error") {
+      const parsed = safeParseJSON(rawMessage);
+      if (parsed?.id != null) {
+        sendApplicationResponse(
+          createJsonRpcErrorResponse(
+            parsed.id,
+            {
+              message: `Codex unavailable (${codexLaunchState})`,
+              errorCode: "codex_unavailable",
+            },
+            "codex_unavailable",
+          ),
+        );
+      }
       return;
     }
     const codexRequest = stripRuntimeProviderFieldsForCodex(
@@ -1382,6 +1462,9 @@ function startBridge({
   // Runs bridge-private JSON-RPC calls against the local app-server so token-bearing responses
   // can power bridge features like transcription without ever reaching the phone.
   function sendCodexRequest(method, params) {
+    if (codexLaunchState === "degraded" || codexLaunchState === "error") {
+      return Promise.reject(new Error(`Codex unavailable (${codexLaunchState})`));
+    }
     const requestId = `bridge-managed-${randomBytes(12).toString("hex")}`;
     const payload = JSON.stringify({
       id: requestId,
