@@ -1745,6 +1745,110 @@ test("outbound buffer drain on reconnect", () => {
   }
 });
 
+test("priority trim uses age-based notify eviction when all entries are protected", () => {
+  const previousCap = process.env.REMODEX_BRIDGE_OUTBOUND_CAP;
+  const previousPriority = process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND;
+  const previousLegacy = process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM;
+  const previousRecentTurns = process.env.REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS;
+  const previousNotifyAge = process.env.REMODEX_BRIDGE_NOTIFY_EVICTION_MAX_AGE_MS;
+  process.env.REMODEX_BRIDGE_OUTBOUND_CAP = "3";
+  process.env.REMODEX_BRIDGE_PRIORITY_OUTBOUND = "1";
+  process.env.REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM = "0";
+  process.env.REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS = "1";
+  process.env.REMODEX_BRIDGE_NOTIFY_EVICTION_MAX_AGE_MS = "0";
+
+  const macIdentity = createOkpKeyPair("ed25519");
+  const phoneIdentity = createOkpKeyPair("ed25519");
+  const phoneEphemeral = createOkpKeyPair("x25519");
+  const secureTransport = createTestBridgeSecureTransport({
+    sessionId: "session-notify-age-eviction",
+    relayUrl: "wss://relay.example/relay",
+    deviceState: {
+      macDeviceId: "mac-notify-age-eviction",
+      macIdentityPrivateKey: macIdentity.privateKey,
+      macIdentityPublicKey: macIdentity.publicKey,
+      trustedPhones: {
+        "phone-notify-age-eviction": phoneIdentity.publicKey,
+      },
+    },
+  });
+
+  const structuredLogs = captureStructuredLogs();
+  try {
+    finishHandshake({
+      secureTransport,
+      sessionId: "session-notify-age-eviction",
+      macDeviceId: "mac-notify-age-eviction",
+      phoneDeviceId: "phone-notify-age-eviction",
+      macIdentity,
+      phoneIdentity,
+      phoneEphemeral,
+      handshakeMode: HANDSHAKE_MODE_TRUSTED_RECONNECT,
+      lastAppliedBridgeOutboundSeq: 0,
+      skipResumeState: true,
+    });
+
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "turn/started",
+        params: { threadId: "thread-live", turnId: "turn-live" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread-live", turnId: "turn-live", delta: "live stream" },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({ method: "thread/status/changed", params: { threadId: "thread-live", status: "running" } }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "permission/request",
+        params: {
+          threadId: "thread-live",
+          turnId: "turn-live",
+          permissionId: "perm-1",
+        },
+      }),
+      () => false
+    );
+    secureTransport.queueOutboundApplicationMessage(
+      JSON.stringify({
+        method: "permission/request",
+        params: {
+          threadId: "thread-live",
+          turnId: "turn-live",
+          permissionId: "perm-2",
+        },
+      }),
+      () => false
+    );
+
+    const trimLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_dropped");
+    const stallLogs = structuredLogs.filter((entry) => entry.event === "bridge_outbound_drop_stalled");
+    assert.ok(trimLogs.length > 0, "expected protected-buffer stall to drop entries");
+    assert.equal(trimLogs[0].reason, "notify_age_eviction");
+    assert.ok(stallLogs.length > 0, "expected stall metric when notify age eviction runs");
+    assert.equal(
+      trimLogs[0].highestPriorityTierDropped,
+      OUTBOUND_PRIORITY.NOTIFY,
+      "expected notify-tier payload to be evicted first"
+    );
+  } finally {
+    structuredLogs.restore();
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_CAP", previousCap);
+    restoreEnvValue("REMODEX_BRIDGE_PRIORITY_OUTBOUND", previousPriority);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_LEGACY_TRIM", previousLegacy);
+    restoreEnvValue("REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS", previousRecentTurns);
+    restoreEnvValue("REMODEX_BRIDGE_NOTIFY_EVICTION_MAX_AGE_MS", previousNotifyAge);
+  }
+});
+
 function restoreEnvValue(name, previousValue) {
   if (previousValue === undefined) {
     delete process.env[name];
