@@ -16,7 +16,9 @@ const {
   normalizeCommandTokenForAllowlist,
   resolveAgentsList,
   resolveSessionIdFromCreateResponse,
+  resolveSessionList,
 } = require("../src/opencode-client");
+const { sessionV2InfoToDiscoveredThread } = require("../src/opencode-models");
 
 const TEST_BASE_URL = "http://127.0.0.1:4291";
 
@@ -46,6 +48,18 @@ function createMockOpencodeClientImpl() {
       session: {
         create: async () => ({ sessionID: "ses_test" }),
         get: async () => ({}),
+        list: async () => ({
+          data: [
+            {
+              id: "ses_external",
+              title: "Mac CLI session",
+              location: { directory: "/Users/me/work/repo" },
+              time: { created: "2026-06-08T10:00:00.000Z", updated: "2026-06-08T11:00:00.000Z" },
+            },
+          ],
+          limit: 50,
+          limited: false,
+        }),
         prompt: async () => ({}),
         command: async () => ({}),
         setConfig: async () => ({}),
@@ -753,4 +767,54 @@ test("buildModelFromAny sets logoProviderId for OpenCode Go upstream", () => {
   );
   assert.equal(goModel.logoProviderId, "opencode-go");
   assert.equal(goModel.upstreamProviderId, "opencode-go");
+});
+
+test("resolveSessionList maps external sessions to discovered thread rows", () => {
+  const result = resolveSessionList({
+    data: [
+      {
+        id: "ses_external",
+        title: "Mac CLI session",
+        location: { directory: "/Users/me/work/repo" },
+        time: { created: "2026-06-08T10:00:00.000Z", updated: "2026-06-08T11:00:00.000Z" },
+      },
+      {
+        id: "ses_child",
+        parentID: "ses_parent",
+        title: "Child",
+        time: { created: "2026-06-08T09:00:00.000Z" },
+      },
+      {
+        id: "ses_archived",
+        title: "Archived",
+        time: { created: "2026-06-08T08:00:00.000Z", archived: true },
+      },
+    ],
+    limit: 50,
+    limited: false,
+  });
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-session-ses_external");
+  assert.equal(result.data[0].cwd, "/Users/me/work/repo");
+  assert.equal(result.data[0].metadata.discoveredExternally, true);
+  assert.equal(result.data[0].metadata.sessionId, "ses_external");
+});
+
+test("sessionV2InfoToDiscoveredThread includes fresh TUI sessions with created time only", () => {
+  const discovered = sessionV2InfoToDiscoveredThread({
+    id: "ses_fresh",
+    location: { directory: "/Users/me/work/fresh" },
+    time: { created: "2026-06-08T12:00:00.000Z" },
+  });
+
+  assert.equal(discovered.id, "opencode-session-ses_fresh");
+  assert.equal(discovered.cwd, "/Users/me/work/fresh");
+});
+
+test("listSessions wraps SDK session.list", async () => {
+  const client = await createTestClient();
+  const result = await client.listSessions({ limit: 10 });
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-session-ses_external");
 });

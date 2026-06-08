@@ -11,7 +11,10 @@ const { mapSdkCommandToBridge } = require("./opencode-command-arguments");
 const {
   OPENCODE_PROVIDER_ID,
   DEFAULT_OPENCODE_MODEL,
+  compareThreadsByUpdatedAt,
   displayNameForOpenCodeModel,
+  publicThread,
+  sessionV2InfoToDiscoveredThread,
 } = require("./opencode-models");
 const { resolveModelCapabilities } = require("./provider-capabilities");
 const { parseOpenCodeModelSlug } = require("./opencode-model-slug");
@@ -218,6 +221,37 @@ async function createOpenCodeClient({
     } catch (error) {
       console.warn(`${logPrefix} OpenCode project.list() failed: ${error.message}`);
       return [];
+    }
+  }
+
+  async function listSessions({ directory, limit, cursor, archived } = {}) {
+    if (typeof client.session?.list !== "function") {
+      return { data: [], limited: false, limit: 0, nextCursor: null };
+    }
+
+    const query = {};
+    const normalizedDirectory = readString(directory);
+    if (normalizedDirectory) {
+      query.directory = normalizedDirectory;
+    }
+    const normalizedLimit = Number(limit);
+    if (Number.isFinite(normalizedLimit) && normalizedLimit > 0) {
+      query.limit = Math.floor(normalizedLimit);
+    }
+    const normalizedCursor = Number(cursor);
+    if (Number.isFinite(normalizedCursor) && normalizedCursor >= 0) {
+      query.cursor = Math.floor(normalizedCursor);
+    }
+    if (archived === true) {
+      query.archived = true;
+    }
+
+    try {
+      const response = await withTimeout(client.session.list(query), REQUEST_TIMEOUT_MS);
+      return resolveSessionList(response);
+    } catch (error) {
+      console.warn(`${logPrefix} OpenCode session.list() failed: ${error.message}`);
+      return { data: [], limited: false, limit: 0, nextCursor: null };
     }
   }
 
@@ -621,6 +655,7 @@ async function createOpenCodeClient({
     createSession,
     getSession,
     listProjects,
+    listSessions,
     prompt,
     abort,
     getMessages,
@@ -1144,6 +1179,30 @@ function resolveProjectList(response) {
   return [];
 }
 
+function resolveSessionList(response) {
+  const rows = [];
+  if (Array.isArray(response)) {
+    rows.push(...response);
+  } else if (Array.isArray(response?.data)) {
+    rows.push(...response.data);
+  } else if (Array.isArray(response?.sessions)) {
+    rows.push(...response.sessions);
+  }
+
+  const discovered = rows
+    .map(sessionV2InfoToDiscoveredThread)
+    .filter(Boolean)
+    .toSorted(compareThreadsByUpdatedAt)
+    .map(publicThread);
+
+  return {
+    data: discovered,
+    limited: Boolean(response?.limited),
+    limit: Number(response?.limit) || discovered.length,
+    nextCursor: response?.cursor ?? response?.nextCursor ?? null,
+  };
+}
+
 function mapOpenCodeProjectRow(project) {
   if (!project || typeof project !== "object") {
     return null;
@@ -1332,4 +1391,5 @@ module.exports = {
   resolveProviderListPayload,
   resolveProviderAuthPayload,
   resolveSessionIdFromCreateResponse,
+  resolveSessionList,
 };

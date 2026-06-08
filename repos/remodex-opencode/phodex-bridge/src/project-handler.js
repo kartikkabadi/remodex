@@ -26,7 +26,7 @@ const ROOTLESS_CHAT_DEDUP_LIMIT = 50;
 
 // ─── ENTRY POINT ─────────────────────────────────────────────
 
-function handleProjectRequest(rawMessage, sendResponse) {
+function handleProjectRequest(rawMessage, sendResponse, options = {}) {
   let parsed;
   try {
     parsed = JSON.parse(rawMessage);
@@ -42,7 +42,7 @@ function handleProjectRequest(rawMessage, sendResponse) {
   const id = parsed.id;
   const params = parsed.params || {};
 
-  handleProjectMethod(method, params)
+  handleProjectMethod(method, params, options)
     .then((result) => {
       sendResponse(JSON.stringify({ id, result }));
     })
@@ -226,14 +226,59 @@ async function projectCreateDirectory(params, options = {}) {
 // `thread/start`. Without an explicit cwd the app-server falls back to its own
 // process working directory (often the user's home), which would otherwise show
 // up in the sidebar as a project named after the user account.
+function resolveFileProjectRegistry(options = {}) {
+  if (options.projectRegistry && typeof options.projectRegistry.listProjects === "function") {
+    return options.projectRegistry;
+  }
+  return null;
+}
+
 function projectKnownProjectsRegistry(options = {}) {
+  const fileRegistry = resolveFileProjectRegistry(options);
+  if (fileRegistry) {
+    return { kind: "file", registry: fileRegistry };
+  }
   if (options.knownProjectsRegistry && typeof options.knownProjectsRegistry.list === "function") {
-    return options.knownProjectsRegistry;
+    return { kind: "memory", registry: options.knownProjectsRegistry };
   }
   if (!projectKnownProjectsRegistry._default) {
     projectKnownProjectsRegistry._default = createKnownProjectsRegistry();
   }
-  return projectKnownProjectsRegistry._default;
+  return { kind: "memory", registry: projectKnownProjectsRegistry._default };
+}
+
+function adaptKnownProjectForRpc(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const projectPath = readString(entry.path);
+  if (!projectPath) {
+    return null;
+  }
+
+  const label =
+    readString(entry.label) ||
+    readString(entry.name) ||
+    path.basename(projectPath);
+  const providerHints = Array.isArray(entry.providerHints)
+    ? entry.providerHints.filter(Boolean)
+    : readString(entry.provider)
+      ? [readString(entry.provider)]
+      : [];
+
+  return {
+    id: readString(entry.id) || projectPath,
+    path: projectPath,
+    label,
+    name: label,
+    source: readString(entry.source) || null,
+    sources: Array.isArray(entry.sources) ? entry.sources.filter(Boolean) : [],
+    providerHints,
+    rememberedAt: readString(entry.firstSeenAt || entry.rememberedAt) || null,
+    lastSeenAt: readString(entry.lastSeenAt) || null,
+    provider: providerHints[0] || readString(entry.provider) || null,
+  };
 }
 
 function createKnownProjectsRegistry() {
@@ -271,15 +316,17 @@ function createKnownProjectsRegistry() {
 }
 
 async function projectKnownProjects(options = {}) {
-  const registry = projectKnownProjectsRegistry(options);
-  const projects = registry.list(DEFAULT_KNOWN_PROJECT_LIMIT).map((entry) => ({
-    path: entry.path,
-    name: entry.name,
-    rememberedAt: entry.rememberedAt,
-    lastSeenAt: entry.lastSeenAt,
-    provider: readString(entry.provider) || null,
-    source: readString(entry.source) || null,
-  }));
+  const registrySource = projectKnownProjectsRegistry(options);
+  const projects =
+    registrySource.kind === "file"
+      ? registrySource.registry
+          .listProjects({ limit: DEFAULT_KNOWN_PROJECT_LIMIT })
+          .map(adaptKnownProjectForRpc)
+          .filter(Boolean)
+      : registrySource.registry
+          .list(DEFAULT_KNOWN_PROJECT_LIMIT)
+          .map(adaptKnownProjectForRpc)
+          .filter(Boolean);
   return { projects };
 }
 
@@ -294,8 +341,20 @@ async function projectRememberKnownProject(params = {}, options = {}) {
     throw projectError("missing_directory", "That project folder does not exist on this Mac.");
   }
 
-  const registry = projectKnownProjectsRegistry(options);
-  const remembered = registry.remember(validation.path, {
+  const fileRegistry = resolveFileProjectRegistry(options);
+  if (fileRegistry && typeof fileRegistry.rememberProjectPath === "function") {
+    const remembered = fileRegistry.rememberProjectPath(validation.path, {
+      label: readString(params.name || params.title),
+      provider: readString(params.provider),
+      source: readString(params.source) || "ios-picker",
+      lastSeenAt: new Date().toISOString(),
+    });
+    const project = adaptKnownProjectForRpc(remembered);
+    return { project };
+  }
+
+  const registrySource = projectKnownProjectsRegistry(options);
+  const remembered = registrySource.registry.remember(validation.path, {
     name: readString(params.name || params.title),
     provider: readString(params.provider),
     source: readString(params.source) || "project/rememberKnownProject",
@@ -303,14 +362,7 @@ async function projectRememberKnownProject(params = {}, options = {}) {
   });
 
   return {
-    project: {
-      path: remembered.path,
-      name: remembered.name,
-      rememberedAt: remembered.rememberedAt,
-      lastSeenAt: remembered.lastSeenAt,
-      provider: readString(remembered.provider) || null,
-      source: readString(remembered.source) || null,
-    },
+    project: adaptKnownProjectForRpc(remembered),
   };
 }
 

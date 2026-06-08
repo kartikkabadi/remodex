@@ -141,6 +141,17 @@ function normalizeOpenCodeModel(value) {
 }
 
 function publicThread(thread) {
+  const metadata = {
+    provider: OPENCODE_PROVIDER_ID,
+    ...(thread.metadata && typeof thread.metadata === "object" ? thread.metadata : {}),
+  };
+  if (thread.discoveredExternally === true) {
+    metadata.discoveredExternally = true;
+  }
+  if (readString(thread.sessionId)) {
+    metadata.sessionId = readString(thread.sessionId);
+  }
+
   return {
     id: thread.id,
     title: thread.title,
@@ -152,7 +163,69 @@ function publicThread(thread) {
     agent: thread.agent || "",
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
-    metadata: { provider: OPENCODE_PROVIDER_ID },
+    metadata,
+  };
+}
+
+function readSessionTimestamp(session, field) {
+  const time = session?.time;
+  if (!time || typeof time !== "object") {
+    return "";
+  }
+  return readString(time[field]);
+}
+
+function sessionHasDiscoverySignal(session) {
+  return Boolean(
+    readString(session?.title) ||
+      readSessionTimestamp(session, "updated") ||
+      readSessionTimestamp(session, "created"),
+  );
+}
+
+function sessionV2InfoToDiscoveredThread(session) {
+  if (!session || typeof session !== "object") {
+    return null;
+  }
+
+  const sessionId = readString(session.id || session.sessionID || session.sessionId);
+  if (!sessionId) {
+    return null;
+  }
+  if (readString(session.parentID)) {
+    return null;
+  }
+  if (session.time?.archived) {
+    return null;
+  }
+  if (!sessionHasDiscoverySignal(session)) {
+    return null;
+  }
+
+  const cwd = readString(
+    session.location?.directory || session.directory || session.cwd,
+  );
+  const createdAt =
+    readSessionTimestamp(session, "created") || new Date().toISOString();
+  const updatedAt = readSessionTimestamp(session, "updated") || createdAt;
+  const threadId = `opencode-session-${sessionId}`;
+
+  return {
+    id: threadId,
+    title: readString(session.title) || "OpenCode chat",
+    cwd: cwd || "",
+    hasProjectCwd: Boolean(cwd),
+    model: normalizeOpenCodeModel(session.model),
+    agent: readString(session.agent) || "build",
+    createdAt,
+    updatedAt,
+    sessionId,
+    discoveredExternally: true,
+    metadata: {
+      provider: OPENCODE_PROVIDER_ID,
+      discoveredExternally: true,
+      sessionId,
+    },
   };
 }
 
@@ -586,6 +659,8 @@ module.exports = {
   normalizeRuntimeProvider,
   parseOpenCodeModelsOutput,
   publicThread,
+  sessionHasDiscoverySignal,
+  sessionV2InfoToDiscoveredThread,
   readModelProvider,
   readThreadId,
   removeUndefinedValues,
