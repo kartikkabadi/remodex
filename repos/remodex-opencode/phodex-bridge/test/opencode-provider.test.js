@@ -2520,6 +2520,51 @@ test("command/execute rejects directory traversal outside home allowlist", async
   );
 });
 
+test("command/execute rejects rehydrated sdk directory when store cwd is empty", async () => {
+  const sessionStore = fakeSessionStore();
+  const ownershipStore = fakeOwnershipStore();
+  sessionStore.set("opencode-thread-rehydrate-bad-cwd", "ses_rehydrate_bad", {
+    cwd: "",
+    model: "openai/gpt-5.5",
+    agent: "build",
+  });
+  ownershipStore.setOwnership("opencode-thread-rehydrate-bad-cwd", "opencode");
+
+  const provider = makeProvider({
+    sessionStore,
+    ownershipStore,
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            get: async () => ({
+              sessionID: "ses_rehydrate_bad",
+              directory: "/etc",
+            }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 1,
+        method: "command/execute",
+        params: {
+          threadId: "opencode-thread-rehydrate-bad-cwd",
+          command: "/skills",
+        },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
 test("command/execute rejects directory symlink that resolves outside home", async () => {
   const homeScratch = fs.mkdtempSync(path.join(os.homedir(), "remodex-cmd-exec-"));
   const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-cmd-outside-"));

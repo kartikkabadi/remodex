@@ -6,6 +6,7 @@
 // Exports: createOpenCodeProvider
 // Depends on: ./opencode-server, ./opencode-client, ./opencode-models, ./provider-capabilities, ./thread-ownership-store
 
+const path = require("path");
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
 const {
@@ -2733,7 +2734,11 @@ function createOpenCodeProvider({
     const explicitDirectory = readString(params.directory || params.cwd);
     const directoryCandidate = explicitDirectory || readString(thread.cwd) || process.cwd();
     let directory = directoryCandidate;
-    if (explicitDirectory || thread.hasProjectCwd) {
+    const skipPathValidation =
+      !explicitDirectory &&
+      !thread.hasProjectCwd &&
+      path.resolve(directoryCandidate) === path.resolve(process.cwd());
+    if (!skipPathValidation) {
       directory = await resolveAllowedDirectory(directoryCandidate);
     }
     const allowedCommands = await listCommands(directory);
