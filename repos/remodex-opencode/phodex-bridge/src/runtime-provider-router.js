@@ -7,6 +7,7 @@
 const { createHash } = require("crypto");
 const os = require("os");
 
+const { resolveOpenCodeHandoffEnabled } = require("./bridge-operator-profile");
 const { readString, resolvedParam } = require("./normalize");
 const { projectDiscoverFromOpenCode } = require("./opencode-project-discover-handler");
 const { createOpenCodeProvider } = require("./opencode-provider");
@@ -1385,8 +1386,7 @@ async function buildCatalogOpenCodeRuntime(providers, env, sendRuntimeMessage = 
       : buildOpenCodeRuntimeStatus({
           enabled: false,
           command: hasCommand,
-          handoffEnvEnabled: readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "1"
-            || readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "true",
+          handoffEnvEnabled: resolveOpenCodeHandoffEnabled(env),
         });
 
   const inventoryBefore = Array.isArray(runtimeStatus?.providerInventory)

@@ -4,6 +4,7 @@
 // Exports: continueOpenCodeHandoff, buildHandoffPayload, isOpenCodeHandoffEnabled, detectOpenCodeApp
 // Depends on: ./normalize, ./opencode-models
 
+const { resolveOpenCodeHandoffEnabled } = require("./bridge-operator-profile");
 const { readString, resolvedParam } = require("./normalize");
 const { OPENCODE_PROVIDER_ID } = require("./opencode-models");
 
@@ -17,8 +18,7 @@ const OPENCODE_BUNDLE_IDS = [
 const OPENCODE_APP_PATH = "/Applications/OpenCode.app";
 
 function isOpenCodeHandoffEnabled(env = process.env) {
-  const value = readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase();
-  return value === "1" || value === "true";
+  return resolveOpenCodeHandoffEnabled(env);
 }
 
 function buildHandoffPayload({

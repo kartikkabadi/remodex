@@ -106,7 +106,17 @@ Optional HTTP endpoints:
 
 The trusted-session resolve endpoint is intended for mobile clients that have already completed the first QR bootstrap. It returns the current live session only after signature, nonce, and freshness checks pass.
 
-Push is disabled by default. Enable it only when you are ready to wire APNs and the bridge-side `REMODEX_PUSH_SERVICE_URL`, for example with `REMODEX_ENABLE_PUSH_SERVICE=true`.
+Push uses staged production defaults:
+
+- **`dev` profile** (`NODE_ENV=development`, `NODE_ENV=test`, or `REMODEX_PROFILE=dev`): opt-in only — set `REMODEX_ENABLE_PUSH_SERVICE=true`.
+- **`managed-relay` profile** (APNs credentials present): push routes **auto-enable** when `REMODEX_APNS_*` is complete. Opt out with `REMODEX_ENABLE_PUSH_SERVICE=false`.
+- **`self-hosted` profile**: dark-launch only — when APNs creds are present the relay logs `would_enable_push=true` but keeps routes disabled until you opt in.
+
+Also wire the bridge-side `REMODEX_PUSH_SERVICE_URL` so the Mac bridge can register devices and notify completions.
+
+WebSocket frames are capped at **4 MiB** (`maxPayload` on the relay `WebSocketServer`). Oversize frames close with code `1009`.
+
+Production/self-host installs bind **`127.0.0.1`** by default (`RELAY_BIND_HOST`). Set `RELAY_BIND_HOST=0.0.0.0` only when you intentionally expose the relay on your LAN.
 
 ## Deploy Notes
 

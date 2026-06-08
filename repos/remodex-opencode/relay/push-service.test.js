@@ -14,6 +14,8 @@ const {
   createPushSessionService,
   createFileBackedPushStateStore,
   resolvePushStateFilePath,
+  isApnsConfiguredFromEnv,
+  resolvePushServiceEnablement,
 } = require("./push-service");
 
 test("push service stores device registration and sends one completion alert", async () => {
@@ -285,4 +287,48 @@ test("push service keeps working when state persistence fails", async () => {
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].deviceToken, "aabbcc");
+});
+
+test("resolvePushServiceEnablement keeps dev profile opt-in", () => {
+  const decision = resolvePushServiceEnablement({
+    NODE_ENV: "development",
+    REMODEX_APNS_TEAM_ID: "TEAM123",
+    REMODEX_APNS_KEY_ID: "KEY123",
+    REMODEX_APNS_BUNDLE_ID: "com.example.app",
+    REMODEX_APNS_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+  });
+
+  assert.equal(decision.enabled, false);
+  assert.equal(decision.wouldEnablePush, true);
+  assert.equal(decision.profile, "dev");
+});
+
+test("resolvePushServiceEnablement auto-enables managed relay when APNs creds are present", () => {
+  const decision = resolvePushServiceEnablement({
+    REMODEX_APNS_TEAM_ID: "TEAM123",
+    REMODEX_APNS_KEY_ID: "KEY123",
+    REMODEX_APNS_BUNDLE_ID: "com.example.app",
+    REMODEX_APNS_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+  });
+
+  assert.equal(decision.enabled, true);
+  assert.equal(decision.wouldEnablePush, true);
+  assert.equal(decision.profile, "managed-relay");
+});
+
+test("resolvePushServiceEnablement honors REMODEX_ENABLE_PUSH_SERVICE=false opt-out", () => {
+  const decision = resolvePushServiceEnablement({
+    REMODEX_ENABLE_PUSH_SERVICE: "false",
+    REMODEX_APNS_TEAM_ID: "TEAM123",
+    REMODEX_APNS_KEY_ID: "KEY123",
+    REMODEX_APNS_BUNDLE_ID: "com.example.app",
+    REMODEX_APNS_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+  });
+
+  assert.equal(decision.enabled, false);
+  assert.equal(decision.wouldEnablePush, true);
+});
+
+test("isApnsConfiguredFromEnv returns false when credentials are incomplete", () => {
+  assert.equal(isApnsConfiguredFromEnv({ REMODEX_APNS_TEAM_ID: "TEAM123" }), false);
 });

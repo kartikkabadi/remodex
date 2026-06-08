@@ -326,6 +326,102 @@ function apnsConfigFromEnv(env) {
   };
 }
 
+function isApnsConfiguredFromEnv(env = process.env) {
+  const config = apnsConfigFromEnv(env);
+  return Boolean(config.teamId && config.keyId && config.bundleId && config.privateKey);
+}
+
+function resolveRelayProfile(env = process.env) {
+  const explicitProfile = readString(env.REMODEX_PROFILE || env.PHODEX_PROFILE).toLowerCase();
+  if (explicitProfile === "dev") {
+    return "dev";
+  }
+  if (explicitProfile === "managed-relay" || explicitProfile === "managed") {
+    return "managed-relay";
+  }
+  if (explicitProfile === "self-hosted" || explicitProfile === "selfhost") {
+    return "self-hosted";
+  }
+
+  const nodeEnv = readString(env.NODE_ENV).toLowerCase();
+  if (nodeEnv === "development" || nodeEnv === "test") {
+    return "dev";
+  }
+
+  if (isApnsConfiguredFromEnv(env)) {
+    return "managed-relay";
+  }
+
+  return "self-hosted";
+}
+
+function resolvePushServiceEnablement(env = process.env) {
+  const explicit = readOptionalBooleanEnv(
+    ["REMODEX_ENABLE_PUSH_SERVICE", "PHODEX_ENABLE_PUSH_SERVICE"],
+    env
+  );
+  const apnsConfigured = isApnsConfiguredFromEnv(env);
+  const profile = resolveRelayProfile(env);
+
+  if (explicit === false) {
+    return {
+      enabled: false,
+      wouldEnablePush: apnsConfigured,
+      profile,
+    };
+  }
+  if (explicit === true) {
+    return {
+      enabled: true,
+      wouldEnablePush: apnsConfigured,
+      profile,
+    };
+  }
+
+  if (profile === "dev") {
+    return {
+      enabled: false,
+      wouldEnablePush: apnsConfigured,
+      profile,
+    };
+  }
+
+  if (profile === "managed-relay" && apnsConfigured) {
+    return {
+      enabled: true,
+      wouldEnablePush: true,
+      profile,
+    };
+  }
+
+  return {
+    enabled: false,
+    wouldEnablePush: apnsConfigured,
+    profile,
+  };
+}
+
+function readOptionalBooleanEnv(keys, env = process.env) {
+  const truthy = new Set(["1", "true", "yes", "on"]);
+  const falsy = new Set(["0", "false", "no", "off"]);
+
+  for (const key of keys) {
+    const rawValue = env?.[key];
+    if (typeof rawValue !== "string" || !rawValue.trim()) {
+      continue;
+    }
+    const normalizedValue = rawValue.trim().toLowerCase();
+    if (truthy.has(normalizedValue)) {
+      return true;
+    }
+    if (falsy.has(normalizedValue)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
 function readAPNsPrivateKey(env) {
   const rawValue = readFirstDefinedEnv(["REMODEX_APNS_PRIVATE_KEY", "PHODEX_APNS_PRIVATE_KEY"], env);
   if (rawValue) {
@@ -446,4 +542,7 @@ module.exports = {
   createPushSessionService,
   createFileBackedPushStateStore,
   resolvePushStateFilePath,
+  isApnsConfiguredFromEnv,
+  resolvePushServiceEnablement,
+  resolveRelayProfile,
 };

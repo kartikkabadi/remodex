@@ -45,8 +45,10 @@ function fakeProvider({
   };
 }
 
-test("isOpenCodeHandoffEnabled respects REMODEX_OPENCODE_HANDOFF", () => {
-  assert.equal(isOpenCodeHandoffEnabled({}), false);
+test("isOpenCodeHandoffEnabled respects production defaults and explicit overrides", () => {
+  assert.equal(isOpenCodeHandoffEnabled({}), true);
+  assert.equal(isOpenCodeHandoffEnabled({ REMODEX_PROFILE: "dev" }), false);
+  assert.equal(isOpenCodeHandoffEnabled({ NODE_ENV: "development" }), false);
   assert.equal(isOpenCodeHandoffEnabled({ REMODEX_OPENCODE_HANDOFF: "0" }), false);
   assert.equal(isOpenCodeHandoffEnabled({ REMODEX_OPENCODE_HANDOFF: "1" }), true);
   assert.equal(isOpenCodeHandoffEnabled({ REMODEX_OPENCODE_HANDOFF: "true" }), true);
@@ -142,7 +144,7 @@ test("continueOpenCodeHandoff rejects when env gate is off", async () => {
       continueOpenCodeHandoff(
         { threadId: "opencode-thread-1" },
         {
-          env: {},
+          env: { REMODEX_OPENCODE_HANDOFF: "0" },
           platform: "darwin",
           ownershipStore: fakeOwnership(),
           opencodeProvider: fakeProvider(),

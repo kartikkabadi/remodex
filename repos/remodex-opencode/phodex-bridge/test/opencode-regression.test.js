@@ -509,7 +509,7 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
   ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
 
   const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
-  delete process.env.REMODEX_OPENCODE_HANDOFF;
+  process.env.REMODEX_OPENCODE_HANDOFF = "0";
 
   const response = await requestDesktopHandoff(
     {
@@ -518,6 +518,7 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
       params: { threadId: "opencode-thread-handoff" },
     },
     {
+      env: { REMODEX_OPENCODE_HANDOFF: "0" },
       ownershipStore,
       opencodeProvider: mockOpenCodeProvider(),
     },
@@ -531,6 +532,38 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
   } else {
     process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
   }
+});
+
+test("desktop/continueOpenCode succeeds with production-default handoff when env unset", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-handoff-default-ownership.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
+
+  const response = await requestDesktopHandoff(
+    {
+      id: "handoff-default",
+      method: "desktop/continueOpenCode",
+      params: { threadId: "opencode-thread-handoff" },
+    },
+    {
+      env: {},
+      ownershipStore,
+      opencodeProvider: mockOpenCodeProvider(),
+    },
+  );
+
+  assert.equal(response.id, "handoff-default");
+  assert.equal(response.result.success, true);
+  assert.equal(response.result.sessionId, "ses_handoff");
 });
 
 test("desktop/continueOpenCode succeeds when handoff env gate is on", async () => {
