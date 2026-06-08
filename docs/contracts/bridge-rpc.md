@@ -192,6 +192,8 @@ External discovery is **client-true by default** — no Mac env flip is required
 | `REMODEX_OPENCODE_ENSURE_STARTED_MS` | `4000` | Cap blocking `ensureStarted` on discover path |
 | `REMODEX_LIST_THREADS_VALIDATE_CAP` | `20` | Owned stub validation budget only — **not** shared with discover |
 | `REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS` | `60000` | TTL cache for per-`sessionId` SDK validation on owned stubs |
+| `REMODEX_VALIDATION_RPC_LIMIT_PER_MIN` | `120` | Global token bucket for `getSession` / `getMessages` validation RPCs |
+| `REMODEX_OPENCODE_SERVE_WAKE_MS` | `8000` | Cap blocking `ensureStarted` on `turn/start` and other serve wakes (distinct from list-path 4s cap) |
 
 **Wall-clock SLOs** (iOS foreground poll every **10s**; secure transport per-message timeout **12s**):
 
@@ -216,8 +218,26 @@ Router runs Codex `thread/list` and OpenCode `provider.listThreads()` **in paral
 | `thread_list_codex_ms` | `ms` | Codex leg wall time |
 | `thread_list_opencode_ms` | `ms` | OpenCode leg wall time (0 when paginated with cursor) |
 | `thread_list_wall_ms` | `wallMs`, `codexMs`, `opencodeMs`, `discoverProjectsEnabled` | End-to-end merge time |
+| `thread_list_leg_abandoned` | `leg`, `budgetMs` | Per-leg race hit fallback before underlying work finished |
+| `thread_list_codex_failed` | `message` | Codex leg `.catch()` isolation |
+| `thread_list_provider_failed` | `providerId`, `message` | OpenCode/provider leg `.catch()` isolation |
+| `opencode_list_threads_filtered` | `materialization_blocked`, `sdk_validations`, `sdk_validations_cap`, … | OpenCode anti-ghost summary (see `observability.md`) |
+| `opencode_validation_rpc_rate_limited` | `limitPerMin` | Validation token bucket exhausted |
 
-See also `docs/operations/performance-limits.md`.
+See also `docs/operations/performance-limits.md` and `docs/operations/observability.md` § `thread/list`.
+
+#### Secure transport outbound buffer
+
+During relay disconnect, the bridge queues encrypted application messages in a bounded catch-up buffer (`secure-transport.js`). On `trusted_reconnect`, `resumeState` replays entries with `bridgeOutboundSeq` greater than the phone's `lastAppliedBridgeOutboundSeq`.
+
+| Knob | Default | Purpose |
+|------|---------|---------|
+| `MAX_BRIDGE_OUTBOUND_MESSAGES` | `100` | Message count cap (override: `REMODEX_BRIDGE_OUTBOUND_CAP`) |
+| `MAX_BRIDGE_OUTBOUND_BYTES` | `10 MiB` | Byte cap |
+| `REMODEX_BRIDGE_PRIORITY_OUTBOUND` | `1` | Priority-tier trim; protects `turn/completed` and `item/completed` over RPC responses |
+| `REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS` | `2` | Recent turns whose lifecycle/stream entries are pin-protected |
+
+Logs: `bridge_outbound_buffered` (pre-resume queue), `bridge_outbound_dropped` (trim under cap pressure). Full field reference: `observability.md` § Secure transport outbound buffer.
 
 When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
 
