@@ -2404,6 +2404,30 @@ test("listThreads omits external sessions when discover flag is off", async () =
   );
 });
 
+test("adopt rejects discovered session cwd outside home allowlist", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([
+        externalDiscoveredRow({ cwd: "/etc/passwd", sessionId: "ses_blocked_cwd" }),
+      ]),
+  });
+
+  await provider.listThreads();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/read",
+        params: { threadId: "opencode-session-ses_blocked_cwd" },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
 test("thread/read adopts discovered session", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();

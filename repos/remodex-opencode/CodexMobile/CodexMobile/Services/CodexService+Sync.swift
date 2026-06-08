@@ -211,12 +211,16 @@ extension CodexService {
     }
 
     func shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: String) -> Bool {
+        if resumedThreadIDs.contains(threadId) {
+            return false
+        }
+
         if let thread = thread(for: threadId) {
             return thread.isDiscoveredExternalOpenCodeThread
         }
 
         // Unadopted class (e) stubs can appear before local metadata is populated.
-        if threadId.hasPrefix("opencode-session-"), !resumedThreadIDs.contains(threadId) {
+        if threadId.hasPrefix("opencode-session-") {
             return true
         }
 
@@ -953,11 +957,15 @@ extension CodexService {
     // Preserves locally derived metadata keys (for example repo context) when server payload is sparse.
     func mergedThreadMetadata(
         serverMetadata: [String: JSONValue]?,
-        localMetadata: [String: JSONValue]?
+        localMetadata: [String: JSONValue]?,
+        treatAsServerState: Bool = false
     ) -> [String: JSONValue]? {
         var merged = serverMetadata ?? [:]
         for (key, value) in localMetadata ?? [:] where merged[key] == nil {
             merged[key] = value
+        }
+        if treatAsServerState, serverMetadata?["discoveredExternally"] == nil {
+            merged.removeValue(forKey: "discoveredExternally")
         }
         return merged.isEmpty ? nil : merged
     }

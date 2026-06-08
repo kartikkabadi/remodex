@@ -115,7 +115,8 @@ extension CodexService {
         if merged.cwd == nil { merged.cwd = existing.normalizedProjectPath }
         merged.metadata = mergedThreadMetadata(
             serverMetadata: merged.metadata,
-            localMetadata: existing.metadata
+            localMetadata: existing.metadata,
+            treatAsServerState: treatAsServerState
         )
         if merged.forkedFromThreadId == nil { merged.forkedFromThreadId = existing.forkedFromThreadId }
         if merged.parentThreadId == nil { merged.parentThreadId = existing.parentThreadId }

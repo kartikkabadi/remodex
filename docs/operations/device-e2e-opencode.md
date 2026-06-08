@@ -7,8 +7,8 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **696/696** green |
-| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **283/283** green (CI gate on `opencode-*` touches) |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **769/769** green |
+| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **344/344** green (CI gate on `opencode-*` touches) |
 | Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
@@ -135,7 +135,7 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | O0 | Bridge + relay ≥10 min | Terminal screenshot + `lsof` |
 | O1 | OpenCode enabled (no `REMODEX_DISABLE_OPENCODE`) | Settings/runtime catalog |
 | O2 | `REMODEX_OPENCODE_HANDOFF=1` on Mac | `launchctl`/`run-local-remodex` env |
-| O3 | 696/696 + 283/283 automated | CI log or local run |
+| O3 | 769/769 + 344/344 automated | CI log or local run |
 | O4 | `runtime/catalog` OpenCode enabled | Screenshot |
 | O5 | Model picker + All Models sheet | Find model beyond 120 cap |
 | O6 | Streaming + Stop mid-turn | Screen recording |

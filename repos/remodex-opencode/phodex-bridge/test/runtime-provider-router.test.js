@@ -2233,6 +2233,65 @@ test("providerForRequest routes discovered external thread ids when discover fla
   }
 });
 
+test("thread/read routes providerless discovered external ids to OpenCode provider", async () => {
+  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
+  try {
+    let handledMethod = null;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => {
+        throw new Error("Codex passthrough should not run for discovered external read");
+      },
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      providers: [
+        {
+          id: "opencode",
+          async listModels() {
+            return [];
+          },
+          async listThreads() {
+            return { data: [] };
+          },
+          ownsThread() {
+            return false;
+          },
+          async handleRequest(request) {
+            handledMethod = request.method;
+            return { thread: { id: request.params.threadId, title: "Adopted" } };
+          },
+        },
+      ],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "discovered-read",
+        method: "thread/read",
+        params: { threadId: "opencode-session-ses_router_read" },
+      }),
+    );
+    await responsePromise;
+
+    assert.equal(handledMethod, "thread/read");
+    assert.equal(responsePayload.id, "discovered-read");
+    assert.equal(responsePayload.result.thread.id, "opencode-session-ses_router_read");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+    } else {
+      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
+    }
+  }
+});
+
 test("thread/resume routes providerless discovered external ids to OpenCode provider", async () => {
   const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
   process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";

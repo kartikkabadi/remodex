@@ -113,6 +113,25 @@ final class CodexServiceDiscoveredExternalSyncTests: XCTestCase {
         XCTAssertTrue(recordedMethods.isEmpty)
     }
 
+    func testResumedDiscoveredExternalThreadSkipsSyncEvenWithStaleMetadata() async {
+        let service = makeService()
+        let threadID = "opencode-session-ses_stale_meta"
+
+        service.isConnected = true
+        service.isInitialized = true
+        service.resumedThreadIDs.insert(threadID)
+        service.upsertThread(
+            CodexThread(
+                id: threadID,
+                title: "Stale metadata session",
+                modelProvider: "opencode",
+                metadata: ["discoveredExternally": .bool(true)]
+            )
+        )
+
+        XCTAssertFalse(service.shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: threadID))
+    }
+
     func testAdoptedDiscoveredExternalThreadAllowsBackgroundSync() async {
         let service = makeService()
         let threadID = "opencode-session-ses_adopted_01"
