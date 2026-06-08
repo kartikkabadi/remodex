@@ -106,7 +106,7 @@ test("permission/reply allows a permission", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_abc123", allow: true },
+    params: { permissionId: "perm_abc123", threadId: "thread-1", allow: true },
   });
 
   assert.equal(result.success, true);
@@ -130,7 +130,7 @@ test("permission/reply denies a permission", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_deny", allow: false },
+    params: { permissionId: "perm_deny", threadId: "thread-1", allow: false },
   });
 
   assert.equal(result.success, true);
@@ -163,7 +163,7 @@ test("permission/reply handles client error", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_err", allow: true },
+    params: { permissionId: "perm_err", threadId: "thread-1", allow: true },
   });
 
   assert.equal(result.success, false);
@@ -180,7 +180,7 @@ test("permission/reply success clears pending and second reply is unknown", asyn
   const first = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_once", allow: true },
+    params: { permissionId: "perm_once", threadId: "thread-1", allow: true },
   });
   assert.equal(first.success, true);
   assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
@@ -188,7 +188,7 @@ test("permission/reply success clears pending and second reply is unknown", asyn
   const second = await provider.handleRequest({
     id: 2,
     method: "permission/reply",
-    params: { permissionId: "perm_once", allow: true },
+    params: { permissionId: "perm_once", threadId: "thread-1", allow: true },
   });
   assert.equal(second.success, false);
   assert.match(second.reason, /unknown|expired/i);
@@ -206,7 +206,12 @@ test("permission/reply rejects sessionId mismatch", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_session", allow: true, sessionId: "ses_other" },
+    params: {
+      permissionId: "perm_session",
+      threadId: "thread-1",
+      allow: true,
+      sessionId: "ses_other",
+    },
   });
 
   assert.equal(result.success, false);
@@ -236,7 +241,7 @@ test("permission/reply re-arms watchdog on SDK failure when permissions UI disab
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permissionId: "perm_watchdog", allow: true },
+    params: { permissionId: "perm_watchdog", threadId: "thread-1", allow: true },
   });
 
   assert.equal(result.success, false);
@@ -266,6 +271,23 @@ test("shutdown clears pending permissions and watchdogs", async () => {
   await provider.shutdown();
 
   assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
+});
+
+test("permission/reply rejects missing threadId (SEC-04)", async () => {
+  const provider = makeProvider({ clientFactory: () => fakeClient() });
+  provider.testSeedPendingPermission("perm_missing_thread", { threadId: "thread-1" });
+
+  const result = await provider.handleRequest({
+    id: 1,
+    method: "permission/reply",
+    params: { permissionId: "perm_missing_thread", allow: true },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "Missing thread ID");
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+
+  await provider.shutdown();
 });
 
 test("permission/reply rejects threadId mismatch", async () => {
@@ -304,6 +326,23 @@ test("redactPermissionArgs redacts sensitive keys and truncates", () => {
   assert.match(summary, /truncated/);
 });
 
+test("permission/request arms watchdog when permissions UI enabled", () => {
+  const provider = makeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_OPENCODE_PERMISSIONS_UI: "1", REMODEX_TEST: "1" },
+    clientFactory: () => fakeClient(),
+  });
+
+  provider.__test.handlePermissionRequestEvent(
+    { thread: { id: "thread-1", cwd: "/tmp" }, turn: { id: "turn-1" }, sessionId: "ses-1" },
+    { permissionId: "perm-watchdog-ui", tool: "bash", args: { command: "ls" } },
+  );
+
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+  assert.equal(provider.__test.hasPendingPermissionWatchdog("perm-watchdog-ui"), true);
+
+  void provider.shutdown();
+});
+
 test("permission/request emit omits raw args and includes argsSummary", () => {
   const messages = [];
   const provider = makeProvider({
@@ -340,7 +379,7 @@ test("permission/reply accepts permission_id snake_case", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "permission/reply",
-    params: { permission_id: "perm_snake", allow: true },
+    params: { permission_id: "perm_snake", threadId: "thread-1", allow: true },
   });
 
   assert.equal(result.success, true);

@@ -219,7 +219,7 @@ function createOpenCodeProvider({
   const pendingPermissions = new Map();
   /** @type {Map<string, Set<string>>} */
   const sessionPermissionGrants = new Map();
-  const PERMISSION_WATCHDOG_MS = 30_000;
+  const PERMISSION_WATCHDOG_MS = DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
   let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
   let discoverRefreshInFlight = null;
   const adoptMutexes = new Map();
@@ -2404,6 +2404,7 @@ function createOpenCodeProvider({
       requestedAt: payload.requestedAt,
       argsSummary: redactPermissionArgs(payload.args),
     });
+    armPermissionWatchdog(entry, payload);
   }
 
   function testSeedPendingPermission(permissionId, fields = {}) {
@@ -2451,7 +2452,17 @@ function createOpenCodeProvider({
     }
 
     const replyThreadId = readThreadId(params);
-    if (replyThreadId && replyThreadId !== pending.threadId) {
+    if (!replyThreadId) {
+      console.log(
+        JSON.stringify({
+          event: "permission_reply_rejected",
+          permissionId,
+          reason: "missing_thread_id",
+        }),
+      );
+      return { success: false, reason: "Missing thread ID" };
+    }
+    if (replyThreadId !== pending.threadId) {
       console.log(
         JSON.stringify({
           event: "permission_reply_rejected",

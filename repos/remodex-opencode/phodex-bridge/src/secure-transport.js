@@ -50,6 +50,9 @@ const SYSTEM_OUTBOUND_METHODS = new Set([
   "runtime/warning",
   "account/rateLimits/updated",
 ]);
+const PERMISSION_PROTECTED_OUTBOUND_METHODS = new Set([
+  "permission/request",
+]);
 
 function createBridgeSecureTransport({
   sessionId,
@@ -924,6 +927,8 @@ function classifyOutboundPriority(payload) {
   case "item/toolCall":
   case "item/toolCallUpdate":
     return OUTBOUND_PRIORITY.TOOL;
+  case "permission/request":
+    return OUTBOUND_PRIORITY.NOTIFY;
   default:
     return OUTBOUND_PRIORITY.NOTIFY;
   }
@@ -1031,6 +1036,16 @@ function computeSystemProtectedIndices(entries) {
   return protectedIndices;
 }
 
+function computePermissionProtectedIndices(entries) {
+  const protectedIndices = new Set();
+  entries.forEach((entry, index) => {
+    if (entry.method && PERMISSION_PROTECTED_OUTBOUND_METHODS.has(entry.method)) {
+      protectedIndices.add(index);
+    }
+  });
+  return protectedIndices;
+}
+
 function computeRecentTurnProtectedIndices(
   entries,
   recentCount = readRecentTurnProtectCount(),
@@ -1075,6 +1090,7 @@ function computeProtectedEntryIndices(entries, options = {}) {
   const protectedIndices = new Set([
     ...computePinnedEntryIndices(entries),
     ...computeSystemProtectedIndices(entries),
+    ...computePermissionProtectedIndices(entries),
     ...computeRecentTurnProtectedIndices(entries, readRecentTurnProtectCount(), options),
   ]);
   return protectedIndices;
@@ -1229,6 +1245,7 @@ module.exports = {
   PAIRING_QR_VERSION,
   SECURE_PROTOCOL_VERSION,
   classifyOutboundPriority,
+  computePermissionProtectedIndices,
   computeProtectedEntryIndices,
   computeRecentTurnProtectedIndices,
   computeSystemProtectedIndices,

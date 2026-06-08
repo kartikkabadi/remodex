@@ -37,6 +37,7 @@ struct CodexMobileApp: App {
                 .environment(petCompanionStore)
                 .environment(petCompanionStatusStore)
                 .environment(subscriptionService)
+                .openCodePermissionPresenter()
                 .task {
                     await subscriptionService.bootstrap()
                 }
