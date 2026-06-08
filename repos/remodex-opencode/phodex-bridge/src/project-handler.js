@@ -8,6 +8,14 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { resolveCodexHome } = require("./codex-home");
+const {
+  assertProjectPathAllowed,
+  isPathAllowed,
+  normalizeCandidatePath,
+  realpathSyncIfAvailable,
+  resolveHomeDir,
+  validateDirectory,
+} = require("./project-path-policy");
 
 const DEFAULT_DIRECTORY_LIMIT = 200;
 const DEFAULT_DIRECTORY_SEARCH_LIMIT = 80;
@@ -586,37 +594,6 @@ async function requireUsableDirectory(candidatePath, options = {}) {
   return validation;
 }
 
-async function validateDirectory(candidatePath, options = {}) {
-  const normalizedPath = normalizeCandidatePath(candidatePath, options);
-  const isAllowed = isPathAllowed(normalizedPath, options);
-  if (!isAllowed) {
-    return {
-      path: normalizedPath,
-      exists: false,
-      isDirectory: false,
-      isAllowed: false,
-    };
-  }
-
-  try {
-    const realPath = await fs.promises.realpath(normalizedPath);
-    const stats = await fs.promises.stat(realPath);
-    return {
-      path: realPath,
-      exists: true,
-      isDirectory: stats.isDirectory(),
-      isAllowed: isPathAllowed(realPath, options),
-    };
-  } catch {
-    return {
-      path: normalizedPath,
-      exists: false,
-      isDirectory: false,
-      isAllowed,
-    };
-  }
-}
-
 function parentPathWithinAllowedRoots(candidatePath, options = {}) {
   const parentPath = path.dirname(candidatePath);
   if (!parentPath || parentPath === candidatePath) {
@@ -627,47 +604,7 @@ function parentPathWithinAllowedRoots(candidatePath, options = {}) {
 }
 
 function assertPathAllowed(candidatePath, options = {}) {
-  if (!isPathAllowed(candidatePath, options)) {
-    throw projectError("path_not_allowed", "That folder is outside the allowed local project locations.");
-  }
-}
-
-function isPathAllowed(candidatePath, options = {}) {
-  const normalizedPath = path.resolve(candidatePath);
-  return allowedProjectRoots(options).some((rootPath) => samePathOrDescendant(normalizedPath, rootPath));
-}
-
-function allowedProjectRoots(options = {}) {
-  const roots = Array.isArray(options.allowedRoots) && options.allowedRoots.length
-    ? options.allowedRoots
-    : [resolveHomeDir(options)];
-
-  return [...new Set(roots.flatMap((rootPath) => {
-    const resolvedRoot = path.resolve(rootPath);
-    return [resolvedRoot, realpathSyncIfAvailable(resolvedRoot)].filter(Boolean);
-  }))];
-}
-
-function samePathOrDescendant(candidatePath, rootPath) {
-  const relative = path.relative(rootPath, candidatePath);
-  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function normalizeCandidatePath(candidatePath, options = {}) {
-  const rawPath = readString(candidatePath);
-  if (!rawPath) {
-    throw projectError("missing_path", "A folder path is required.");
-  }
-
-  if (rawPath === "~" || rawPath.startsWith("~/")) {
-    return path.resolve(resolveHomeDir(options), rawPath.slice(2));
-  }
-
-  if (!path.isAbsolute(rawPath)) {
-    throw projectError("invalid_path", "Use an absolute folder path.");
-  }
-
-  return path.resolve(rawPath);
+  assertProjectPathAllowed(candidatePath, options);
 }
 
 function isHiddenDirectoryName(name) {
@@ -744,10 +681,6 @@ function directoryMatchesSearch(directory, tokens) {
   return tokens.every((token) => haystack.includes(token));
 }
 
-function resolveHomeDir(options = {}) {
-  return options.homeDir || os.homedir();
-}
-
 function uniqueExistingOrCandidatePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -763,14 +696,6 @@ function uniqueExistingOrCandidatePaths(paths) {
   }
 
   return result;
-}
-
-function realpathSyncIfAvailable(candidatePath) {
-  try {
-    return fs.realpathSync(candidatePath);
-  } catch {
-    return null;
-  }
 }
 
 function readString(value) {

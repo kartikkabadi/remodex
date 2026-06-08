@@ -85,6 +85,22 @@ test("getAllOwnedBy returns threads for a provider", () => {
   }
 });
 
+test("persists thread-ownership.json with mode 0o600", () => {
+  const tempDir = makeTempDir();
+  try {
+    const storagePath = path.join(tempDir, "thread-ownership.json");
+    const store = createThreadOwnershipStore({
+      storagePath,
+      fsImpl: fs,
+    });
+    store.setOwnership("thread-secure", "opencode");
+
+    assert.equal(fs.statSync(storagePath).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
 test("durable across store instances", () => {
   const tempDir = makeTempDir();
   try {

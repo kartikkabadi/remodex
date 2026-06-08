@@ -53,4 +53,5 @@ test("projectRememberKnownProject writes through file registry", async () => {
   assert.equal(listed.projects.length, 1);
   assert.equal(listed.projects[0].path, fs.realpathSync(projectDir));
   assert.ok(fs.existsSync(storagePath));
+  assert.equal(fs.statSync(storagePath).mode & 0o777, 0o600);
 });

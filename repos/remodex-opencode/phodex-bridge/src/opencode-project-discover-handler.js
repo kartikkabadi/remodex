@@ -5,9 +5,14 @@
 // Depends on: ./normalize, ./opencode-runtime-policy
 
 const { readString } = require("./normalize");
+const { validateDirectory } = require("./project-path-policy");
 const { isOpenCodeRuntimeDisabled } = require("./opencode-runtime-policy");
 
-function handleOpenCodeProjectDiscoverRequest(rawMessage, sendResponse, { opencodeProvider, projectRegistry } = {}) {
+function handleOpenCodeProjectDiscoverRequest(
+  rawMessage,
+  sendResponse,
+  { homeDir, opencodeProvider, projectRegistry } = {},
+) {
   let parsed;
   try {
     parsed = JSON.parse(rawMessage);
@@ -23,7 +28,7 @@ function handleOpenCodeProjectDiscoverRequest(rawMessage, sendResponse, { openco
   const id = parsed.id;
   const params = parsed.params || {};
 
-  projectDiscoverFromOpenCode(params, { opencodeProvider, projectRegistry })
+  projectDiscoverFromOpenCode(params, { homeDir, opencodeProvider, projectRegistry })
     .then((result) => {
       sendResponse(JSON.stringify({ id, result }));
     })
@@ -45,7 +50,7 @@ function handleOpenCodeProjectDiscoverRequest(rawMessage, sendResponse, { openco
   return true;
 }
 
-async function projectDiscoverFromOpenCode(params, { opencodeProvider, projectRegistry } = {}) {
+async function projectDiscoverFromOpenCode(params, { homeDir, opencodeProvider, projectRegistry } = {}) {
   if (isOpenCodeRuntimeDisabled(process.env)) {
     return { projects: [], source: "opencode", disabled: true };
   }
@@ -55,7 +60,19 @@ async function projectDiscoverFromOpenCode(params, { opencodeProvider, projectRe
   }
 
   const directory = readString(params.directory || params.cwd);
-  const projects = await opencodeProvider.discoverProjects({ directory });
+  const discoverParams = {};
+  if (directory) {
+    const validation = await validateDirectory(directory, { homeDir });
+    if (!validation.isAllowed) {
+      throw projectDiscoverError(
+        "path_not_allowed",
+        "That folder is outside the allowed local project locations.",
+      );
+    }
+    discoverParams.directory = validation.path;
+  }
+
+  const projects = await opencodeProvider.discoverProjects(discoverParams);
 
   if (projectRegistry && Array.isArray(projects)) {
     for (const project of projects) {

@@ -8,6 +8,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { resolveCodexHome } = require("./codex-home");
+const { isPathAllowed } = require("./project-path-policy");
 const { readString } = require("./normalize");
 
 const REGISTRY_SCHEMA_VERSION = 1;
@@ -134,7 +135,11 @@ function rememberKnownProjectEntries(storagePath, candidates, options = {}) {
   for (const candidate of candidates) {
     const metadata = candidate?.metadata || {};
     const normalizedPath = normalizeProjectPath(candidate?.path, options);
-    if (!normalizedPath || isGeneratedProjectlessPath(normalizedPath, options)) {
+    if (
+      !normalizedPath ||
+      isGeneratedProjectlessPath(normalizedPath, options) ||
+      !isPathAllowed(normalizedPath, options)
+    ) {
       continue;
     }
 
@@ -247,8 +252,16 @@ function writeRegistryState(storagePath, state) {
   const directory = path.dirname(storagePath);
   fs.mkdirSync(directory, { recursive: true });
   const tempPath = `${storagePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(normalizedState, null, 2)}\n`, "utf8");
+  fs.writeFileSync(tempPath, `${JSON.stringify(normalizedState, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   fs.renameSync(tempPath, storagePath);
+  try {
+    fs.chmodSync(storagePath, 0o600);
+  } catch {
+    // Best-effort on platforms that restrict chmod.
+  }
 }
 
 function normalizeRegistryState(state) {

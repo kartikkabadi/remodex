@@ -54,9 +54,14 @@ function createJsonFileStore({
     fsImpl.writeFileSync(
       tempPath,
       `${JSON.stringify(state, null, 2)}\n`,
-      "utf8",
+      { encoding: "utf8", mode: 0o600 },
     );
     fsImpl.renameSync(tempPath, resolvedPath);
+    try {
+      fsImpl.chmodSync(resolvedPath, 0o600);
+    } catch {
+      // Best-effort on platforms that restrict chmod.
+    }
   }
 
   return { resolvePath, read, write };

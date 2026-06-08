@@ -91,6 +91,65 @@ test("project/discover registers OpenCode projects in the bridge registry", asyn
   });
 });
 
+test("project/discover rejects disallowed directory params before calling OpenCode", async () => {
+  await withOpenCodeEnabled(async () => {
+    const homeDir = makeTempDir();
+    try {
+      let discoverCalled = false;
+      const opencodeProvider = {
+        discoverProjects: async () => {
+          discoverCalled = true;
+          return [];
+        },
+      };
+
+      await assert.rejects(
+        () =>
+          projectDiscoverFromOpenCode(
+            { directory: "/etc" },
+            { homeDir, opencodeProvider, projectRegistry: null },
+          ),
+        (err) => err.errorCode === "path_not_allowed",
+      );
+      assert.equal(discoverCalled, false);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true });
+    }
+  });
+});
+
+test("project/discover rejects symlink directories that resolve outside home", async () => {
+  await withOpenCodeEnabled(async () => {
+    const homeDir = makeTempDir();
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-discover-outside-"));
+    const linkPath = path.join(homeDir, "outside-link");
+    fs.symlinkSync(outsideDir, linkPath, "dir");
+
+    try {
+      let discoverCalled = false;
+      const opencodeProvider = {
+        discoverProjects: async () => {
+          discoverCalled = true;
+          return [];
+        },
+      };
+
+      await assert.rejects(
+        () =>
+          projectDiscoverFromOpenCode(
+            { directory: linkPath },
+            { homeDir, opencodeProvider, projectRegistry: null },
+          ),
+        (err) => err.errorCode === "path_not_allowed",
+      );
+      assert.equal(discoverCalled, false);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true });
+      fs.rmSync(outsideDir, { recursive: true });
+    }
+  });
+});
+
 test("handleOpenCodeProjectDiscoverRequest responds to project/discover RPC", async () => {
   await withOpenCodeEnabled(async () => {
     const opencodeProvider = {
