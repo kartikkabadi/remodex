@@ -69,10 +69,14 @@ test("mapOpenCodeSessionToContextUsage sums token counters into context window s
 
 test("project/discover registers OpenCode projects in the bridge registry", async () => {
   await withOpenCodeEnabled(async () => {
+    const homeDir = makeTempDir();
+    const allowedDir = path.join(homeDir, "workspace", "demo-app");
+    fs.mkdirSync(allowedDir, { recursive: true });
     const remembered = [];
     const opencodeProvider = {
       discoverProjects: async () => [
-        { id: "proj-1", path: "/tmp/demo-app", name: "Demo App" },
+        { id: "proj-1", path: allowedDir, name: "Demo App" },
+        { id: "proj-evil", path: "/etc/passwd", name: "Blocked" },
       ],
     };
     const projectRegistry = {
@@ -81,13 +85,21 @@ test("project/discover registers OpenCode projects in the bridge registry", asyn
       },
     };
 
-    const result = await projectDiscoverFromOpenCode({}, { opencodeProvider, projectRegistry });
+    try {
+      const result = await projectDiscoverFromOpenCode(
+        {},
+        { homeDir, opencodeProvider, projectRegistry },
+      );
 
-    assert.equal(result.source, "opencode");
-    assert.equal(result.count, 1);
-    assert.equal(remembered.length, 1);
-    assert.equal(remembered[0].projectPath, "/tmp/demo-app");
-    assert.equal(remembered[0].meta.provider, "opencode");
+      assert.equal(result.source, "opencode");
+      assert.equal(result.count, 1);
+      assert.equal(result.projects.length, 1);
+      assert.equal(remembered.length, 1);
+      assert.equal(remembered[0].projectPath, fs.realpathSync(allowedDir));
+      assert.equal(remembered[0].meta.provider, "opencode");
+    } finally {
+      fs.rmSync(homeDir, { recursive: true });
+    }
   });
 });
 
@@ -152,21 +164,28 @@ test("project/discover rejects symlink directories that resolve outside home", a
 
 test("handleOpenCodeProjectDiscoverRequest responds to project/discover RPC", async () => {
   await withOpenCodeEnabled(async () => {
+    const homeDir = makeTempDir();
+    const repoDir = path.join(homeDir, "workspace", "repo");
+    fs.mkdirSync(repoDir, { recursive: true });
     const opencodeProvider = {
-      discoverProjects: async () => [{ id: "p1", path: "/workspace/repo", name: "Repo" }],
+      discoverProjects: async () => [{ id: "p1", path: repoDir, name: "Repo" }],
     };
-    const response = await new Promise((resolve) => {
-      const handled = handleOpenCodeProjectDiscoverRequest(
-        JSON.stringify({ id: 7, method: "project/discover", params: {} }),
-        (payload) => resolve(JSON.parse(payload)),
-        { opencodeProvider, projectRegistry: null },
-      );
-      assert.equal(handled, true);
-    });
+    try {
+      const response = await new Promise((resolve) => {
+        const handled = handleOpenCodeProjectDiscoverRequest(
+          JSON.stringify({ id: 7, method: "project/discover", params: {} }),
+          (payload) => resolve(JSON.parse(payload)),
+          { homeDir, opencodeProvider, projectRegistry: null },
+        );
+        assert.equal(handled, true);
+      });
 
-    assert.equal(response.id, 7);
-    assert.equal(response.result.source, "opencode");
-    assert.equal(response.result.count, 1);
+      assert.equal(response.id, 7);
+      assert.equal(response.result.source, "opencode");
+      assert.equal(response.result.count, 1);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true });
+    }
   });
 });
 

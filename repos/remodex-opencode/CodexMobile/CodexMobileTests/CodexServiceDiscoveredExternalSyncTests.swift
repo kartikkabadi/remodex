@@ -83,6 +83,76 @@ final class CodexServiceDiscoveredExternalSyncTests: XCTestCase {
         XCTAssertTrue(recordedMethods.isEmpty)
     }
 
+    func testDiscoveredExternalThreadSkipsSyncThreadHistory() async {
+        let service = makeService()
+        let threadID = "opencode-session-ses_history_01"
+
+        service.isConnected = true
+        service.isInitialized = true
+        service.upsertThread(
+            CodexThread(
+                id: threadID,
+                title: "History session",
+                modelProvider: "opencode",
+                metadata: ["discoveredExternally": .bool(true)]
+            )
+        )
+
+        var recordedMethods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            recordedMethods.append(method)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([:]),
+                includeJSONRPC: false
+            )
+        }
+
+        await service.syncThreadHistory(threadId: threadID)
+
+        XCTAssertTrue(recordedMethods.isEmpty)
+    }
+
+    func testAdoptedDiscoveredExternalThreadAllowsBackgroundSync() async {
+        let service = makeService()
+        let threadID = "opencode-session-ses_adopted_01"
+
+        service.isConnected = true
+        service.isInitialized = true
+        service.resumedThreadIDs.insert(threadID)
+        service.upsertThread(
+            CodexThread(
+                id: threadID,
+                title: "Adopted session",
+                modelProvider: "opencode",
+                metadata: [
+                    "provider": .string("opencode"),
+                    "sessionId": .string("ses_adopted_01"),
+                ]
+            )
+        )
+
+        var recordedMethods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            recordedMethods.append(method)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "thread": .object([
+                        "id": .string(threadID),
+                        "title": .string("Adopted session"),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        await service.syncActiveThreadState(threadId: threadID)
+
+        XCTAssertFalse(service.shouldSkipBackgroundSyncForDiscoveredExternalThread(threadId: threadID))
+        XCTAssertTrue(recordedMethods.contains("thread/resume") || recordedMethods.contains("thread/read"))
+    }
+
     func testCatchUpRunningThreadSkipsDiscoveredExternalPrefixWithoutMetadata() async {
         let service = makeService()
         let threadID = "opencode-session-ses_prefix_only"

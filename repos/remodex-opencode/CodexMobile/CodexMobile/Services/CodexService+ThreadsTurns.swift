@@ -1239,6 +1239,9 @@ extension CodexService {
             var params: RPCObject = [
                 "threadId": .string(threadId),
             ]
+            if let modelProvider = enforcedThreadOwnershipModelProvider(for: threadId) {
+                params["modelProvider"] = .string(modelProvider)
+            }
             let resolvedProjectPath = requestedSignature.projectPath
             if let workingDirectory = resolvedProjectPath {
                 params["cwd"] = .string(workingDirectory)

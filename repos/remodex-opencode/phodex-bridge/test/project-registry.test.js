@@ -73,6 +73,66 @@ test("rememberProjectPath rejects symlink targets outside the home root", () => 
   assert.equal(registry.listProjects().length, 0);
 });
 
+test("listProjects omits unavailable directories by default", () => {
+  const homeDir = makeTempHome();
+  const registry = makeRegistry(homeDir);
+  const projectDir = path.join(homeDir, "workspace", "gone-repo");
+  fs.mkdirSync(projectDir, { recursive: true });
+  registry.rememberProjectPath(projectDir, { source: "test", provider: "codex" });
+  fs.rmSync(projectDir, { recursive: true });
+
+  assert.equal(registry.listProjects().length, 0);
+  assert.equal(registry.listProjects({ includeUnavailable: true }).length, 1);
+});
+
+test("listProjects omits generated projectless paths", () => {
+  const homeDir = makeTempHome();
+  const registry = makeRegistry(homeDir);
+  const codexHome = path.join(homeDir, ".codex");
+  const generatedPath = path.join(codexHome, "threads", "thread-abc");
+  fs.mkdirSync(generatedPath, { recursive: true });
+
+  registry.rememberProjectPath(generatedPath, { source: "test", provider: "codex" });
+
+  assert.equal(registry.listProjects().length, 0);
+});
+
+test("listProjects omits disallowed paths persisted before read filter", () => {
+  const homeDir = makeTempHome();
+  const registry = makeRegistry(homeDir);
+  const storagePath = registry.storagePath;
+  fs.mkdirSync(path.dirname(storagePath), { recursive: true });
+  fs.writeFileSync(
+    storagePath,
+    `${JSON.stringify({
+      version: 1,
+      projects: [
+        {
+          path: path.join(homeDir, "allowed-repo"),
+          label: "Allowed",
+          source: "seed",
+          firstSeenAt: "2026-06-08T00:00:00.000Z",
+          lastSeenAt: "2026-06-08T00:00:00.000Z",
+        },
+        {
+          path: "/etc/passwd",
+          label: "Blocked",
+          source: "seed",
+          firstSeenAt: "2026-06-08T00:00:00.000Z",
+          lastSeenAt: "2026-06-08T00:00:00.000Z",
+        },
+      ],
+    }, null, 2)}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  const allowedDir = path.join(homeDir, "allowed-repo");
+  fs.mkdirSync(allowedDir, { recursive: true });
+
+  const listed = registry.listProjects();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].path, fs.realpathSync(allowedDir));
+});
+
 test("writeRegistryState persists known-projects.json with mode 0o600", () => {
   const homeDir = makeTempHome();
   const registry = makeRegistry(homeDir);

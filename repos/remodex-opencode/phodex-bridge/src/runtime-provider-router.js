@@ -41,6 +41,8 @@ const PROVIDER_FIELD_KEYS = [
   "harness",
 ];
 
+const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
+
 const ROUTABLE_THREAD_METHODS = new Set([
   "thread/start",
   "thread/resume",
@@ -708,6 +710,15 @@ function normalizeExplicitRequestedProvider(params = {}) {
   return isOpenCodeProvider(readModelProvider(params)) ? OPENCODE_PROVIDER_ID : CODEX_PROVIDER_ID;
 }
 
+function isDiscoverSessionsEnabled(env = process.env) {
+  return readString(env?.REMODEX_OPENCODE_DISCOVER_SESSIONS) === "1";
+}
+
+function isDiscoveredExternalThreadId(threadId) {
+  const normalized = readString(threadId);
+  return Boolean(normalized && normalized.startsWith(DISCOVERED_THREAD_ID_PREFIX));
+}
+
 function providerForRequest(request, providers, ownershipStore = null) {
   const params = request.params || {};
   const providerFromRequest = readModelProvider(params);
@@ -781,7 +792,16 @@ function providerForRequest(request, providers, ownershipStore = null) {
       storedProvider: storedProvider || null,
     }),
   );
-  const resolved = providers.find((provider) => provider.ownsThread(threadId)) || null;
+  let resolved = providers.find((provider) => provider.ownsThread(threadId)) || null;
+  let matchReason = resolved ? "owns_thread_match" : "no_owning_provider";
+  if (
+    !resolved &&
+    isDiscoverSessionsEnabled() &&
+    isDiscoveredExternalThreadId(threadId)
+  ) {
+    resolved = providers.find((provider) => provider.id === OPENCODE_PROVIDER_ID) || null;
+    matchReason = resolved ? "discovered_external_thread_id" : "discovered_external_no_provider";
+  }
   console.log(
     JSON.stringify({
       event: "provider_for_request_decision",
@@ -790,8 +810,8 @@ function providerForRequest(request, providers, ownershipStore = null) {
       hasExplicitProviderField: hasProviderField,
       storedProvider: storedProvider || null,
       resolvedProvider: resolved ? resolved.id : null,
-      matchReason: resolved ? "owns_thread_match" : "no_owning_provider",
-      owns: !!resolved,
+      matchReason,
+      owns: matchReason === "owns_thread_match",
     }),
   );
   return resolved;

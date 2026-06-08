@@ -215,7 +215,12 @@ extension CodexService {
             return thread.isDiscoveredExternalOpenCodeThread
         }
 
-        return threadId.hasPrefix("opencode-session-")
+        // Unadopted class (e) stubs can appear before local metadata is populated.
+        if threadId.hasPrefix("opencode-session-"), !resumedThreadIDs.contains(threadId) {
+            return true
+        }
+
+        return false
     }
 
     func syncThreadHistory(threadId: String, force: Bool = false) async {

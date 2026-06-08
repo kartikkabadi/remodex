@@ -198,7 +198,7 @@ function normalizeStoredEntry(entry, options = {}) {
   }
 
   const normalizedPath = normalizeProjectPath(entry.path, options);
-  if (!normalizedPath) {
+  if (!normalizedPath || !isPathAllowed(normalizedPath, options)) {
     return null;
   }
 

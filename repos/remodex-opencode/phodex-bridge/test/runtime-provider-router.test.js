@@ -6,6 +6,10 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { createProjectRegistry } = require("../src/project-registry");
 const {
   DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
   MODEL_LIST_PROVIDER_BUDGET_MS,
@@ -1830,6 +1834,15 @@ test("computeCatalogFingerprint changes when only connectedOnServe flips", () =>
   }));
 });
 
+function makeDiscoverProjectRegistryFixture() {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-discover-"));
+  const registry = createProjectRegistry({
+    storagePath: path.join(homeDir, "remodex", "known-projects.json"),
+    homeDir,
+  });
+  return { homeDir, registry };
+}
+
 function makeDiscoverProvider(overrides = {}) {
   return {
     id: "opencode",
@@ -1919,7 +1932,7 @@ test("thread/list skips hot-path project discover when REMODEX_OPENCODE_DISCOVER
         responsePayload = JSON.parse(payload);
         resolveResponse();
       },
-      projectRegistry: { rememberProjectsFromThreads() {} },
+      projectRegistry: makeDiscoverProjectRegistryFixture().registry,
       providers: [
         makeDiscoverProvider({
           async discoverProjects() {
@@ -1941,18 +1954,22 @@ test("thread/list skips hot-path project discover when REMODEX_OPENCODE_DISCOVER
   });
 });
 
-test("thread/list debounces project discover within TTL", async () => {
+test("thread/list debounces project discover within TTL and remembers projects", async () => {
   await withDiscoverEnv({ discoverProjects: "1", discoverTtl: "60000" }, async () => {
+    const { homeDir, registry } = makeDiscoverProjectRegistryFixture();
+    const projectDir = path.join(homeDir, "workspace", "demo");
+    fs.mkdirSync(projectDir, { recursive: true });
     let discoverCalls = 0;
     const router = createRuntimeProviderRouter({
+      homeDir,
       sendCodexRequest: async () => ({ data: [] }),
       sendApplicationResponse: () => {},
-      projectRegistry: { rememberProjectsFromThreads() {} },
+      projectRegistry: registry,
       providers: [
         makeDiscoverProvider({
           async discoverProjects() {
             discoverCalls += 1;
-            return [{ id: "proj-1", path: "/Users/me/work/demo", name: "Demo" }];
+            return [{ id: "proj-1", path: projectDir, name: "Demo" }];
           },
         }),
       ],
@@ -1963,9 +1980,12 @@ test("thread/list debounces project discover within TTL", async () => {
     await waitOneTick();
     router.handleApplicationMessage(request);
     await waitOneTick();
-    await waitOneTick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.equal(discoverCalls, 1);
+    assert.equal(registry.listProjects().length, 1);
+    assert.equal(registry.listProjects()[0].path, fs.realpathSync(projectDir));
+    fs.rmSync(homeDir, { recursive: true });
   });
 });
 
@@ -1983,7 +2003,7 @@ test("thread/list returns before slow project discover completes", async () => {
         responsePayload = JSON.parse(payload);
         resolveResponse();
       },
-      projectRegistry: { rememberProjectsFromThreads() {} },
+      projectRegistry: makeDiscoverProjectRegistryFixture().registry,
       providers: [
         makeDiscoverProvider({
           discoverProjects() {
@@ -2027,7 +2047,7 @@ test("thread/list logs thread_list_wall_ms and opencode_discover_on_list when di
           responsePayload = JSON.parse(payload);
           resolveResponse();
         },
-        projectRegistry: { rememberProjectsFromThreads() {} },
+        projectRegistry: makeDiscoverProjectRegistryFixture().registry,
         providers: [
           makeDiscoverProvider({
             async discoverProjects() {
@@ -2079,7 +2099,7 @@ test("thread/list does not call project discover when REMODEX_DISABLE_OPENCODE=1
         responsePayload = JSON.parse(payload);
         resolveResponse();
       },
-      projectRegistry: { rememberProjectsFromThreads() {} },
+      projectRegistry: makeDiscoverProjectRegistryFixture().registry,
       providers: [
         makeDiscoverProvider({
           async discoverProjects() {
@@ -2180,4 +2200,94 @@ test("auth inventory change via model/list pushes runtime/catalog/updated once",
     }),
     catalogUpdates[1].params.catalogRevision,
   );
+});
+
+test("providerForRequest routes discovered external thread ids when discover flag is on", () => {
+  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
+  try {
+    const provider = makeProvider([]);
+    withMutedConsole(() => {
+      assert.equal(
+        providerForRequest(
+          { method: "thread/resume", params: { threadId: "opencode-session-ses_router" } },
+          [provider],
+        ),
+        provider,
+      );
+      assert.equal(
+        providerForRequest(
+          { method: "thread/resume", params: { threadId: "opencode-session-ses_router" } },
+          [provider],
+          null,
+        ),
+        provider,
+      );
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+    } else {
+      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
+    }
+  }
+});
+
+test("thread/resume routes providerless discovered external ids to OpenCode provider", async () => {
+  const previous = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = "1";
+  try {
+    let handledMethod = null;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => {
+        throw new Error("Codex passthrough should not run for discovered external resume");
+      },
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      providers: [
+        {
+          id: "opencode",
+          async listModels() {
+            return [];
+          },
+          async listThreads() {
+            return { data: [] };
+          },
+          ownsThread() {
+            return false;
+          },
+          async handleRequest(request) {
+            handledMethod = request.method;
+            return { thread: { id: request.params.threadId, title: "Adopted" } };
+          },
+        },
+      ],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "discovered-resume",
+        method: "thread/resume",
+        params: { threadId: "opencode-session-ses_router_resume" },
+      }),
+    );
+    await responsePromise;
+
+    assert.equal(handledMethod, "thread/resume");
+    assert.equal(responsePayload.id, "discovered-resume");
+    assert.equal(responsePayload.result.thread.id, "opencode-session-ses_router_resume");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+    } else {
+      process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previous;
+    }
+  }
 });

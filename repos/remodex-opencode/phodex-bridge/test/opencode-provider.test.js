@@ -6,6 +6,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("os");
+const path = require("path");
 const {
   buildStaticSlashCommands,
   createOpenCodeClient,
@@ -2319,7 +2321,7 @@ function discoveredListClient(rows = []) {
 
 function externalDiscoveredRow({
   sessionId = "ses_external_mac",
-  cwd = "/Users/me/work/mac-opencode",
+  cwd = path.join(os.homedir(), "work", "mac-opencode"),
   title = "Mac OpenCode session",
 } = {}) {
   return {
@@ -2353,10 +2355,36 @@ test("listThreads includes external sessions when discover flag is on", async ()
   const list = await provider.listThreads();
   const row = list.data.find((thread) => thread.id === "opencode-session-ses_external_mac");
   assert.ok(row, "external session should appear in listThreads");
-  assert.equal(row.cwd, "/Users/me/work/mac-opencode");
+  assert.equal(row.cwd, path.join(os.homedir(), "work", "mac-opencode"));
   assert.equal(row.modelProvider, "opencode");
   assert.equal(row.metadata.discoveredExternally, true);
   assert.equal(row.metadata.sessionId, "ses_external_mac");
+});
+
+test("listThreads discover merge does not fetch session messages", async () => {
+  let getMessagesCalls = 0;
+  let getSessionCalls = 0;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      getMessages: async () => {
+        getMessagesCalls += 1;
+        return [];
+      },
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+    }),
+  });
+
+  await provider.listThreads();
+  assert.equal(getMessagesCalls, 0);
+  assert.equal(getSessionCalls, 0);
 });
 
 test("listThreads omits external sessions when discover flag is off", async () => {
@@ -2374,6 +2402,32 @@ test("listThreads omits external sessions when discover flag is off", async () =
     list.data.find((thread) => thread.id === "opencode-session-ses_external_mac"),
     undefined,
   );
+});
+
+test("thread/read adopts discovered session", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  const read = await provider.handleRequest({
+    id: 1,
+    method: "thread/read",
+    params: { threadId: "opencode-session-ses_external_mac", includeTurns: true },
+  });
+
+  assert.equal(read.thread.id, "opencode-session-ses_external_mac");
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), true);
+  assert.equal(sessionStore.get("opencode-session-ses_external_mac"), "ses_external_mac");
 });
 
 test("thread/resume adopts discovered session and thread/read succeeds", async () => {

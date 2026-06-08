@@ -49,6 +49,7 @@ const { resolveOpenCodeVariantForPrompt } = require("./opencode-variant-resolve"
 const { createOpenCodeAuthErrorNotifier } = require("./opencode-auth-error-handler");
 const { mapOpenCodeSessionToContextUsage } = require("./opencode-usage-mapper");
 const { createAttachmentStore, isAttachmentsEnabled } = require("./attachment-store");
+const { validateDirectory } = require("./project-path-policy");
 
 const ERROR_CODES = {
   OPENCODE_NOT_INSTALLED: { errorCode: "opencode_not_installed", action: "show_install_instructions" },
@@ -1077,7 +1078,15 @@ function createOpenCodeProvider({
           }),
         );
 
-        const cwd = readString(discoveredMeta.cwd) || process.cwd();
+        const cwdCandidate = readString(discoveredMeta.cwd) || process.cwd();
+        const cwdValidation = await validateDirectory(cwdCandidate);
+        if (!cwdValidation.isAllowed) {
+          const error = new Error("That folder is outside the allowed local project locations.");
+          error.errorCode = "path_not_allowed";
+          error.userMessage = error.message;
+          throw error;
+        }
+        const cwd = cwdValidation.path;
         const title = readString(discoveredMeta.title) || "OpenCode chat";
         const model = normalizeOpenCodeModel(discoveredMeta.model);
         const agent = readString(discoveredMeta.agent) || "build";
@@ -1879,7 +1888,13 @@ function createOpenCodeProvider({
     const threadId = active.thread.id;
     inFlightThreadIds.add(threadId);
     try {
-      await ensureStarted();
+      const ensureStartedResult = await ensureStartedWithCap();
+      if (!ensureStartedResult.started) {
+        const error = new Error("OpenCode is still starting. Try again in a moment.");
+        error.errorCode = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
+        error.action = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.action;
+        throw error;
+      }
 
       if (!active.thread.sessionId) {
         const sessionId = await client.createSession({ cwd });

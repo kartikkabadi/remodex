@@ -72,27 +72,35 @@ async function projectDiscoverFromOpenCode(params, { homeDir, opencodeProvider, 
     discoverParams.directory = validation.path;
   }
 
-  const projects = await opencodeProvider.discoverProjects(discoverParams);
+  const discoveredProjects = await opencodeProvider.discoverProjects(discoverParams);
+  const projects = [];
 
-  if (projectRegistry && Array.isArray(projects)) {
-    for (const project of projects) {
+  if (Array.isArray(discoveredProjects)) {
+    for (const project of discoveredProjects) {
       const projectPath = readString(project.path || project.directory || project.cwd);
       if (!projectPath) {
         continue;
       }
-      projectRegistry.rememberProjectPath(projectPath, {
-        source: "opencode-project-discover",
-        provider: "opencode",
-        projectId: readString(project.id || project.projectID || project.projectId),
-        label: readString(project.name || project.title || project.label),
-      });
+      const validation = await validateDirectory(projectPath, { homeDir });
+      if (!validation.isAllowed) {
+        continue;
+      }
+      if (projectRegistry) {
+        projectRegistry.rememberProjectPath(validation.path, {
+          source: "opencode-project-discover",
+          provider: "opencode",
+          projectId: readString(project.id || project.projectID || project.projectId),
+          label: readString(project.name || project.title || project.label),
+        });
+      }
+      projects.push(project);
     }
   }
 
   return {
     projects,
     source: "opencode",
-    count: Array.isArray(projects) ? projects.length : 0,
+    count: projects.length,
   };
 }
 
