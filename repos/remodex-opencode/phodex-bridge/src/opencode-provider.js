@@ -836,6 +836,27 @@ function createOpenCodeProvider({
     return ids;
   }
 
+  function filterDiscoveredRows(rows) {
+    const ownedSessionIds = collectOwnedSessionIds();
+    return rows.filter((row) => {
+      const sessionId = readString(row.metadata?.sessionId || row.sessionId);
+      return sessionId && !ownedSessionIds.has(sessionId) && !threads.has(row.id);
+    });
+  }
+
+  function removeDiscoveredRowFromCache(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId || discoveredSessionsCache.rows.length === 0) {
+      return;
+    }
+    discoveredSessionsCache = {
+      ...discoveredSessionsCache,
+      rows: discoveredSessionsCache.rows.filter(
+        (row) => readString(row.metadata?.sessionId || row.sessionId) !== normalizedSessionId,
+      ),
+    };
+  }
+
   function scheduleAsyncDiscoverRefresh() {
     if (discoverRefreshInFlight) {
       return;
@@ -850,8 +871,9 @@ function createOpenCodeProvider({
       });
   }
 
-  async function ensureStartedWithDiscoverCap() {
+  async function ensureStartedWithCap({ onTimeout } = {}) {
     const capMs = resolveEnsureStartedCapMs(env);
+    const startedAt = Date.now();
     let timeoutId;
     try {
       await Promise.race([
@@ -866,17 +888,13 @@ function createOpenCodeProvider({
           }
         }),
       ]);
-      return true;
+      return { started: true, ms: Date.now() - startedAt };
     } catch (error) {
       if (readString(error?.message) === "ensure_started_timeout") {
-        console.log(
-          JSON.stringify({
-            event: "discover_refresh_async",
-            reason: "ensure_started_timeout",
-          }),
-        );
-        scheduleAsyncDiscoverRefresh();
-        return false;
+        if (typeof onTimeout === "function") {
+          onTimeout();
+        }
+        return { started: false, ms: Date.now() - startedAt };
       }
       throw error;
     } finally {
@@ -884,6 +902,21 @@ function createOpenCodeProvider({
         clearTimeout(timeoutId);
       }
     }
+  }
+
+  async function ensureStartedWithDiscoverCap() {
+    const result = await ensureStartedWithCap({
+      onTimeout: () => {
+        console.log(
+          JSON.stringify({
+            event: "discover_refresh_async",
+            reason: "ensure_started_timeout",
+          }),
+        );
+        scheduleAsyncDiscoverRefresh();
+      },
+    });
+    return result.started;
   }
 
   async function refreshDiscoveredSessionsCache({ force = false, background = false } = {}) {
@@ -896,15 +929,24 @@ function createOpenCodeProvider({
       now - discoveredSessionsCache.fetchedAt < ttlMs;
 
     if (cacheFresh) {
-      return discoveredSessionsCache.rows;
+      const rows = filterDiscoveredRows(discoveredSessionsCache.rows);
+      console.log(
+        JSON.stringify({
+          event: "opencode_discover_sessions",
+          listed: rows.length,
+          cache_hit: true,
+          background,
+        }),
+      );
+      return rows;
     }
 
     const started = await ensureStartedWithDiscoverCap();
     if (!started && discoveredSessionsCache.rows.length > 0) {
-      return discoveredSessionsCache.rows;
+      return filterDiscoveredRows(discoveredSessionsCache.rows);
     }
     if (!healthy || !client || typeof client.listSessions !== "function") {
-      return discoveredSessionsCache.rows;
+      return filterDiscoveredRows(discoveredSessionsCache.rows);
     }
 
     const listResult = await client.listSessions({ limit: cap });
@@ -1024,7 +1066,16 @@ function createOpenCodeProvider({
           throw threadNotFoundError(normalizedThreadId);
         }
 
-        await ensureStarted();
+        const ensureStartedResult = await ensureStartedWithCap();
+        console.log(
+          JSON.stringify({
+            event: "adopt_ensure_started_ms",
+            ms: ensureStartedResult.ms,
+            started: ensureStartedResult.started,
+            sessionId,
+            threadId: normalizedThreadId,
+          }),
+        );
 
         const cwd = readString(discoveredMeta.cwd) || process.cwd();
         const title = readString(discoveredMeta.title) || "OpenCode chat";
@@ -1072,21 +1123,24 @@ function createOpenCodeProvider({
           userStartedInProcess: true,
         };
 
-        try {
-          const messages = normalizeSessionMessagesResponse(
-            await client.getMessages(sessionId),
-          );
-          if (messages && messages.length > 0) {
-            thread.turns = messagesToTurns(messages, normalizedThreadId);
+        if (ensureStartedResult.started && client && typeof client.getMessages === "function") {
+          try {
+            const messages = normalizeSessionMessagesResponse(
+              await client.getMessages(sessionId),
+            );
+            if (messages && messages.length > 0) {
+              thread.turns = messagesToTurns(messages, normalizedThreadId);
+            }
+          } catch {
+            // thread/read still succeeds with empty turns.
           }
-        } catch {
-          // thread/read still succeeds with empty turns.
         }
 
         threads.set(normalizedThreadId, thread);
         if (typeof sessions.markAdopted === "function") {
           sessions.markAdopted(sessionId);
         }
+        removeDiscoveredRowFromCache(sessionId);
         rememberThreadProject(thread, "opencode-discovered-adopt");
         return thread;
       } finally {

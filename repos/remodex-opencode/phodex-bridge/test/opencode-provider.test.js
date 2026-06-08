@@ -2562,6 +2562,50 @@ test("owned sessionId omits discovered stub and adopt returns owned thread", asy
   assert.equal(adopted.thread.id, "opencode-thread-owned");
 });
 
+test("owned sessionId omits discovered stub on discover cache hit", async () => {
+  let listCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_DISCOVER_TTL_MS: "60000",
+    },
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      listSessions: async () => {
+        listCalls += 1;
+        return { data: [externalDiscoveredRow()] };
+      },
+    }),
+  });
+
+  const first = await provider.listThreads();
+  assert.ok(
+    first.data.find((thread) => thread.id === "opencode-session-ses_external_mac"),
+    "discovered stub should appear before ownership mapping",
+  );
+  assert.equal(listCalls, 1);
+
+  ownershipStore.setOwnership("opencode-thread-owned", "opencode");
+  sessionStore.set("opencode-thread-owned", "ses_external_mac", {
+    cwd: "/Users/me/work/phone-started",
+    title: "Phone thread",
+  });
+
+  const second = await provider.listThreads();
+  assert.equal(
+    second.data.find((thread) => thread.id === "opencode-session-ses_external_mac"),
+    undefined,
+    "discovered stub should be filtered on cache hit after ownership mapping",
+  );
+  assert.ok(second.data.find((thread) => thread.id === "opencode-thread-owned"));
+  assert.equal(listCalls, 1, "cache hit should not call listSessions again");
+});
+
 test("discover uses stale cache when ensureStarted exceeds cap", async (t) => {
   let listCalls = 0;
   let blockStart = false;
@@ -2618,6 +2662,64 @@ test("discover uses stale cache when ensureStarted exceeds cap", async (t) => {
   const second = await provider.listThreads();
   assert.equal(second.data.length, 1);
   assert.equal(listCalls, 1, "stale cache should avoid blocking refresh on ensureStarted timeout");
+});
+
+test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t) => {
+  let blockStart = false;
+  let running = false;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_OPENCODE_DISCOVER_TTL_MS: "60000",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for adopt-timeout test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => discoveredListClient([externalDiscoveredRow()]),
+  });
+  t.after(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await provider.shutdown();
+  });
+
+  await provider.listThreads();
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+
+  const read = await provider.handleRequest({
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac", includeTurns: true },
+  });
+
+  assert.equal(read.thread.id, "opencode-session-ses_external_mac");
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), true);
+  assert.equal(sessionStore.get("opencode-session-ses_external_mac"), "ses_external_mac");
+  assert.deepEqual(read.thread.turns, []);
 });
 
 test("ownership stub includes cwd for sidebar grouping", async () => {
