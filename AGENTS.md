@@ -26,7 +26,7 @@ A multi-repo workspace containing:
 
 - **Thread ownership is durable**: `~/.remodex/thread-ownership.json` persists thread→provider mapping across bridge restarts. Set on `thread/start`, checked on every subsequent route.
 - **Provider isolation**: OpenCode providers never leak into Codex paths. `stripRuntimeProviderFieldsForCodex()` removes provider fields before forwarding to Codex app-server.
-- **Capability flags drive UI exclusively**: the 15 capability flags in `runtime/catalog` (plus optional 16th `supportsStructuredSkillInput`) are the only source of truth for what the iOS composer shows, hides, or greys out. Provider identity is never checked in UI code for visibility. Canonical plan: `docs/design/master-opencode-integration.md`.
+- **Capability flags drive UI exclusively**: the **19** capability flags in `runtime/catalog` (`provider-capabilities.js` / ADR-002) are the only source of truth for what the iOS composer shows, hides, or greys out. Provider identity is never checked in UI code for visibility. Live parity: `docs/operations/release-compatibility.md`; archival plan: `docs/design/master-opencode-integration.md`.
 - **Secure transport is unchanged**: E2EE encryption, relay protocol, pairing flow, and trusted reconnect are NOT modified by provider work.
 - **Handler cascade order is load-bearing**: the if/else chain in `bridge.js:handleApplicationMessage()` has a fixed order. Insert new handlers at the documented position, not at the end.
 
@@ -37,7 +37,7 @@ See `docs/architecture/` for full decision records with context and rejected alt
 | ADR | Topic | Decision |
 |-----|-------|----------|
 | 001 | Provider interface | `ProviderHarness` interface — one file + one registration per new runtime |
-| 002 | Capability model | 15 flags per model (+ optional 16th structured skills), catalog is source of truth, grey-out mechanics |
+| 002 | Capability model | 19 flags per model, catalog is source of truth, grey-out mechanics |
 | 003 | Thread ownership | Durable JSON file, strict providers (no mid-thread harness switching) |
 | 004 | Transport protocol | `opencode serve` HTTP + `@opencode-ai/sdk/v2` as primary |
 | 005 | Error taxonomy | 3-layer model: SDK→Bridge→iOS, structured error codes, no raw stack traces |
@@ -69,17 +69,17 @@ remodex:opencode/
 
 Completed in `repos/remodex-opencode` on base `38ad72b`. See `repos/remodex-opencode/AGENTS.md` Phase 2 table. PR8 catalog handoff flip **done** — see `docs/operations/device-e2e-signoff.md`.
 
-## Execute-plan follow-on (16 PRs — in progress)
+## Execute-plan follow-on (16 PRs — **merged**)
 
-Grok `/execute-plan` `a6c7a11c` (Jun 2026) implemented most PRs in isolated worktrees; **0/16 merged to `main`**.
+Grok `/execute-plan` `a6c7a11c` (Jun 2026) landed **16/16 PR intents on meta `main`** via four themed merges (Messaging, Composer, Branding, Closeout). Historical Grok worktrees remain for forensic reference only.
 
 | Doc | Purpose |
 |-----|---------|
-| [`docs/operations/execute-plan-a6c7a11c-INDEX.md`](docs/operations/execute-plan-a6c7a11c-INDEX.md) | Start here |
-| [`docs/operations/execute-plan-a6c7a11c-STATUS.md`](docs/operations/execute-plan-a6c7a11c-STATUS.md) | Done vs not done |
-| [`.cursor/plans/execute-plan-a6c7a11c-integration.plan.md`](.cursor/plans/execute-plan-a6c7a11c-integration.plan.md) | How to finish (Phase 0 → Themes A–D) |
+| [`docs/operations/execute-plan-a6c7a11c-INDEX.md`](docs/operations/execute-plan-a6c7a11c-INDEX.md) | Entry point |
+| [`docs/operations/execute-plan-a6c7a11c-STATUS.md`](docs/operations/execute-plan-a6c7a11c-STATUS.md) | **Authoritative** done vs not done (16/16 on `main`) |
+| [`.cursor/plans/execute-plan-a6c7a11c-integration.plan.md`](.cursor/plans/execute-plan-a6c7a11c-integration.plan.md) | Historical integration plan (complete) |
 
-Do not resume Grok TUI; use worktree git + integration plan.
+**Next bar (post execute-plan):** owner device final pass (O0–O17, `REMODEX_DISABLE_OPENCODE=1` regression) → upstream export. Do not resume Grok TUI.
 
 ## Workflow
 
