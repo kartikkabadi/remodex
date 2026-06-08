@@ -73,7 +73,17 @@ Horizontal relay sharding is **deferred post-TestFlight** (OQ-8). Until then, se
 
 ## `model/list`
 
-See `REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS` and `CODEX_MODEL_LIST_BUDGET_MS` in `runtime-provider-router.js`.
+Router runs Codex and OpenCode legs in **parallel** (`Promise.all`), mirroring `thread/list`.
+
+| Metric / knob | Budget | Notes |
+|---------------|--------|-------|
+| Codex leg | `CODEX_MODEL_LIST_BUDGET_MS` (**3s** internal) | `.catch()` → `{ items: [] }` |
+| OpenCode leg | `REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS` (default cold-serve sum) | On timeout → `[]` for OpenCode models |
+| `full: true` sheet | `REMODEX_MODEL_LIST_OPENCODE_FULL_BUDGET_MS` (**15s**) | Lazy All Models sheet only |
+| Wall p95 (warm picker) | **< 3s** | First-page model picker |
+| Wall p95 (`full: true`) | **< 8s** | All Models sheet |
+
+Implementation: `runtime-provider-router.js` (`withModelListBudget`, `listProviderModelsForModelList`).
 
 ## Test suite duration
 

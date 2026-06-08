@@ -108,14 +108,22 @@ function createTestRouter(overrides = {}) {
     router,
     async request(request, { timeoutMs = 5000 } = {}) {
       payload = null;
+      let responded = false;
       const responsePromise = new Promise((resolve) => {
-        resolveResponse = resolve;
+        resolveResponse = () => {
+          responded = true;
+          resolve();
+        };
       });
       const timeoutPromise = new Promise((resolve) => {
         setTimeout(resolve, timeoutMs);
       });
       router.handleApplicationMessage(JSON.stringify(request));
       await Promise.race([responsePromise, timeoutPromise]);
+      assert.ok(
+        responded && payload,
+        `router did not respond within ${timeoutMs}ms for ${request.method ?? "unknown method"}`,
+      );
       return payload;
     },
   };

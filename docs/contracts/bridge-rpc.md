@@ -86,6 +86,26 @@ All fields optional. Omit for first page.
 
 **Routing behavior:** Bridge fetches Codex models via `codex.send("model/list")`, fetches OpenCode models via `provider.listModels()`, merges both arrays into `items`, adds `modelProvider` and `capabilities` fields to every model. Codex models always come first.
 
+Router runs Codex `model/list` and OpenCode `provider.listModels()` **in parallel** (`Promise.all`), mirroring `thread/list`. Each leg has an independent race budget; Codex failures are isolated via `.catch()` and return `{ items: [] }`.
+
+#### `model/list` parallel merge and SLOs
+
+| Env knob | Default | Purpose |
+|----------|---------|---------|
+| `CODEX_MODEL_LIST_BUDGET_MS` | `3000` (internal constant) | Codex leg race cap |
+| `REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS` | `START_TIMEOUT + HEALTH_TIMEOUT + 5s` | OpenCode leg race cap (cold serve) |
+| `REMODEX_MODEL_LIST_OPENCODE_FULL_BUDGET_MS` | `15000` | `params.full: true` All Models sheet only |
+
+**Wall-clock SLOs** (picker first page vs lazy All Models sheet):
+
+| Metric | Budget | Notes |
+|--------|--------|-------|
+| `model/list` p95 (warm, first page) | **< 3s** | Model picker initial load |
+| `model/list` p95 (`full: true`) | **< 8s** | All Models sheet; iOS loads lazily on sheet open |
+| OpenCode leg on budget timeout | fallback `[]` | Codex items still returned; OpenCode omitted for that response |
+
+See `docs/operations/performance-limits.md` § `model/list`.
+
 **`modelProvider` values:** `"codex"`, `"opencode"`, or future provider IDs.
 
 **`upstreamProviderId`:** For OpenCode models only — the underlying provider (e.g. `"anthropic"`, `"openai"`, `"google"`). For Codex models this field is absent.
@@ -96,8 +116,16 @@ All fields optional. Omit for first page.
 
 **Params:**
 ```
-{ cursor?: string, limit?: number, includeArchived?: boolean }
+{
+  cursor?: string,
+  limit?: number,
+  includeArchived?: boolean,
+  discoverOpenCodeSessions?: boolean,
+  discoverOpenCodeProjects?: boolean
+}
 ```
+
+The Remodex iOS app sends `discoverOpenCodeSessions` / `discoverOpenCodeProjects: true` on foreground sidebar polls when the user has not opted out (`openCodeExternalDiscoveryEnabled`, default **on**). Bridge policy honors client params when env is unset; `REMODEX_OPENCODE_DISCOVER_SESSIONS=0` hard-kills session discover; `REMODEX_OPENCODE_DISCOVER_PROJECTS=0` hard-kills hot-path project discover.
 
 **Result:**
 ```json
