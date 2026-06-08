@@ -220,6 +220,7 @@ function createOpenCodeProvider({
   /** @type {Map<string, Set<string>>} */
   const sessionPermissionGrants = new Map();
   const PERMISSION_WATCHDOG_MS = DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
+  const MAX_PENDING_PERMISSIONS = 20;
   let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
   let discoverRefreshInFlight = null;
   const adoptMutexes = new Map();
@@ -1517,10 +1518,7 @@ function createOpenCodeProvider({
       unsubscribe();
     }
     eventUnsubscribers.clear();
-    for (const pending of pendingPermissions.values()) {
-      clearPermissionWatchdog(pending);
-    }
-    pendingPermissions.clear();
+    clearAllPendingPermissions();
     activeTurns.clear();
     inFlightThreadIds.clear();
     completedTurnIds.clear();
@@ -2325,6 +2323,33 @@ function createOpenCodeProvider({
     }
   }
 
+  function clearAllPendingPermissions() {
+    for (const pending of pendingPermissions.values()) {
+      clearPermissionWatchdog(pending);
+    }
+    pendingPermissions.clear();
+  }
+
+  function evictOldestPendingPermission() {
+    const oldestPermissionId = pendingPermissions.keys().next().value;
+    if (!oldestPermissionId) {
+      return null;
+    }
+
+    const evicted = pendingPermissions.get(oldestPermissionId);
+    clearPermissionWatchdog(evicted);
+    pendingPermissions.delete(oldestPermissionId);
+    void (async () => {
+      try {
+        await ensureStarted();
+        await client.replyToPermission(oldestPermissionId, false);
+      } catch (error) {
+        console.error(`${logPrefix} permission cap eviction auto-deny failed: ${error.message}`);
+      }
+    })();
+    return evicted;
+  }
+
   function armPermissionWatchdog(entry, payload) {
     clearPermissionWatchdog(entry);
     entry.watchdog = setTimeout(() => {
@@ -2386,6 +2411,11 @@ function createOpenCodeProvider({
 
     const existing = pendingPermissions.get(permissionId);
     clearPermissionWatchdog(existing);
+    if (!existing) {
+      while (pendingPermissions.size >= MAX_PENDING_PERMISSIONS) {
+        evictOldestPendingPermission();
+      }
+    }
     const entry = { ...payload, watchdog: null };
     pendingPermissions.set(permissionId, entry);
 
@@ -2646,6 +2676,7 @@ function createOpenCodeProvider({
           `${logPrefix} OpenCode server idle for ${Math.round(idleDuration / 60000)}min, shutting down.`,
         );
         server.stop().then(() => {
+          clearAllPendingPermissions();
           client = null;
           healthy = false;
         });

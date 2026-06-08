@@ -273,6 +273,39 @@ test("shutdown clears pending permissions and watchdogs", async () => {
   assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
 });
 
+test("permission/request evicts oldest pending entry at cap 20 (B-17)", async () => {
+  const deniedIds = [];
+  const replyClient = fakeClient(async (permissionId, allow) => {
+    if (!allow) {
+      deniedIds.push(permissionId);
+    }
+    return { success: true };
+  });
+  const provider = makeProvider({
+    env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_OPENCODE_PERMISSIONS_UI: "1", REMODEX_TEST: "1" },
+    clientFactory: () => replyClient,
+  });
+
+  for (let index = 0; index < 20; index += 1) {
+    provider.testSeedPendingPermission(`perm-cap-${index}`, { threadId: "thread-1" });
+  }
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 20);
+
+  provider.__test.handlePermissionRequestEvent(
+    { thread: { id: "thread-1", cwd: "/tmp" }, turn: { id: "turn-1" }, sessionId: "ses-1" },
+    { permissionId: "perm-cap-new", tool: "bash", args: { command: "ls" } },
+  );
+
+  assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 20);
+  assert.equal(provider.__test.hasPendingPermissionWatchdog("perm-cap-0"), false);
+  assert.equal(provider.__test.hasPendingPermissionWatchdog("perm-cap-new"), true);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(deniedIds, ["perm-cap-0"]);
+
+  await provider.shutdown();
+});
+
 test("permission/reply rejects missing threadId (SEC-04)", async () => {
   const provider = makeProvider({ clientFactory: () => fakeClient() });
   provider.testSeedPendingPermission("perm_missing_thread", { threadId: "thread-1" });

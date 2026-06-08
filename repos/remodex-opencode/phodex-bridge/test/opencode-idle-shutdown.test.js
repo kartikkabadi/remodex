@@ -175,6 +175,56 @@ test("shutdown stops idle timer", async () => {
   }
 });
 
+test("idle timer clears pending permissions when server stops (B-23)", async () => {
+  installFakeTimers();
+  try {
+    let stopped = false;
+    let _running = false;
+    const server = {
+      get baseUrl() {
+        return _running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return _running;
+      },
+      start() {
+        _running = true;
+        return Promise.resolve();
+      },
+      stop() {
+        _running = false;
+        stopped = true;
+        return Promise.resolve();
+      },
+    };
+
+    const provider = createOpenCodeProvider({
+      sendApplicationMessage: () => {},
+      env: { REMODEX_ENABLE_OPENCODE: "1", REMODEX_OPENCODE_PERMISSIONS_UI: "1", REMODEX_TEST: "1" },
+      serverFactory: () => server,
+      clientFactory: () => fakeClient(),
+      ownershipStore: fakeOwnershipStore(),
+    });
+
+    provider.__test.handlePermissionRequestEvent(
+      { thread: { id: "thread-1", cwd: "/tmp" }, turn: { id: "turn-1" }, sessionId: "ses-1" },
+      { permissionId: "perm-idle-clear", tool: "bash", args: { command: "ls" } },
+    );
+    assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 1);
+
+    await provider.listModels();
+
+    const idleTimeout = timeoutCalls.find((t) => t.ms === HEALTH_IDLE_SHUTDOWN_MS);
+    assert.ok(idleTimeout, "idle timer should be set");
+    await idleTimeout.fn();
+
+    assert.ok(stopped, "server.stop should be called by idle timer");
+    assert.equal(provider.getObservabilityMetrics().permissionPendingCount, 0);
+  } finally {
+    restoreTimers();
+  }
+});
+
 test("idle timer stops server when no active turns", async () => {
   installFakeTimers();
   try {
