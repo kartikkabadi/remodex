@@ -109,6 +109,35 @@ test("handles empty thread ID", () => {
   assert.equal(ok, false);
 });
 
+test("getBySessionId returns owned thread mapping", () => {
+  const store = makeSessionStore();
+  store.set("opencode-thread-owned", "ses_owned", { cwd: "/tmp/project" });
+  const entry = store.getBySessionId("ses_owned");
+  assert.equal(entry.threadId, "opencode-thread-owned");
+  assert.equal(entry.sessionId, "ses_owned");
+  assert.equal(entry.cwd, "/tmp/project");
+});
+
+test("discovered index persists metadata until adopt", () => {
+  const fs = fakeFs();
+  const store = makeSessionStore({ fs });
+  store.setDiscovered("ses_discovered", {
+    threadId: "opencode-session-ses_discovered",
+    cwd: "/tmp/mac",
+    title: "Mac session",
+    model: "opencode/gpt-5.5",
+    agent: "build",
+  });
+  const entry = store.getDiscovered("ses_discovered");
+  assert.equal(entry.threadId, "opencode-session-ses_discovered");
+  assert.equal(entry.adopted, false);
+
+  store.markAdopted("ses_discovered");
+  const store2 = makeSessionStore({ fs });
+  const adopted = store2.getDiscovered("ses_discovered");
+  assert.equal(adopted.adopted, true);
+});
+
 // --- Provider session lifecycle tests ---
 
 function fakeServer() {

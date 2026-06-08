@@ -68,6 +68,7 @@ function fakeOwnershipStore() {
 
 function fakeSessionStore() {
   const store = new Map();
+  const discovered = new Map();
   return {
     set(threadId, sessionId, metadata = {}) {
       store.set(threadId, {
@@ -83,6 +84,36 @@ function fakeSessionStore() {
     getEntry(threadId) {
       const entry = store.get(threadId);
       return entry ? { ...entry } : null;
+    },
+    getBySessionId(sessionId) {
+      for (const [threadId, entry] of store.entries()) {
+        if (entry.sessionId === sessionId) {
+          return { threadId, ...entry };
+        }
+      }
+      return null;
+    },
+    setDiscovered(sessionId, metadata = {}) {
+      discovered.set(sessionId, {
+        sessionId,
+        threadId: metadata.threadId || `opencode-session-${sessionId}`,
+        adopted: false,
+        ...metadata,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    },
+    getDiscovered(sessionId) {
+      const entry = discovered.get(sessionId);
+      return entry ? { ...entry } : null;
+    },
+    markAdopted(sessionId) {
+      const entry = discovered.get(sessionId);
+      if (!entry) {
+        return false;
+      }
+      entry.adopted = true;
+      return true;
     },
     remove(threadId) {
       return store.delete(threadId);
@@ -2265,4 +2296,352 @@ test("getHandoffContext ignores untrusted client sessionId and directory", async
   assert.equal(context.threadId, start.thread.id);
   assert.equal(context.sessionId, "ses_owned");
   assert.equal(context.cwd, "/tmp/owned-project");
+});
+
+function discoveredListClient(rows = []) {
+  return {
+    ...fakeClient(),
+    listSessions: async () => ({ data: rows }),
+    getMessages: async () => [
+      {
+        type: "user",
+        text: "hello from mac",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        type: "assistant",
+        text: "hello from opencode",
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
+function externalDiscoveredRow({
+  sessionId = "ses_external_mac",
+  cwd = "/Users/me/work/mac-opencode",
+  title = "Mac OpenCode session",
+} = {}) {
+  return {
+    id: `opencode-session-${sessionId}`,
+    title,
+    name: title,
+    cwd,
+    model: "opencode/gpt-5.5",
+    modelProvider: "opencode",
+    provider: "opencode",
+    createdAt: "2026-06-08T10:00:00.000Z",
+    updatedAt: "2026-06-08T11:00:00.000Z",
+    metadata: {
+      provider: "opencode",
+      discoveredExternally: true,
+      sessionId,
+    },
+  };
+}
+
+test("listThreads includes external sessions when discover flag is on", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  const list = await provider.listThreads();
+  const row = list.data.find((thread) => thread.id === "opencode-session-ses_external_mac");
+  assert.ok(row, "external session should appear in listThreads");
+  assert.equal(row.cwd, "/Users/me/work/mac-opencode");
+  assert.equal(row.modelProvider, "opencode");
+  assert.equal(row.metadata.discoveredExternally, true);
+  assert.equal(row.metadata.sessionId, "ses_external_mac");
+});
+
+test("listThreads omits external sessions when discover flag is off", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "0",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-session-ses_external_mac"),
+    undefined,
+  );
+});
+
+test("thread/resume adopts discovered session and thread/read succeeds", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  const read = await provider.handleRequest({
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac", includeTurns: true },
+  });
+
+  assert.equal(read.thread.id, "opencode-session-ses_external_mac");
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), true);
+  assert.equal(sessionStore.get("opencode-session-ses_external_mac"), "ses_external_mac");
+  assert.ok(Array.isArray(read.thread.turns));
+  assert.equal(read.thread.turns.length, 1);
+});
+
+test("turn/start before adopt fails with thread_not_found", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "turn/start",
+        params: {
+          threadId: "opencode-session-ses_external_mac",
+          input: "hello",
+        },
+      }),
+    (error) => error.errorCode === "thread_not_found",
+  );
+});
+
+test("turn/start after adopt succeeds", async () => {
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  await provider.handleRequest({
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac" },
+  });
+
+  const turn = await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: {
+      threadId: "opencode-session-ses_external_mac",
+      input: "hello after adopt",
+    },
+  });
+  assert.ok(turn.turnId);
+});
+
+test("second thread/resume on discovered id is idempotent", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const provider = makeProvider({
+    ownershipStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  await provider.handleRequest({
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac" },
+  });
+  const second = await provider.handleRequest({
+    id: 2,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac" },
+  });
+
+  assert.equal(second.thread.id, "opencode-session-ses_external_mac");
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), true);
+});
+
+test("adopt failure leaves no ownership row", async () => {
+  const ownershipStore = {
+    setOwnership() {
+      return false;
+    },
+    ownsThread() {
+      return false;
+    },
+    removeOwnership() {
+      return false;
+    },
+    getAllOwnedBy() {
+      return [];
+    },
+  };
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  await provider.listThreads();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/read",
+        params: { threadId: "opencode-session-ses_external_mac" },
+      }),
+    (error) => error.errorCode === "opencode_adopt_failed",
+  );
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), false);
+  assert.equal(sessionStore.get("opencode-session-ses_external_mac"), null);
+});
+
+test("owned sessionId omits discovered stub and adopt returns owned thread", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  ownershipStore.setOwnership("opencode-thread-owned", "opencode");
+  sessionStore.set("opencode-thread-owned", "ses_external_mac", {
+    cwd: "/Users/me/work/phone-started",
+    title: "Phone thread",
+  });
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+    },
+    clientFactory: async () =>
+      discoveredListClient([externalDiscoveredRow()]),
+  });
+
+  const list = await provider.listThreads();
+  assert.equal(
+    list.data.find((thread) => thread.id === "opencode-session-ses_external_mac"),
+    undefined,
+  );
+  assert.ok(list.data.find((thread) => thread.id === "opencode-thread-owned"));
+
+  const adopted = await provider.handleRequest({
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "opencode-session-ses_external_mac" },
+  });
+  assert.equal(adopted.thread.id, "opencode-thread-owned");
+});
+
+test("discover uses stale cache when ensureStarted exceeds cap", async (t) => {
+  let listCalls = 0;
+  let blockStart = false;
+  let running = false;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_OPENCODE_DISCOVER_TTL_MS: "1",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for stale-cache test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      listSessions: async () => {
+        listCalls += 1;
+        return { data: [externalDiscoveredRow()] };
+      },
+    }),
+  });
+  t.after(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await provider.shutdown();
+  });
+
+  const first = await provider.listThreads();
+  assert.equal(first.data.length, 1);
+  assert.equal(listCalls, 1);
+
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const second = await provider.listThreads();
+  assert.equal(second.data.length, 1);
+  assert.equal(listCalls, 1, "stale cache should avoid blocking refresh on ensureStarted timeout");
+});
+
+test("ownership stub includes cwd for sidebar grouping", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  ownershipStore.setOwnership("opencode-thread-stub-cwd", "opencode");
+  sessionStore.set("opencode-thread-stub-cwd", "ses_stub", {
+    cwd: "/Users/me/work/stub-project",
+    title: "Stub with cwd",
+  });
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: { REMODEX_ENABLE_OPENCODE: "1" },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => ({}),
+      getMessages: async () => [{ type: "user", text: "activity" }],
+    }),
+  });
+
+  const list = await provider.listThreads();
+  const row = list.data.find((thread) => thread.id === "opencode-thread-stub-cwd");
+  assert.ok(row);
+  assert.equal(row.cwd, "/Users/me/work/stub-project");
 });

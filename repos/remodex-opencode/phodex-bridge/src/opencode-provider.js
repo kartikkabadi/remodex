@@ -65,6 +65,10 @@ const HEALTH_MAX_RESTARTS = 3;
 const HEALTH_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
 const LIST_THREADS_SESSION_VALIDATE_CAP = 20;
 const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
+const DEFAULT_DISCOVER_SESSIONS_CAP = 30;
+const DEFAULT_DISCOVER_SESSIONS_TTL_MS = 60_000;
+const DEFAULT_ENSURE_STARTED_CAP_MS = 4_000;
+const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
 const OPENCODE_PRUNE_OPS_HINT =
   "node phodex-bridge/scripts/prune-opencode-ownership.js --apply";
@@ -75,6 +79,42 @@ function resolveListThreadsValidateCap(env = process.env) {
     return boundedPositiveInteger(fromEnv, LIST_THREADS_SESSION_VALIDATE_CAP);
   }
   return LIST_THREADS_SESSION_VALIDATE_CAP;
+}
+
+function isDiscoverSessionsEnabled(env = process.env) {
+  return readString(env?.REMODEX_OPENCODE_DISCOVER_SESSIONS) === "1";
+}
+
+function resolveDiscoverSessionsCap(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_LIST_THREADS_DISCOVER_CAP);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return boundedPositiveInteger(fromEnv, DEFAULT_DISCOVER_SESSIONS_CAP);
+  }
+  return DEFAULT_DISCOVER_SESSIONS_CAP;
+}
+
+function resolveDiscoverSessionsTtlMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_DISCOVER_TTL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_DISCOVER_SESSIONS_TTL_MS;
+}
+
+function resolveEnsureStartedCapMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_ENSURE_STARTED_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_ENSURE_STARTED_CAP_MS;
+}
+
+function parseDiscoveredThreadSessionId(threadId) {
+  const normalized = readString(threadId);
+  if (!normalized || !normalized.startsWith(DISCOVERED_THREAD_ID_PREFIX)) {
+    return "";
+  }
+  return readString(normalized.slice(DISCOVERED_THREAD_ID_PREFIX.length));
 }
 
 function maybeLogOpenCodePruneOpsHint({ materializationBlocked = 0, prunedCount = 0 } = {}) {
@@ -166,6 +206,9 @@ function createOpenCodeProvider({
   /** @type {Map<string, Set<string>>} */
   const sessionPermissionGrants = new Map();
   const PERMISSION_WATCHDOG_MS = 30_000;
+  let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
+  let discoverRefreshInFlight = null;
+  const adoptMutexes = new Map();
 
   function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
     const tid = readString(threadId);
@@ -204,10 +247,13 @@ function createOpenCodeProvider({
 
   function ownershipStubFromStore(threadId, storeEntry) {
     const updatedAt = readString(storeEntry?.updatedAt) || new Date().toISOString();
+    const cwd = readString(storeEntry?.cwd) || "";
     return {
       id: threadId,
       title: readString(storeEntry?.title) || "OpenCode chat",
       name: readString(storeEntry?.title) || "OpenCode chat",
+      cwd,
+      hasProjectCwd: Boolean(cwd),
       model: normalizeOpenCodeModel(storeEntry?.model) || DEFAULT_OPENCODE_MODEL,
       modelProvider: OPENCODE_PROVIDER_ID,
       provider: OPENCODE_PROVIDER_ID,
@@ -773,6 +819,285 @@ function createOpenCodeProvider({
     return client.listSkills(directory);
   }
 
+  function collectOwnedSessionIds() {
+    const ids = new Set();
+    for (const [, entry] of sessions.entries()) {
+      const sessionId = readString(typeof entry === "string" ? entry : entry?.sessionId);
+      if (sessionId) {
+        ids.add(sessionId);
+      }
+    }
+    for (const thread of threads.values()) {
+      const sessionId = readString(thread.sessionId);
+      if (sessionId) {
+        ids.add(sessionId);
+      }
+    }
+    return ids;
+  }
+
+  function scheduleAsyncDiscoverRefresh() {
+    if (discoverRefreshInFlight) {
+      return;
+    }
+    discoverRefreshInFlight = refreshDiscoveredSessionsCache({
+      force: true,
+      background: true,
+    })
+      .catch(() => {})
+      .finally(() => {
+        discoverRefreshInFlight = null;
+      });
+  }
+
+  async function ensureStartedWithDiscoverCap() {
+    const capMs = resolveEnsureStartedCapMs(env);
+    let timeoutId;
+    try {
+      await Promise.race([
+        ensureStarted(),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error("ensure_started_timeout")),
+            capMs,
+          );
+          if (readString(env.REMODEX_TEST) === "1" && typeof timeoutId?.unref === "function") {
+            timeoutId.unref();
+          }
+        }),
+      ]);
+      return true;
+    } catch (error) {
+      if (readString(error?.message) === "ensure_started_timeout") {
+        console.log(
+          JSON.stringify({
+            event: "discover_refresh_async",
+            reason: "ensure_started_timeout",
+          }),
+        );
+        scheduleAsyncDiscoverRefresh();
+        return false;
+      }
+      throw error;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  async function refreshDiscoveredSessionsCache({ force = false, background = false } = {}) {
+    const cap = resolveDiscoverSessionsCap(env);
+    const ttlMs = resolveDiscoverSessionsTtlMs(env);
+    const now = Date.now();
+    const cacheFresh =
+      !force &&
+      discoveredSessionsCache.fetchedAt > 0 &&
+      now - discoveredSessionsCache.fetchedAt < ttlMs;
+
+    if (cacheFresh) {
+      return discoveredSessionsCache.rows;
+    }
+
+    const started = await ensureStartedWithDiscoverCap();
+    if (!started && discoveredSessionsCache.rows.length > 0) {
+      return discoveredSessionsCache.rows;
+    }
+    if (!healthy || !client || typeof client.listSessions !== "function") {
+      return discoveredSessionsCache.rows;
+    }
+
+    const listResult = await client.listSessions({ limit: cap });
+    const ownedSessionIds = collectOwnedSessionIds();
+    const rows = [];
+
+    for (const thread of listResult.data || []) {
+      const sessionId = readString(thread.metadata?.sessionId || thread.sessionId);
+      if (!sessionId) {
+        continue;
+      }
+      if (ownedSessionIds.has(sessionId)) {
+        continue;
+      }
+      if (threads.has(thread.id)) {
+        continue;
+      }
+
+      if (typeof sessions.setDiscovered === "function") {
+        sessions.setDiscovered(sessionId, {
+          threadId: thread.id,
+          cwd: readString(thread.cwd),
+          title: readString(thread.title),
+          model: readString(thread.model),
+          agent: readString(thread.agent),
+        });
+      }
+
+      rows.push(thread);
+      if (rows.length >= cap) {
+        break;
+      }
+    }
+
+    discoveredSessionsCache = { rows, fetchedAt: Date.now() };
+    console.log(
+      JSON.stringify({
+        event: "opencode_discover_sessions",
+        listed: rows.length,
+        cache_hit: false,
+        background,
+      }),
+    );
+    return rows;
+  }
+
+  async function discoverExternalSessions() {
+    if (!isDiscoverSessionsEnabled(env)) {
+      return [];
+    }
+    return refreshDiscoveredSessionsCache();
+  }
+
+  async function adoptDiscoveredSession(threadId) {
+    const normalizedThreadId = readThreadId({ threadId });
+    const sessionId = parseDiscoveredThreadSessionId(normalizedThreadId);
+    if (!sessionId) {
+      return null;
+    }
+
+    if (ownership.ownsThread(normalizedThreadId, OPENCODE_PROVIDER_ID)) {
+      const existing = threads.get(normalizedThreadId);
+      if (existing) {
+        return existing;
+      }
+      return rehydrateThreadIfNeeded(normalizedThreadId);
+    }
+
+    const ownedBySession =
+      typeof sessions.getBySessionId === "function" ? sessions.getBySessionId(sessionId) : null;
+    if (ownedBySession?.threadId) {
+      if (typeof sessions.markAdopted === "function") {
+        sessions.markAdopted(sessionId);
+      }
+      const ownedThreadId = ownedBySession.threadId;
+      if (threads.has(ownedThreadId)) {
+        return threads.get(ownedThreadId);
+      }
+      return rehydrateThreadIfNeeded(ownedThreadId);
+    }
+
+    if (adoptMutexes.has(normalizedThreadId)) {
+      return adoptMutexes.get(normalizedThreadId);
+    }
+
+    const adoptPromise = (async () => {
+      try {
+        let discoveredMeta =
+          typeof sessions.getDiscovered === "function"
+            ? sessions.getDiscovered(sessionId)
+            : null;
+        if (!discoveredMeta) {
+          const cacheRow = discoveredSessionsCache.rows.find(
+            (row) =>
+              row.id === normalizedThreadId ||
+              readString(row.metadata?.sessionId) === sessionId,
+          );
+          if (cacheRow) {
+            discoveredMeta = {
+              threadId: cacheRow.id,
+              sessionId,
+              cwd: readString(cacheRow.cwd),
+              title: readString(cacheRow.title),
+              model: readString(cacheRow.model),
+              agent: readString(cacheRow.agent),
+            };
+          }
+        }
+        if (!discoveredMeta) {
+          await refreshDiscoveredSessionsCache({ force: true });
+          discoveredMeta =
+            typeof sessions.getDiscovered === "function"
+              ? sessions.getDiscovered(sessionId)
+              : null;
+        }
+        if (!discoveredMeta) {
+          throw threadNotFoundError(normalizedThreadId);
+        }
+
+        await ensureStarted();
+
+        const cwd = readString(discoveredMeta.cwd) || process.cwd();
+        const title = readString(discoveredMeta.title) || "OpenCode chat";
+        const model = normalizeOpenCodeModel(discoveredMeta.model);
+        const agent = readString(discoveredMeta.agent) || "build";
+        const now = new Date().toISOString();
+
+        const sessionSetOk = sessions.set(normalizedThreadId, sessionId, {
+          cwd,
+          title,
+          model,
+          agent,
+          discovered: true,
+        });
+        if (!sessionSetOk) {
+          const error = new Error(`Failed to adopt OpenCode session ${sessionId}`);
+          error.errorCode = "opencode_adopt_failed";
+          throw error;
+        }
+
+        try {
+          assertOwnershipPersisted(
+            ownership.setOwnership(normalizedThreadId, OPENCODE_PROVIDER_ID),
+            normalizedThreadId,
+          );
+        } catch {
+          sessions.remove(normalizedThreadId);
+          const error = new Error(`Failed to adopt OpenCode session ${sessionId}`);
+          error.errorCode = "opencode_adopt_failed";
+          throw error;
+        }
+
+        const thread = {
+          id: normalizedThreadId,
+          title,
+          cwd,
+          model,
+          agent,
+          createdAt: now,
+          updatedAt: now,
+          archived: false,
+          hasProjectCwd: Boolean(cwd),
+          turns: [],
+          sessionId,
+          userStartedInProcess: true,
+        };
+
+        try {
+          const messages = normalizeSessionMessagesResponse(
+            await client.getMessages(sessionId),
+          );
+          if (messages && messages.length > 0) {
+            thread.turns = messagesToTurns(messages, normalizedThreadId);
+          }
+        } catch {
+          // thread/read still succeeds with empty turns.
+        }
+
+        threads.set(normalizedThreadId, thread);
+        if (typeof sessions.markAdopted === "function") {
+          sessions.markAdopted(sessionId);
+        }
+        rememberThreadProject(thread, "opencode-discovered-adopt");
+        return thread;
+      } finally {
+        adoptMutexes.delete(normalizedThreadId);
+      }
+    })();
+
+    adoptMutexes.set(normalizedThreadId, adoptPromise);
+    return adoptPromise;
+  }
+
   async function listThreads(params = {}) {
     const limit = boundedPositiveInteger(params.limit, 50);
     const includeArchived = params.includeArchived === true || params.include_archived === true;
@@ -787,6 +1112,7 @@ function createOpenCodeProvider({
     let validationErrors = 0;
     let prunedInvalid = 0;
     let rehydrateSkipped = 0;
+    let discoveredExternal = 0;
     const sdkCap = resolveListThreadsValidateCap(env);
     const hasOwnedThreadState =
       threads.size > 0 ||
@@ -996,12 +1322,28 @@ function createOpenCodeProvider({
       // Return in-memory threads when ownership or OpenCode is unavailable.
     }
 
+    let discoveredRows = [];
+    if (isDiscoverSessionsEnabled(env)) {
+      try {
+        discoveredRows = await discoverExternalSessions();
+        discoveredExternal = discoveredRows.length;
+      } catch (error) {
+        console.log(
+          JSON.stringify({
+            event: "opencode_discover_sessions_failed",
+            message: readString(error?.message) || "discoverExternalSessions failed",
+          }),
+        );
+      }
+    }
+
     console.log(
       JSON.stringify({
         event: "opencode_list_threads_filtered",
         ownership: ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length,
-        listed: localThreads.length + ownedStubs.length,
+        listed: localThreads.length + ownedStubs.length + discoveredExternal,
         local_memory: localThreads.length,
+        discovered_external: discoveredExternal,
         removed_orphan_ownership: removedOrphanOwnership,
         removed_orphan_session: removedOrphanSession,
         sdk_validations: sdkValidations,
@@ -1017,7 +1359,7 @@ function createOpenCodeProvider({
     maybeLogOpenCodePruneOpsHint({ materializationBlocked });
 
     const seen = new Set();
-    const data = [...localThreads, ...ownedStubs]
+    const data = [...localThreads, ...ownedStubs, ...discoveredRows]
       .filter((thread) => {
         if (!thread?.id || seen.has(thread.id)) return false;
         seen.add(thread.id);
@@ -1116,7 +1458,11 @@ function createOpenCodeProvider({
   async function threadRead(request) {
     const params = request.params || {};
     const threadId = readThreadId(params);
-    const thread = await ensureThreadSession(await requireThread(threadId));
+    let thread = await adoptDiscoveredSession(threadId);
+    if (!thread) {
+      thread = await requireThread(threadId);
+    }
+    thread = await ensureThreadSession(thread);
 
     rememberThreadProject(thread, "opencode-thread-read");
     const responseThread = { ...publicThread(thread) };
@@ -2638,6 +2984,15 @@ function createOpenCodeProvider({
       scheduleAttachmentCleanup,
       setLastAttachmentCleanupAt: (timestamp) => {
         lastAttachmentCleanupAt = timestamp;
+      },
+      setHealthy: (value) => {
+        healthy = value === true;
+      },
+      setClient: (value) => {
+        client = value;
+      },
+      setDiscoverCache: (rows, fetchedAt = Date.now()) => {
+        discoveredSessionsCache = { rows, fetchedAt };
       },
     },
   };

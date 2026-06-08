@@ -624,6 +624,39 @@ test("DISABLE_OPENCODE=1 thread/list does not hot-path discover OpenCode project
   }
 });
 
+test("thread/list with REMODEX_DISABLE_OPENCODE=1 returns Codex-only threads", async () => {
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  process.env.REMODEX_DISABLE_OPENCODE = "1";
+  try {
+    const { request } = createTestRouter({
+      sendCodexRequest: async () => ({
+        data: [
+          {
+            id: "codex-thread-only",
+            cwd: "/Users/me/work/codex",
+            provider: "codex",
+          },
+        ],
+      }),
+    });
+    const response = await request({
+      id: "thread-list-disable",
+      method: "thread/list",
+      params: {},
+    });
+
+    assert.equal(response.id, "thread-list-disable");
+    assert.equal(response.result.data.length, 1);
+    assert.equal(response.result.data[0].id, "codex-thread-only");
+  } finally {
+    if (previousDisable === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+    }
+  }
+});
+
 // MSG-3: DISABLE=1 regression for router/notify paths (late guard, dedup, buffer not affect codex passthrough)
 test("DISABLE_OPENCODE=1 keeps codex router catalog codex-only (no OC provider leakage)", async () => {
   const previous = process.env.REMODEX_DISABLE_OPENCODE;

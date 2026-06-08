@@ -332,6 +332,70 @@ test("thread/list remembers Codex and provider project folders", async () => {
   );
 });
 
+test("thread/list merges discovered external OpenCode sessions from provider", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({ data: [] }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads() {
+          return {
+            data: [
+              {
+                id: "opencode-session-ses_router_external",
+                title: "Mac session",
+                cwd: "/Users/me/work/router-external",
+                modelProvider: "opencode",
+                provider: "opencode",
+                metadata: {
+                  discoveredExternally: true,
+                  sessionId: "ses_router_external",
+                },
+              },
+            ],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-discovered",
+      method: "thread/list",
+      params: {},
+    }),
+  );
+  await responsePromise;
+
+  assert.equal(responsePayload.id, "threads-discovered");
+  const row = responsePayload.result.data.find(
+    (thread) => thread.id === "opencode-session-ses_router_external",
+  );
+  assert.ok(row);
+  assert.equal(row.cwd, "/Users/me/work/router-external");
+  assert.equal(row.modelProvider, "opencode");
+  assert.equal(row.metadata.discoveredExternally, true);
+});
+
 test("model/list returns Codex models when OpenCode listModels never resolves", async () => {
   let responsePayload = null;
   let resolveResponse;
