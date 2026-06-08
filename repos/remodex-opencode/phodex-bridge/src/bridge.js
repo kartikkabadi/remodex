@@ -1351,7 +1351,8 @@ function startBridge({
         return true;
       }
 
-      if (codexHandshakeState !== "warm") {
+      const openCodeCarriesBridge = opencodeCarriesBridge(availableRuntimes);
+      if (codexHandshakeState !== "warm" && !openCodeCarriesBridge) {
         forwardedInitializeRequestIds.add(String(parsed.id));
         return false;
       }
@@ -1368,7 +1369,7 @@ function startBridge({
     }
 
     if (method === "initialized") {
-      return codexHandshakeState === "warm";
+      return codexHandshakeState === "warm" || opencodeCarriesBridge(availableRuntimes);
     }
 
     return false;
