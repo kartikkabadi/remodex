@@ -173,7 +173,7 @@ When `REMODEX_OPENCODE_DISCOVER_SESSIONS=1`, the bridge calls SDK `session.list`
 
 #### `thread/list` discovery flags and SLOs
 
-Phased rollout uses dual feature flags (both default **`0`** until device matrix O18–O20 passes):
+Phased rollout uses dual env feature flags (both default **`0`** on the Mac until device matrix O18–O20 passes). The **Remodex iOS app** sends `discoverOpenCodeSessions` / `discoverOpenCodeProjects: true` on every `thread/list` poll when the user has not opted out (`openCodeExternalDiscoveryEnabled`, default **on**). Bridge policy honors client params when env is unset; env `=0` hard-kills; env `=1` enables without client params.
 
 | Env knob | Default | Purpose |
 |----------|---------|---------|

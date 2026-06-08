@@ -54,6 +54,24 @@ Signals to watch:
 - OpenCode SDK: `[remodex:opencode-sdk]`
 - Router: `[remodex:router]`
 
+### `thread/list` hot-path events
+
+Emitted by `runtime-provider-router.js` and `opencode-provider.js` on each sidebar poll:
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `thread_list_codex_ms` | `ms` | Codex leg wall time |
+| `thread_list_opencode_ms` | `ms` | OpenCode leg wall time (`0` when paginated with cursor) |
+| `thread_list_wall_ms` | `wallMs`, `codexMs`, `opencodeMs`, `discoverProjectsEnabled` | End-to-end merge time |
+| `thread_list_leg_abandoned` | `leg`, `budgetMs` | Per-leg race hit fallback before underlying work finished |
+| `thread_list_codex_failed` | `message` | Codex leg `.catch()` isolation |
+| `thread_list_provider_failed` | `providerId`, `message` | OpenCode/provider leg `.catch()` isolation |
+| `opencode_list_threads_wake_timeout` | `capMs` | Owned-thread wake exceeded `REMODEX_OPENCODE_ENSURE_STARTED_MS` |
+| `opencode_list_threads_wake_failed` | `message`, `ms` | Owned-thread wake failed or timed out |
+| `opencode_list_threads_degraded_stubs` | `threadId`, `reason` | Owned stub returned without SDK validation after wake timeout |
+
+O18 SLO evidence: collect `thread_list_wall_ms` over a 5-minute window with both discover flags on.
+
 ### Redaction
 
 Never log:

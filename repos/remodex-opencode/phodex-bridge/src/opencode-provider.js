@@ -1170,11 +1170,13 @@ function createOpenCodeProvider({
     let prunedInvalid = 0;
     let rehydrateSkipped = 0;
     let discoveredExternal = 0;
+    let degradedWakeStubs = 0;
     const sdkCap = resolveListThreadsValidateCap(env);
     const hasOwnedThreadState =
       threads.size > 0 ||
       ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length > 0 ||
       sessions.entries().length > 0;
+    let wakeDegraded = false;
     if ((!healthy || !client) && hasOwnedThreadState) {
       try {
         const wakeResult = await ensureStartedWithCap({
@@ -1188,6 +1190,7 @@ function createOpenCodeProvider({
           },
         });
         if (!wakeResult.started) {
+          wakeDegraded = true;
           console.log(
             JSON.stringify({
               event: "opencode_list_threads_wake_failed",
@@ -1344,6 +1347,25 @@ function createOpenCodeProvider({
         rehydrateSkipped += 1;
 
         if (!canValidateSessions) {
+          if (wakeDegraded) {
+            const stub = ownershipStubFromStore(threadId, storeEntry);
+            ownedStubs.push({
+              ...stub,
+              metadata: {
+                provider: OPENCODE_PROVIDER_ID,
+                degradedWake: true,
+              },
+            });
+            degradedWakeStubs += 1;
+            console.log(
+              JSON.stringify({
+                event: "opencode_list_threads_degraded_stubs",
+                threadId,
+                reason: "wake_timeout",
+              }),
+            );
+            continue;
+          }
           materializationBlocked += 1;
           continue;
         }
@@ -1429,6 +1451,7 @@ function createOpenCodeProvider({
         pruned_invalid: prunedInvalid,
         validation_errors: validationErrors,
         materialization_blocked: materializationBlocked,
+        degraded_wake_stubs: degradedWakeStubs,
       }),
     );
     maybeLogOpenCodePruneOpsHint({ materializationBlocked });

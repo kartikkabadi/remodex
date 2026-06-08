@@ -47,6 +47,68 @@ final class OpenCodeDiscoveryParamsTests: XCTestCase {
         XCTAssertEqual(requestParams?["discoverOpenCodeProjects"]?.boolValue, true)
     }
 
+    func testPaginatedFetchServerThreadsKeepsDiscoveryParamsOnEveryPage() async throws {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+
+        var requestParams: [RPCObject] = []
+        var requestCount = 0
+
+        service.requestTransportOverride = { method, params in
+            guard method == "thread/list" else {
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([:]),
+                    includeJSONRPC: false
+                )
+            }
+
+            requestCount += 1
+            requestParams.append(params?.objectValue ?? [:])
+
+            if requestCount == 1 {
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "data": .array([
+                            .object([
+                                "id": .string("thread-page-1"),
+                                "title": .string("Page one"),
+                            ]),
+                        ]),
+                        "nextCursor": .string("cursor-page-2"),
+                    ]),
+                    includeJSONRPC: false
+                )
+            }
+
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "data": .array([
+                        .object([
+                            "id": .string("thread-page-2"),
+                            "title": .string("Page two"),
+                        ]),
+                    ]),
+                    "nextCursor": .null,
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let threads = try await service.fetchServerThreads(limit: 2)
+
+        XCTAssertEqual(threads.count, 2)
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(requestParams.count, 2)
+        for params in requestParams {
+            XCTAssertEqual(params["discoverOpenCodeSessions"]?.boolValue, true)
+            XCTAssertEqual(params["discoverOpenCodeProjects"]?.boolValue, true)
+        }
+    }
+
     func testListThreadsOmitsDiscoveryParamsWhenUserDisabled() async throws {
         let suiteName = "OpenCodeDiscoveryParamsTests.disabled.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard

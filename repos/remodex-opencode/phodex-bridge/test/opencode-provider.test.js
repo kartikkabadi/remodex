@@ -2754,6 +2754,87 @@ test("discover uses stale cache when ensureStarted exceeds cap", async (t) => {
   assert.equal(listCalls, 1, "stale cache should avoid blocking refresh on ensureStarted timeout");
 });
 
+test("listThreads returns degraded ownership stubs when owned wake exceeds cap", async (t) => {
+  let blockStart = false;
+  let running = false;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  ownershipStore.setOwnership("opencode-thread-degraded", "opencode");
+  sessionStore.set("opencode-thread-degraded", "ses_degraded", {
+    cwd: "/Users/me/work/degraded",
+    title: "Degraded owned chat",
+  });
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.map((entry) => String(entry)).join(" "));
+  };
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for degraded-owned test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => fakeClient(),
+  });
+  t.after(async () => {
+    console.log = originalLog;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await provider.shutdown();
+  });
+
+  await provider.listModels();
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+
+  const list = await provider.listThreads();
+  const row = list.data.find((thread) => thread.id === "opencode-thread-degraded");
+  assert.ok(row, "owned stub should appear in degraded wake mode");
+  assert.equal(row.metadata?.degradedWake, true);
+
+  const parsedLogs = logs
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  assert.ok(
+    parsedLogs.some((entry) => entry.event === "opencode_list_threads_wake_timeout"),
+    "wake timeout event expected",
+  );
+  assert.ok(
+    parsedLogs.some((entry) => entry.event === "opencode_list_threads_degraded_stubs"),
+    "degraded stub event expected",
+  );
+});
+
 test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t) => {
   let blockStart = false;
   let running = false;

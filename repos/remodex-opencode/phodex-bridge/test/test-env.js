@@ -20,6 +20,15 @@ if (
   process.env.REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS = "100";
 }
 
+if (process.env.REMODEX_TEST_FULL !== "1") {
+  if (!process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS) {
+    process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS = "100";
+  }
+  if (!process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS) {
+    process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS = "100";
+  }
+}
+
 // Shorten opencode serve start/health waits in unit tests (production: 15s / 5s).
 if (process.env.REMODEX_TEST_FULL !== "1") {
   if (!process.env.REMODEX_OPENCODE_START_TIMEOUT_MS) {

@@ -602,7 +602,10 @@ test("DISABLE_OPENCODE=1 thread/list does not hot-path discover OpenCode project
     const response = await request({
       id: "thread-list-disable-discover",
       method: "thread/list",
-      params: {},
+      params: {
+        discoverOpenCodeSessions: true,
+        discoverOpenCodeProjects: true,
+      },
     });
     await waitOneTick();
 
@@ -642,7 +645,10 @@ test("thread/list with REMODEX_DISABLE_OPENCODE=1 returns Codex-only threads", a
     const response = await request({
       id: "thread-list-disable",
       method: "thread/list",
-      params: {},
+      params: {
+        discoverOpenCodeSessions: true,
+        discoverOpenCodeProjects: true,
+      },
     });
 
     assert.equal(response.id, "thread-list-disable");
