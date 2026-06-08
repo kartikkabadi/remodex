@@ -681,7 +681,8 @@ extension CodexService {
             return
         }
 
-        finalizeAllStreamingState()
+        // B-11: threadless terminal events must not wipe unrelated running threads.
+        finalizeStreamingPresentationOnly()
 
         guard let turnFailureMessage else {
             return
@@ -730,7 +731,8 @@ extension CodexService {
             markFailedIfUnread(threadId: threadId)
             notifyRunCompletionIfNeeded(threadId: threadId, turnId: resolvedTurnID, result: .failed)
         } else {
-            finalizeAllStreamingState()
+            // B-11: threadless error notifications must not wipe unrelated running threads.
+            finalizeStreamingPresentationOnly()
         }
     }
 

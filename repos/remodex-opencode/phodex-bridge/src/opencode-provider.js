@@ -6,6 +6,7 @@
 // Exports: createOpenCodeProvider
 // Depends on: ./opencode-server, ./opencode-client, ./opencode-models, ./provider-capabilities, ./thread-ownership-store
 
+const path = require("path");
 const { readString, resolvedParam } = require("./normalize");
 const { createOpenCodeServer } = require("./opencode-server");
 const {
@@ -69,7 +70,10 @@ const LIST_THREADS_SESSION_VALIDATE_CAP = 20;
 const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
 const DEFAULT_DISCOVER_SESSIONS_CAP = 30;
 const DEFAULT_DISCOVER_SESSIONS_TTL_MS = 60_000;
-const DEFAULT_ENSURE_STARTED_CAP_MS = 4_000;
+const DEFAULT_LIST_THREADS_VALIDATE_CACHE_TTL_MS = 60_000;
+const DEFAULT_ENSURE_STARTED_LIST_CAP_MS = 4_000;
+const DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS = 8_000;
+const DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN = 120;
 const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
 const OPENCODE_PRUNE_OPS_HINT =
@@ -99,12 +103,74 @@ function resolveDiscoverSessionsTtlMs(env = process.env) {
   return DEFAULT_DISCOVER_SESSIONS_TTL_MS;
 }
 
-function resolveEnsureStartedCapMs(env = process.env) {
+function resolveEnsureStartedListCapMs(env = process.env) {
   const fromEnv = Number(env?.REMODEX_OPENCODE_ENSURE_STARTED_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) {
     return fromEnv;
   }
-  return DEFAULT_ENSURE_STARTED_CAP_MS;
+  return DEFAULT_ENSURE_STARTED_LIST_CAP_MS;
+}
+
+function resolveEnsureStartedServeWakeCapMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_SERVE_WAKE_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS;
+}
+
+function resolveValidationRpcLimitPerMin(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_VALIDATION_RPC_LIMIT_PER_MIN);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN;
+}
+
+function createValidationRpcTokenBucket({
+  limitPerMin = DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+  now = () => Date.now(),
+} = {}) {
+  let tokens = limitPerMin;
+  let lastRefillAt = now();
+
+  return {
+    tryConsume(cost = 1) {
+      const normalizedCost = Number.isFinite(cost) && cost > 0 ? cost : 1;
+      const current = now();
+      const elapsed = current - lastRefillAt;
+      if (elapsed > 0) {
+        tokens = Math.min(limitPerMin, tokens + (elapsed / 60_000) * limitPerMin);
+        lastRefillAt = current;
+      }
+      if (tokens < normalizedCost) {
+        return false;
+      }
+      tokens -= normalizedCost;
+      return true;
+    },
+    getAvailableTokens() {
+      const current = now();
+      const elapsed = current - lastRefillAt;
+      if (elapsed > 0) {
+        tokens = Math.min(limitPerMin, tokens + (elapsed / 60_000) * limitPerMin);
+        lastRefillAt = current;
+      }
+      return tokens;
+    },
+    reset() {
+      tokens = limitPerMin;
+      lastRefillAt = now();
+    },
+  };
+}
+
+function resolveListThreadsValidateCacheTtlMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_LIST_THREADS_VALIDATE_CACHE_TTL_MS;
 }
 
 function parseDiscoveredThreadSessionId(threadId) {
@@ -143,6 +209,21 @@ function assertOwnershipPersisted(ok, threadId) {
   const error = new Error(`Failed to persist thread ownership for ${threadId}`);
   error.errorCode = "thread_ownership_persist_failed";
   throw error;
+}
+
+function pathNotAllowedError() {
+  const error = new Error("That folder is outside the allowed local project locations.");
+  error.errorCode = "path_not_allowed";
+  error.userMessage = error.message;
+  return error;
+}
+
+async function resolveAllowedDirectory(candidatePath) {
+  const validation = await validateDirectory(candidatePath);
+  if (!validation.isAllowed) {
+    throw pathNotAllowedError();
+  }
+  return validation.path;
 }
 
 const SENSITIVE_PERMISSION_ARG_KEYS = new Set(["command", "script", "token", "secret", "password"]);
@@ -203,10 +284,59 @@ function createOpenCodeProvider({
   const pendingPermissions = new Map();
   /** @type {Map<string, Set<string>>} */
   const sessionPermissionGrants = new Map();
-  const PERMISSION_WATCHDOG_MS = 30_000;
+  const PERMISSION_WATCHDOG_MS = DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
+  const MAX_PENDING_PERMISSIONS = 20;
   let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
   let discoverRefreshInFlight = null;
+  /** @type {Map<string, { valid?: boolean, hasActivity?: boolean, fetchedAt: number }>} */
+  const sessionValidationCache = new Map();
   const adoptMutexes = new Map();
+  const validationRpcTokenBucket = createValidationRpcTokenBucket({
+    limitPerMin: resolveValidationRpcLimitPerMin(env),
+  });
+
+  function consumeValidationRpcToken(cost = 1) {
+    if (validationRpcTokenBucket.tryConsume(cost)) {
+      return true;
+    }
+    console.log(
+      JSON.stringify({
+        event: "opencode_validation_rpc_rate_limited",
+        limitPerMin: resolveValidationRpcLimitPerMin(env),
+      }),
+    );
+    return false;
+  }
+
+  function readSessionValidationCache(sessionId) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return null;
+    }
+    const entry = sessionValidationCache.get(normalizedSessionId);
+    if (!entry) {
+      return null;
+    }
+    const ttlMs = resolveListThreadsValidateCacheTtlMs(env);
+    if (Date.now() - entry.fetchedAt >= ttlMs) {
+      sessionValidationCache.delete(normalizedSessionId);
+      return null;
+    }
+    return entry;
+  }
+
+  function writeSessionValidationCache(sessionId, patch = {}) {
+    const normalizedSessionId = readString(sessionId);
+    if (!normalizedSessionId) {
+      return;
+    }
+    const previous = readSessionValidationCache(sessionId) || {};
+    sessionValidationCache.set(normalizedSessionId, {
+      ...previous,
+      ...patch,
+      fetchedAt: Date.now(),
+    });
+  }
 
   function commandExecuteDedupeKey(threadId, allowlistToken, clientCommandId) {
     const tid = readString(threadId);
@@ -262,11 +392,22 @@ function createOpenCodeProvider({
   }
 
   async function validateOwnedThreadSession(sessionId) {
+    const cached = readSessionValidationCache(sessionId);
+    if (cached?.valid !== undefined) {
+      return cached.valid;
+    }
+    if (!consumeValidationRpcToken()) {
+      const error = new Error("OpenCode validation RPC rate limit exceeded.");
+      error.errorCode = "opencode_validation_rate_limited";
+      throw error;
+    }
     try {
       await client.getSession(sessionId);
+      writeSessionValidationCache(sessionId, { valid: true });
       return true;
     } catch (error) {
       if (isInvalidOpenCodeSessionError(error)) {
+        writeSessionValidationCache(sessionId, { valid: false, hasActivity: false });
         return false;
       }
       throw error;
@@ -636,12 +777,24 @@ function createOpenCodeProvider({
     if (threadHasActiveTurn(threadId)) {
       return true;
     }
+    const cached = readSessionValidationCache(sessionId);
+    if (cached?.hasActivity !== undefined) {
+      return cached.hasActivity;
+    }
+    if (!consumeValidationRpcToken()) {
+      const error = new Error("OpenCode validation RPC rate limit exceeded.");
+      error.errorCode = "opencode_validation_rate_limited";
+      throw error;
+    }
     try {
       const messages = normalizeSessionMessagesResponse(
         await client.getMessages(sessionId, { limit: 1 }),
       );
-      return Array.isArray(messages) && messages.length > 0;
+      const hasActivity = Array.isArray(messages) && messages.length > 0;
+      writeSessionValidationCache(sessionId, { hasActivity });
+      return hasActivity;
     } catch {
+      writeSessionValidationCache(sessionId, { hasActivity: false });
       return false;
     }
   }
@@ -859,18 +1012,17 @@ function createOpenCodeProvider({
     if (discoverRefreshInFlight) {
       return;
     }
-    discoverRefreshInFlight = refreshDiscoveredSessionsCache({
+    void refreshDiscoveredSessionsCache({
       force: true,
       background: true,
-    })
-      .catch(() => {})
-      .finally(() => {
-        discoverRefreshInFlight = null;
-      });
+    }).catch(() => {});
   }
 
-  async function ensureStartedWithCap({ onTimeout } = {}) {
-    const capMs = resolveEnsureStartedCapMs(env);
+  async function ensureStartedWithCap({ onTimeout, capMs } = {}) {
+    const resolvedCapMs =
+      Number.isFinite(capMs) && capMs > 0
+        ? capMs
+        : resolveEnsureStartedServeWakeCapMs(env);
     const startedAt = Date.now();
     let timeoutId;
     try {
@@ -879,20 +1031,20 @@ function createOpenCodeProvider({
         new Promise((_, reject) => {
           timeoutId = setTimeout(
             () => reject(new Error("ensure_started_timeout")),
-            capMs,
+            resolvedCapMs,
           );
           if (readString(env.REMODEX_TEST) === "1" && typeof timeoutId?.unref === "function") {
             timeoutId.unref();
           }
         }),
       ]);
-      return { started: true, ms: Date.now() - startedAt };
+      return { started: true, ms: Date.now() - startedAt, capMs: resolvedCapMs };
     } catch (error) {
       if (readString(error?.message) === "ensure_started_timeout") {
         if (typeof onTimeout === "function") {
           onTimeout();
         }
-        return { started: false, ms: Date.now() - startedAt };
+        return { started: false, ms: Date.now() - startedAt, capMs: resolvedCapMs };
       }
       throw error;
     } finally {
@@ -904,6 +1056,7 @@ function createOpenCodeProvider({
 
   async function ensureStartedWithDiscoverCap() {
     const result = await ensureStartedWithCap({
+      capMs: resolveEnsureStartedListCapMs(env),
       onTimeout: () => {
         console.log(
           JSON.stringify({
@@ -939,56 +1092,69 @@ function createOpenCodeProvider({
       return rows;
     }
 
-    const started = await ensureStartedWithDiscoverCap();
-    if (!started && discoveredSessionsCache.rows.length > 0) {
-      return filterDiscoveredRows(discoveredSessionsCache.rows);
-    }
-    if (!healthy || !client || typeof client.listSessions !== "function") {
-      return filterDiscoveredRows(discoveredSessionsCache.rows);
+    if (discoverRefreshInFlight) {
+      return discoverRefreshInFlight;
     }
 
-    const listResult = await client.listSessions({ limit: cap });
-    const ownedSessionIds = collectOwnedSessionIds();
-    const rows = [];
-
-    for (const thread of listResult.data || []) {
-      const sessionId = readString(thread.metadata?.sessionId || thread.sessionId);
-      if (!sessionId) {
-        continue;
+    const refreshPromise = (async () => {
+      const started = await ensureStartedWithDiscoverCap();
+      if (!started && discoveredSessionsCache.rows.length > 0) {
+        return filterDiscoveredRows(discoveredSessionsCache.rows);
       }
-      if (ownedSessionIds.has(sessionId)) {
-        continue;
-      }
-      if (threads.has(thread.id)) {
-        continue;
+      if (!healthy || !client || typeof client.listSessions !== "function") {
+        return filterDiscoveredRows(discoveredSessionsCache.rows);
       }
 
-      if (typeof sessions.setDiscovered === "function") {
-        sessions.setDiscovered(sessionId, {
-          threadId: thread.id,
-          cwd: readString(thread.cwd),
-          title: readString(thread.title),
-          model: readString(thread.model),
-          agent: readString(thread.agent),
-        });
+      const listResult = await client.listSessions({ limit: cap });
+      const ownedSessionIds = collectOwnedSessionIds();
+      const rows = [];
+
+      for (const thread of listResult.data || []) {
+        const sessionId = readString(thread.metadata?.sessionId || thread.sessionId);
+        if (!sessionId) {
+          continue;
+        }
+        if (ownedSessionIds.has(sessionId)) {
+          continue;
+        }
+        if (threads.has(thread.id)) {
+          continue;
+        }
+
+        if (typeof sessions.setDiscovered === "function") {
+          sessions.setDiscovered(sessionId, {
+            threadId: thread.id,
+            cwd: readString(thread.cwd),
+            title: readString(thread.title),
+            model: readString(thread.model),
+            agent: readString(thread.agent),
+          });
+        }
+
+        rows.push(thread);
+        if (rows.length >= cap) {
+          break;
+        }
       }
 
-      rows.push(thread);
-      if (rows.length >= cap) {
-        break;
-      }
-    }
+      discoveredSessionsCache = { rows, fetchedAt: Date.now() };
+      console.log(
+        JSON.stringify({
+          event: "opencode_discover_sessions",
+          listed: rows.length,
+          cache_hit: false,
+          background,
+        }),
+      );
+      return rows;
+    })();
 
-    discoveredSessionsCache = { rows, fetchedAt: Date.now() };
-    console.log(
-      JSON.stringify({
-        event: "opencode_discover_sessions",
-        listed: rows.length,
-        cache_hit: false,
-        background,
-      }),
-    );
-    return rows;
+    discoverRefreshInFlight = refreshPromise.finally(() => {
+      if (discoverRefreshInFlight === refreshPromise) {
+        discoverRefreshInFlight = null;
+      }
+    });
+    return discoverRefreshInFlight;
   }
 
   async function discoverExternalSessions() {
@@ -1073,14 +1239,7 @@ function createOpenCodeProvider({
         );
 
         const cwdCandidate = readString(discoveredMeta.cwd) || process.cwd();
-        const cwdValidation = await validateDirectory(cwdCandidate);
-        if (!cwdValidation.isAllowed) {
-          const error = new Error("That folder is outside the allowed local project locations.");
-          error.errorCode = "path_not_allowed";
-          error.userMessage = error.message;
-          throw error;
-        }
-        const cwd = cwdValidation.path;
+        const cwd = await resolveAllowedDirectory(cwdCandidate);
         const title = readString(discoveredMeta.title) || "OpenCode chat";
         const model = normalizeOpenCodeModel(discoveredMeta.model);
         const agent = readString(discoveredMeta.agent) || "build";
@@ -1170,14 +1329,36 @@ function createOpenCodeProvider({
     let prunedInvalid = 0;
     let rehydrateSkipped = 0;
     let discoveredExternal = 0;
+    let degradedWakeStubs = 0;
     const sdkCap = resolveListThreadsValidateCap(env);
     const hasOwnedThreadState =
       threads.size > 0 ||
       ownership.getAllOwnedBy(OPENCODE_PROVIDER_ID).length > 0 ||
       sessions.entries().length > 0;
+    let wakeDegraded = false;
     if ((!healthy || !client) && hasOwnedThreadState) {
       try {
-        await ensureStarted();
+        const wakeResult = await ensureStartedWithCap({
+          capMs: resolveEnsureStartedListCapMs(env),
+          onTimeout: () => {
+            console.log(
+              JSON.stringify({
+                event: "opencode_list_threads_wake_timeout",
+                capMs: resolveEnsureStartedListCapMs(env),
+              }),
+            );
+          },
+        });
+        if (!wakeResult.started) {
+          wakeDegraded = true;
+          console.log(
+            JSON.stringify({
+              event: "opencode_list_threads_wake_failed",
+              message: "OpenCode could not start for thread/list within cap",
+              ms: wakeResult.ms,
+            }),
+          );
+        }
       } catch (error) {
         console.log(
           JSON.stringify({
@@ -1326,6 +1507,25 @@ function createOpenCodeProvider({
         rehydrateSkipped += 1;
 
         if (!canValidateSessions) {
+          if (wakeDegraded) {
+            const stub = ownershipStubFromStore(threadId, storeEntry);
+            ownedStubs.push({
+              ...stub,
+              metadata: {
+                provider: OPENCODE_PROVIDER_ID,
+                degradedWake: true,
+              },
+            });
+            degradedWakeStubs += 1;
+            console.log(
+              JSON.stringify({
+                event: "opencode_list_threads_degraded_stubs",
+                threadId,
+                reason: "wake_timeout",
+              }),
+            );
+            continue;
+          }
           materializationBlocked += 1;
           continue;
         }
@@ -1411,6 +1611,7 @@ function createOpenCodeProvider({
         pruned_invalid: prunedInvalid,
         validation_errors: validationErrors,
         materialization_blocked: materializationBlocked,
+        degraded_wake_stubs: degradedWakeStubs,
       }),
     );
     maybeLogOpenCodePruneOpsHint({ materializationBlocked });
@@ -1425,7 +1626,15 @@ function createOpenCodeProvider({
       .toSorted(compareThreadsByUpdatedAt)
       .slice(0, limit);
 
-    return { data, nextCursor: null };
+    return {
+      data,
+      nextCursor: null,
+      meta: {
+        materializationBlocked,
+        sdkValidations,
+        sdkValidationsCap: sdkCap,
+      },
+    };
   }
 
   async function handleRequest(request) {
@@ -1467,10 +1676,7 @@ function createOpenCodeProvider({
       unsubscribe();
     }
     eventUnsubscribers.clear();
-    for (const pending of pendingPermissions.values()) {
-      clearPermissionWatchdog(pending);
-    }
-    pendingPermissions.clear();
+    clearAllPendingPermissions();
     activeTurns.clear();
     inFlightThreadIds.clear();
     completedTurnIds.clear();
@@ -1485,10 +1691,14 @@ function createOpenCodeProvider({
     const requestedCwd = resolvedParam(params, 'cwd', 'current_working_directory', 'working_directory');
     const threadId = `${OPENCODE_PROVIDER_ID}-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const resolvedSessionId = resolvedParam(params, 'sessionId', 'session_id');
+    let cwd = process.cwd();
+    if (requestedCwd) {
+      cwd = await resolveAllowedDirectory(requestedCwd);
+    }
     const thread = {
       id: threadId,
       title: readString(params.title) || "OpenCode chat",
-      cwd: requestedCwd || process.cwd(),
+      cwd,
       model: normalizeOpenCodeModel(params.model),
       agent: readString(params.agent) || "build",
       createdAt: now,
@@ -1639,8 +1849,6 @@ function createOpenCodeProvider({
       ownership.setOwnership(thread.id, OPENCODE_PROVIDER_ID),
       thread.id,
     );
-
-    emit("turn/started", { threadId: thread.id, turnId, turn: { id: turnId, status: "running" } });
 
     setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, parts, thread.cwd, structuredSkills));
     return { turnId, turn: { id: turnId, threadId: thread.id, status: "running" } };
@@ -1882,12 +2090,32 @@ function createOpenCodeProvider({
     const threadId = active.thread.id;
     inFlightThreadIds.add(threadId);
     try {
-      const ensureStartedResult = await ensureStartedWithCap();
+      const ensureStartedResult = await ensureStartedWithCap({
+        capMs: resolveEnsureStartedServeWakeCapMs(env),
+      });
       if (!ensureStartedResult.started) {
         const error = new Error("OpenCode is still starting. Try again in a moment.");
         error.errorCode = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
         error.action = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.action;
         throw error;
+      }
+
+      if (!active.started) {
+        active.started = true;
+        emit("turn/started", {
+          threadId: active.thread.id,
+          turnId: active.turn.id,
+          turn: { id: active.turn.id, status: "running" },
+        });
+        console.log(
+          JSON.stringify({
+            event: "opencode_turn_started_after_wake",
+            threadId: active.thread.id,
+            turnId: active.turn.id,
+            ensureStartedMs: ensureStartedResult.ms,
+            capMs: ensureStartedResult.capMs,
+          }),
+        );
       }
 
       if (!active.thread.sessionId) {
@@ -2077,6 +2305,13 @@ function createOpenCodeProvider({
         reconnectEnabled: sseReconnectEnabled,
         onResubscribe: () => {
           sseReconnectCount += 1;
+          void hydrateAssistantFromSessionMessages(active)
+            .then((hydrated) => {
+              if (hydrated) {
+                tryCompleteTurnWhenAssistantReady(active, "sse_resubscribe_hydrate");
+              }
+            })
+            .catch(() => {});
         },
       });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
@@ -2132,9 +2367,6 @@ function createOpenCodeProvider({
       }
       if (!active.completed) {
         tryCompleteTurnWhenAssistantReady(active, "prompt_post_poll");
-      }
-      if (!active.completed) {
-        active.started = true;
       }
     } catch (error) {
       if (!active.completed) {
@@ -2271,6 +2503,33 @@ function createOpenCodeProvider({
     }
   }
 
+  function clearAllPendingPermissions() {
+    for (const pending of pendingPermissions.values()) {
+      clearPermissionWatchdog(pending);
+    }
+    pendingPermissions.clear();
+  }
+
+  function evictOldestPendingPermission() {
+    const oldestPermissionId = pendingPermissions.keys().next().value;
+    if (!oldestPermissionId) {
+      return null;
+    }
+
+    const evicted = pendingPermissions.get(oldestPermissionId);
+    clearPermissionWatchdog(evicted);
+    pendingPermissions.delete(oldestPermissionId);
+    void (async () => {
+      try {
+        await ensureStarted();
+        await client.replyToPermission(oldestPermissionId, false);
+      } catch (error) {
+        console.error(`${logPrefix} permission cap eviction auto-deny failed: ${error.message}`);
+      }
+    })();
+    return evicted;
+  }
+
   function armPermissionWatchdog(entry, payload) {
     clearPermissionWatchdog(entry);
     entry.watchdog = setTimeout(() => {
@@ -2332,6 +2591,11 @@ function createOpenCodeProvider({
 
     const existing = pendingPermissions.get(permissionId);
     clearPermissionWatchdog(existing);
+    if (!existing) {
+      while (pendingPermissions.size >= MAX_PENDING_PERMISSIONS) {
+        evictOldestPendingPermission();
+      }
+    }
     const entry = { ...payload, watchdog: null };
     pendingPermissions.set(permissionId, entry);
 
@@ -2350,6 +2614,7 @@ function createOpenCodeProvider({
       requestedAt: payload.requestedAt,
       argsSummary: redactPermissionArgs(payload.args),
     });
+    armPermissionWatchdog(entry, payload);
   }
 
   function testSeedPendingPermission(permissionId, fields = {}) {
@@ -2397,7 +2662,17 @@ function createOpenCodeProvider({
     }
 
     const replyThreadId = readThreadId(params);
-    if (replyThreadId && replyThreadId !== pending.threadId) {
+    if (!replyThreadId) {
+      console.log(
+        JSON.stringify({
+          event: "permission_reply_rejected",
+          permissionId,
+          reason: "missing_thread_id",
+        }),
+      );
+      return { success: false, reason: "Missing thread ID" };
+    }
+    if (replyThreadId !== pending.threadId) {
       console.log(
         JSON.stringify({
           event: "permission_reply_rejected",
@@ -2567,7 +2842,7 @@ function createOpenCodeProvider({
         sessionId: newSessionId,
         model: thread.model,
         agent: thread.agent,
-        cwd: thread.cwd,
+        ...(thread.hasProjectCwd ? { cwd: thread.cwd } : {}),
       },
     });
   }
@@ -2581,6 +2856,7 @@ function createOpenCodeProvider({
           `${logPrefix} OpenCode server idle for ${Math.round(idleDuration / 60000)}min, shutting down.`,
         );
         server.stop().then(() => {
+          clearAllPendingPermissions();
           client = null;
           healthy = false;
         });
@@ -2677,8 +2953,16 @@ function createOpenCodeProvider({
       commandExecuteDedupeByKey.set(dedupeKey, Date.now());
     }
 
-    const directory =
-      readString(params.directory || params.cwd) || readString(thread.cwd) || process.cwd();
+    const explicitDirectory = readString(params.directory || params.cwd);
+    const directoryCandidate = explicitDirectory || readString(thread.cwd) || process.cwd();
+    let directory = directoryCandidate;
+    const skipPathValidation =
+      !explicitDirectory &&
+      !thread.hasProjectCwd &&
+      path.resolve(directoryCandidate) === path.resolve(process.cwd());
+    if (!skipPathValidation) {
+      directory = await resolveAllowedDirectory(directoryCandidate);
+    }
     const allowedCommands = await listCommands(directory);
     const allowedTokens = new Set(
       allowedCommands.map((entry) => normalizeCommandTokenForAllowlist(entry.token)),
@@ -3057,6 +3341,10 @@ function createOpenCodeProvider({
       setDiscoverCache: (rows, fetchedAt = Date.now()) => {
         discoveredSessionsCache = { rows, fetchedAt };
       },
+      getValidationRpcAvailableTokens: () => validationRpcTokenBucket.getAvailableTokens(),
+      resetValidationRpcTokenBucket: () => {
+        validationRpcTokenBucket.reset();
+      },
     },
   };
 }
@@ -3113,4 +3401,13 @@ function activeTurnError(threadId) {
   return error;
 }
 
-module.exports = { createOpenCodeProvider };
+module.exports = {
+  createOpenCodeProvider,
+  createValidationRpcTokenBucket,
+  resolveEnsureStartedListCapMs,
+  resolveEnsureStartedServeWakeCapMs,
+  resolveValidationRpcLimitPerMin,
+  DEFAULT_ENSURE_STARTED_LIST_CAP_MS,
+  DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS,
+  DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+};

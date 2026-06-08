@@ -18,6 +18,7 @@ enum ComposerCapability {
     case steer
     case queue
     case imageAttachments
+    case desktopHandoff
     case mcp
     case pluginMentions
 }
@@ -46,7 +47,9 @@ enum ComposerCapabilityCopy {
         case .queue:
             return "Queued follow-ups are not available for this runtime"
         case .imageAttachments:
-            return "Image attachments send a text placeholder on OpenCode until multimodal is verified"
+            return "Image attachments not supported by this runtime"
+        case .desktopHandoff:
+            return "Desktop handoff is not enabled on this Mac bridge"
         case .mcp:
             return "MCP is configured in OpenCode on your Mac, not from Remodex"
         case .pluginMentions:

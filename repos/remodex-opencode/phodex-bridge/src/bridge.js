@@ -5,7 +5,7 @@
 // Depends on: ws, crypto, os, ./bridge-status, ./codex-desktop-refresher, ./codex-transport, ./rollout-watch, ./voice-handler
 
 const WebSocket = require("ws");
-const { randomBytes } = require("crypto");
+const { createHash, randomBytes } = require("crypto");
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -708,8 +708,8 @@ function startBridge({
         event: "bridge_notify_forward",
         method,
         provider: readStringOrNull(provider) || "unknown",
-        threadId: extractThreadId(method, params),
-        turnId: extractTurnId(method, params),
+        threadId: redactLogIdentifier(extractThreadId(method, params), "thread"),
+        turnId: redactLogIdentifier(extractTurnId(method, params), "turn"),
         status: readStringOrNull(params.status) || readStringOrNull(turnObject.status),
         hasMacRelaySocket: socket?.readyState === WebSocket.OPEN,
       }),
@@ -3704,6 +3704,26 @@ function persistBridgePreferences(
   });
 }
 
+function readVerboseLogsEnabled() {
+  const value = process.env.REMODEX_VERBOSE_LOGS;
+  return value === "1" || (typeof value === "string" && value.toLowerCase() === "true");
+}
+
+// SEC-06: hash bearer-like thread/turn identifiers unless verbose logging is explicitly enabled.
+function redactLogIdentifier(value, label = "id") {
+  const normalized = readStringOrNull(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (readVerboseLogsEnabled()) {
+    return normalized;
+  }
+
+  const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
+  return `${label}#${digest}`;
+}
+
 module.exports = {
   buildThreadTurnsListRelaySanitizeContext,
   buildHeartbeatBridgeStatus,
@@ -3713,6 +3733,7 @@ module.exports = {
   hasRelayConnectionGoneStale,
   normalizeRelayBoundJsonRpcMessage,
   persistBridgePreferences,
+  redactLogIdentifier,
   resolveJsonlTurnsListRolloutPathForFallback,
   sanitizeLiveGeneratedImageMessageForRelay,
   sanitizeThreadHistoryImagesForRelay,

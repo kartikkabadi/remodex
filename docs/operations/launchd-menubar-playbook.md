@@ -9,9 +9,21 @@ cd repos/remodex-opencode
 
 ## Production operator env
 
+Operator Mac bridges default **handoff on** and honor **client-true discovery** (iOS sends `discoverOpenCodeSessions: true`; bridge env unset follows the client). Explicit opt-outs only:
+
 ```bash
-export REMODEX_OPENCODE_HANDOFF=1          # O12–O16 handoff
-export REMODEX_PUSH_ENABLED=1             # relay APNs (WP-05)
+# Handoff + discovery are production-default-on — set only to disable:
+# export REMODEX_OPENCODE_HANDOFF=0
+# export REMODEX_OPENCODE_DISCOVER_SESSIONS=0
+
+# Relay/VPS push (WP-05) — use the env name the relay actually reads:
+export REMODEX_ENABLE_PUSH_SERVICE=true    # opt-in for dev; auto-on when APNs creds present
+export REMODEX_APNS_TEAM_ID=...
+export REMODEX_APNS_KEY_ID=...
+export REMODEX_APNS_BUNDLE_ID=...
+export REMODEX_APNS_PRIVATE_KEY_FILE=...
+export REMODEX_PUSH_SERVICE_URL=https://relay.example   # bridge push registration base URL
+
 # Rollback flags (smoke before revert):
 # REMODEX_OPENCODE_PERMISSIONS_UI=0
 # REMODEX_OPENCODE_SSE_RECONNECT=0

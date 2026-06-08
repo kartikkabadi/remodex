@@ -473,6 +473,26 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
         XCTAssertEqual(service.webSocketKeepAliveIntervalNanoseconds(), 10_000_000_000)
     }
 
+    func testProgressiveSidebarPaintsPinnedSnapshotsBeforeThreadListSync() {
+        let suiteName = "CodexServiceConnectionErrorTests.progressiveSidebar.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let service = CodexService(defaults: defaults)
+        let cachedThread = CodexThread(
+            id: "thread-cached",
+            title: "Cached chat",
+            cwd: "/tmp/remodex-project"
+        )
+        service.pinnedThreadIDs = ["thread-cached"]
+        service.pinnedThreadSnapshotsByRootID = ["thread-cached": [cachedThread]]
+        XCTAssertTrue(service.threads.isEmpty)
+
+        XCTAssertTrue(service.applyProgressiveSidebarFromStaleCacheIfNeeded())
+        XCTAssertEqual(service.threads.map(\.id), ["thread-cached"])
+        XCTAssertEqual(service.connectionPhase, .offline)
+    }
+
     func testInterruptedConnectionCopyIsSoftenedDuringTrustedReconnectRetry() {
         let service = CodexService()
         let macDeviceID = "mac-\(UUID().uuidString)"

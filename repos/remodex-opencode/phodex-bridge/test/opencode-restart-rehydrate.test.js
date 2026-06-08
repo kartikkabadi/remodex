@@ -14,8 +14,20 @@ if (process.env.REMODEX_TEST !== "1") {
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
 const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
+const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+
+function testProjectPath(name) {
+  return path.join(os.homedir(), `.remodex-test-${name}`);
+}
+
+const REHYDRATE_PROJECT = testProjectPath("rehydrate-project");
+const TEST_PROJ = testProjectPath("proj");
+const REHYDRATE_TURN_START = testProjectPath("rehydrate-turn-start");
 
 function fakeFs() {
   const files = new Map();
@@ -88,7 +100,7 @@ function fakeClient({ getSessionImpl, getMessagesImpl, createSessionImpl } = {})
       getSessionImpl ||
       (async (sessionId) => ({
         sessionID: sessionId,
-        directory: "/tmp/rehydrate-project",
+        directory: REHYDRATE_PROJECT,
       })),
     getMessages: getMessagesImpl || (async () => []),
     prompt: async () => {},
@@ -124,7 +136,7 @@ test("thread/read rehydrates from persisted session after provider restart", asy
   const started = await provider1.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { title: "Rehydrate me", cwd: "/tmp/rehydrate-project", model: "openai/gpt-5.5" },
+    params: { title: "Rehydrate me", cwd: REHYDRATE_PROJECT, model: "openai/gpt-5.5" },
   });
   const threadId = started.thread.id;
 
@@ -147,7 +159,7 @@ test("thread/read rehydrates from persisted session after provider restart", asy
   assert.equal(read.thread.model, "openai/gpt-5.5");
   const entry = sessionStore.getEntry(threadId);
   assert.equal(entry.sessionId, "ses_new");
-  assert.equal(entry.cwd, "/tmp/rehydrate-project");
+  assert.equal(entry.cwd, REHYDRATE_PROJECT);
 
   await provider2.shutdown();
 });
@@ -163,7 +175,7 @@ test("thread/turns/list rehydrates before listing turns", async () => {
   const provider1 = makeProvider({ sessionStore, ownershipStore });
   const started = await provider1.handleRequest({
     method: "thread/start",
-    params: { cwd: "/tmp/proj" },
+    params: { cwd: TEST_PROJ },
   });
   await provider1.handleRequest({
     method: "turn/start",
@@ -206,7 +218,7 @@ test("expired SDK session removes store entry and returns opencode_session_expir
   const ownershipStore = fakeOwnershipStore();
 
   sessionStore.set("opencode-thread-stale", "ses_gone", {
-    cwd: "/tmp/proj",
+    cwd: TEST_PROJ,
     model: "openai/gpt-5.5",
     agent: "build",
   });
@@ -247,7 +259,7 @@ test("transient getSession failure keeps store entry and propagates error", asyn
   const ownershipStore = fakeOwnershipStore();
 
   sessionStore.set("opencode-thread-transient", "ses_ok", {
-    cwd: "/tmp/proj",
+    cwd: TEST_PROJ,
     model: "openai/gpt-5.5",
     agent: "build",
   });
@@ -277,6 +289,77 @@ test("transient getSession failure keeps store entry and propagates error", asyn
   await provider.shutdown();
 });
 
+test("thread/read rehydrates when ownership JSON was corrupt but salvageable", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-rehydrate-corrupt-"));
+  const ownershipPath = path.join(tempDir, "thread-ownership.json");
+  const sessionPath = path.join(tempDir, "opencode-sessions.json");
+  const threadId = "opencode-thread-corrupt-rehydrate";
+  try {
+    fs.writeFileSync(
+      ownershipPath,
+      `{
+  "ownership": {
+    "${threadId}": {
+      "providerId": "opencode",
+      "assignedAt": "2026-05-30T12:00:00.000Z"
+    `,
+      "utf8",
+    );
+    fs.writeFileSync(
+      sessionPath,
+      JSON.stringify({
+        sessions: {
+          [threadId]: {
+            sessionId: "ses_salvaged",
+            cwd: "/tmp/rehydrate-corrupt",
+            model: "openai/gpt-5.5",
+            agent: "build",
+            updatedAt: "2026-05-30T12:00:00.000Z",
+          },
+        },
+        discovered: {},
+      }),
+      "utf8",
+    );
+
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: ownershipPath,
+      fsImpl: fs,
+      writeDebounceMs: 0,
+    });
+    const sessionStore = createOpenCodeSessionStore({
+      storagePath: sessionPath,
+      fsImpl: fs,
+    });
+
+    assert.equal(ownershipStore.getOwnership(threadId), "opencode");
+    assert.equal(sessionStore.get(threadId), "ses_salvaged");
+
+    const provider = makeProvider({
+      sessionStore,
+      ownershipStore,
+      clientFactory: () =>
+        fakeClient({
+          getSessionImpl: async (sessionId) => ({
+            sessionID: sessionId,
+            directory: "/tmp/rehydrate-corrupt",
+          }),
+        }),
+    });
+
+    const read = await provider.handleRequest({
+      method: "thread/read",
+      params: { threadId },
+    });
+
+    assert.equal(read.thread.id, threadId);
+    assert.equal(read.thread.model, "openai/gpt-5.5");
+    await provider.shutdown();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("turn/start rehydrates from persisted session after provider restart", async () => {
   const fs = fakeFs();
   const sessionStore = createOpenCodeSessionStore({
@@ -300,7 +383,7 @@ test("turn/start rehydrates from persisted session after provider restart", asyn
 
   const started = await provider1.handleRequest({
     method: "thread/start",
-    params: { cwd: "/tmp/rehydrate-turn-start", model: "openai/gpt-5.5" },
+    params: { cwd: REHYDRATE_TURN_START, model: "openai/gpt-5.5" },
   });
   const threadId = started.thread.id;
 

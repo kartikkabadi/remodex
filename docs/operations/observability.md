@@ -54,6 +54,50 @@ Signals to watch:
 - OpenCode SDK: `[remodex:opencode-sdk]`
 - Router: `[remodex:router]`
 
+### `thread/list` hot-path events
+
+Emitted by `runtime-provider-router.js` and `opencode-provider.js` on each sidebar poll:
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `thread_list_codex_ms` | `ms` | Codex leg wall time |
+| `thread_list_opencode_ms` | `ms` | OpenCode leg wall time (`0` when paginated with cursor) |
+| `thread_list_wall_ms` | `wallMs`, `codexMs`, `opencodeMs`, `discoverProjectsEnabled` | End-to-end merge time |
+| `thread_list_leg_abandoned` | `leg`, `budgetMs` | Per-leg race hit fallback before underlying work finished |
+| `thread_list_codex_failed` | `message` | Codex leg `.catch()` isolation |
+| `thread_list_provider_failed` | `providerId`, `message` | OpenCode/provider leg `.catch()` isolation |
+| `opencode_list_threads_wake_timeout` | `capMs` | Owned-thread wake exceeded `REMODEX_OPENCODE_ENSURE_STARTED_MS` |
+| `opencode_list_threads_wake_failed` | `message`, `ms` | Owned-thread wake failed or timed out |
+| `opencode_list_threads_degraded_stubs` | `threadId`, `reason` | Owned stub returned without SDK validation after wake timeout |
+
+O18 SLO evidence: collect `thread_list_wall_ms` over a 5-minute window with both discover flags on.
+
+### `thread/list` materialization and ghost policy (PR 5 + PR 10)
+
+Emitted by `opencode-provider.js` on each OpenCode `listThreads()` call:
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `opencode_list_threads_filtered` | `local_memory`, `discovered_external`, `sdk_validations`, `sdk_validations_cap`, `user_started_included`, `activity_validated`, `rehydrate_skipped`, `pruned_invalid`, `validation_errors`, **`materialization_blocked`**, `degraded_wake_stubs` | Summary row for anti-ghost filtering |
+| `materialization_blocked` | `threadId`, `sessionId`, `reason` | Per-row omission (validation cap, rate limit, or anti-ghost rule) |
+| `opencode_prune_ops_hint` | `hint`, `materialization_blocked`, `pruned_count` | One-line ops hint when blocked or pruned count **> 50** |
+| `opencode_validation_rpc_rate_limited` | `limitPerMin` | Validation token bucket exhausted (`REMODEX_VALIDATION_RPC_LIMIT_PER_MIN`) |
+
+**Client surface:** merged `thread/list` `meta.materializationBlocked` (camelCase). iOS records `lastThreadListMaterializationBlocked` and logs `thread/list materialization_blocked=N` when **> 0** (`CodexService+ThreadsTurns.swift`). TestFlight gate: expect **0** on clean pairing ([`testflight-beta-runbook.md`](testflight-beta-runbook.md) O18).
+
+### Secure transport outbound buffer (PR 4 + PR 10)
+
+Emitted by `secure-transport.js` during relay disconnect / `trusted_reconnect` catch-up:
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `bridge_outbound_buffered` | `bridgeOutboundSeq`, `payloadBytes` | Message queued while `!isResumed` (relay flap mid-turn) |
+| `bridge_outbound_dropped` | `droppedCount`, `droppedBytes`, `firstSeq`, `lastSeq`, `reason`, `priority`, `method`, `bridgeOutboundSeq`, `highestPriorityTierDropped` | Priority trim evicted entries (`reason: "overflow"`) |
+
+**iOS correlation:** persist `lastAppliedBridgeOutboundSeq` at disconnect; after `resumeState`, compare against bridge head. Non-zero `bridge_outbound_dropped` during a normal turn indicates buffer pressure — see [`performance-limits.md`](performance-limits.md) § Secure transport outbound buffer.
+
+**Priority retention:** `turn/started`, `turn/completed`, `item/completed`, and recent turn stream deltas are protected; RPC responses drop first. Env: `REMODEX_BRIDGE_PRIORITY_OUTBOUND` (default on).
+
 ### Redaction
 
 Never log:

@@ -76,9 +76,20 @@ When the bridge restarts:
 
 ### Idle Shutdown
 
-After 10 minutes with no active turns, the session enters idle state. The `opencode serve` process is NOT killed — only the session's event subscriptions are torn down. The session ID remains valid for future turns.
+After 10 minutes with no active turns and no `activeTurns`, the provider idle timer fires (`opencode-provider.js:resetIdleTimer`). The bridge calls **`server.stop()`** on the `opencode serve` child process, sets `client = null`, and marks the provider unhealthy. This tears down the serve process and its in-memory SDK subscriptions — not merely a soft unsubscribe.
 
-If the `opencode serve` process itself needs to restart (crash, update), the session map is replayed: `opencode-sessions.json` is read, active sessions are rehydrated via `session.get()`, and any irrecoverable sessions are dropped with a structured error to iOS.
+**What survives idle shutdown:**
+- Session IDs in `opencode-sessions.json` (durable mapping)
+- Thread ownership in `thread-ownership.json`
+- Thread metadata in the provider's in-memory `threads` map (until bridge restart)
+
+**What is lost until the next wake:**
+- Live SDK client handle and SSE event subscriptions
+- In-flight serve health state (`healthy = false`)
+
+The next `turn/start`, `thread/list`, or other serve-touching RPC calls `ensureStarted()`, which restarts `opencode serve` and rehydrates sessions via `session.get()` using the persisted session IDs. `opencode-idle-shutdown.test.js` asserts `server.stop` is invoked by the idle timer and that `thread/list` / `turn/start` restart serve afterward.
+
+If `session.get()` fails after a serve restart (session expired on the OpenCode side), the bridge creates a new session and updates the mapping.
 
 ### Shutdown Cleanup
 
@@ -89,7 +100,7 @@ On bridge shutdown (`SIGINT`/`SIGTERM`):
 
 ## Consequences
 
-**Sessions don't leak.** Idle sessions are torn down after 10 minutes. A thread left open overnight doesn't hold resources until the process restarts.
+**Serve process doesn't leak.** Idle shutdown stops `opencode serve` after 10 minutes with no active turns. A thread left open overnight does not keep the serve child running; the next turn pays a cold-start wake cost (~`REMODEX_OPENCODE_SERVE_WAKE_MS`, default 8s cap).
 
 **Threads survive bridge restarts.** Session IDs are durable. Even if `opencode serve` restarts, the session ID can be replayed.
 

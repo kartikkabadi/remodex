@@ -1,7 +1,7 @@
 # ADR-002: Capability Model
 
 **Date:** 2026-05-30  
-**Status:** Accepted (updated 2026-06-06 — 17 flags)
+**Status:** Accepted (updated 2026-06-08 — 19 flags)
 
 ## Context
 
@@ -11,11 +11,11 @@ The iOS app must not make runtime-specific decisions for **visibility** ("if pro
 
 ## Decision
 
-Use **17 capability flags** as the source of truth for what the iOS composer shows, hides, or greys out.
+Use **19 capability flags** as the source of truth for what the iOS composer shows, hides, or greys out.
 
-Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilities.js`.
+Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilities.js` (`CAPABILITIES` array).
 
-### The 17 Flags
+### The 19 Flags
 
 | Flag | What it controls |
 |------|-----------------|
@@ -34,6 +34,8 @@ Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilit
 | `supportsMCP` | MCP settings row |
 | `supportsSkillAutocomplete` | `$` skill autocomplete |
 | `supportsStructuredSkillInput` | Structured `skill` items on `turn/start` |
+| `supportsSkillFileInjection` | Skill file content injection on turn start |
+| `supportsImageAttachments` | Multimodal image attachments in composer |
 | `supportsSteer` | Steer on queued drafts |
 | `supportsQueue` | Local draft queue |
 
@@ -41,6 +43,8 @@ Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilit
 |------|---------------|------------------|
 | `supportsStructuredSkillInput` | `true` | `false` |
 | `supportsSlashCommandExecute` | `false` | `true` |
+| `supportsSkillFileInjection` | `true` | `true` |
+| `supportsImageAttachments` | `true` | `true` |
 
 Do not overload `supportsSkillAutocomplete` — autocomplete ≠ structured turn payload. Do not overload `supportsSlashCommands` — list visibility ≠ execute RPC.
 

@@ -108,14 +108,22 @@ function createTestRouter(overrides = {}) {
     router,
     async request(request, { timeoutMs = 5000 } = {}) {
       payload = null;
+      let responded = false;
       const responsePromise = new Promise((resolve) => {
-        resolveResponse = resolve;
+        resolveResponse = () => {
+          responded = true;
+          resolve();
+        };
       });
       const timeoutPromise = new Promise((resolve) => {
         setTimeout(resolve, timeoutMs);
       });
       router.handleApplicationMessage(JSON.stringify(request));
       await Promise.race([responsePromise, timeoutPromise]);
+      assert.ok(
+        responded && payload,
+        `router did not respond within ${timeoutMs}ms for ${request.method ?? "unknown method"}`,
+      );
       return payload;
     },
   };
@@ -509,7 +517,7 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
   ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
 
   const previousHandoff = process.env.REMODEX_OPENCODE_HANDOFF;
-  delete process.env.REMODEX_OPENCODE_HANDOFF;
+  process.env.REMODEX_OPENCODE_HANDOFF = "0";
 
   const response = await requestDesktopHandoff(
     {
@@ -518,6 +526,7 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
       params: { threadId: "opencode-thread-handoff" },
     },
     {
+      env: { REMODEX_OPENCODE_HANDOFF: "0" },
       ownershipStore,
       opencodeProvider: mockOpenCodeProvider(),
     },
@@ -531,6 +540,38 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
   } else {
     process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
   }
+});
+
+test("desktop/continueOpenCode succeeds with production-default handoff when env unset", async () => {
+  const ownershipStore = createThreadOwnershipStore({
+    storagePath: "/tmp/opencode-handoff-default-ownership.json",
+    fsImpl: {
+      readFileSync() {
+        throw new Error("ENOENT");
+      },
+      writeFileSync() {},
+      renameSync() {},
+      mkdirSync() {},
+    },
+  });
+  ownershipStore.setOwnership("opencode-thread-handoff", "opencode");
+
+  const response = await requestDesktopHandoff(
+    {
+      id: "handoff-default",
+      method: "desktop/continueOpenCode",
+      params: { threadId: "opencode-thread-handoff" },
+    },
+    {
+      env: {},
+      ownershipStore,
+      opencodeProvider: mockOpenCodeProvider(),
+    },
+  );
+
+  assert.equal(response.id, "handoff-default");
+  assert.equal(response.result.success, true);
+  assert.equal(response.result.sessionId, "ses_handoff");
 });
 
 test("desktop/continueOpenCode succeeds when handoff env gate is on", async () => {
@@ -602,7 +643,10 @@ test("DISABLE_OPENCODE=1 thread/list does not hot-path discover OpenCode project
     const response = await request({
       id: "thread-list-disable-discover",
       method: "thread/list",
-      params: {},
+      params: {
+        discoverOpenCodeSessions: true,
+        discoverOpenCodeProjects: true,
+      },
     });
     await waitOneTick();
 
@@ -642,7 +686,10 @@ test("thread/list with REMODEX_DISABLE_OPENCODE=1 returns Codex-only threads", a
     const response = await request({
       id: "thread-list-disable",
       method: "thread/list",
-      params: {},
+      params: {
+        discoverOpenCodeSessions: true,
+        discoverOpenCodeProjects: true,
+      },
     });
 
     assert.equal(response.id, "thread-list-disable");

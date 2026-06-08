@@ -6,6 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const {
@@ -13,9 +14,21 @@ const {
   createOpenCodeClient,
   dispatchEvent,
 } = require("../src/opencode-client");
-const { createOpenCodeProvider } = require("../src/opencode-provider");
+const {
+  createOpenCodeProvider,
+  DEFAULT_ENSURE_STARTED_LIST_CAP_MS,
+  DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS,
+  DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+  resolveEnsureStartedListCapMs,
+  resolveEnsureStartedServeWakeCapMs,
+  resolveValidationRpcLimitPerMin,
+} = require("../src/opencode-provider");
 const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+
+function testProjectPath(name) {
+  return path.join(os.homedir(), `.remodex-test-${name}`);
+}
 
 const activeProviders = [];
 
@@ -231,7 +244,7 @@ test("commandExecute forwards /skills to session.command command skills", async 
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/skills-project" },
+    params: { cwd: testProjectPath("skills-project") },
   });
 
   const result = await provider.commandExecute({
@@ -241,7 +254,7 @@ test("commandExecute forwards /skills to session.command command skills", async 
       threadId: start.thread.id,
       command: "/skills",
       arguments: "",
-      directory: "/tmp/skills-project",
+      directory: testProjectPath("skills-project"),
     },
   });
 
@@ -277,14 +290,14 @@ test("commandExecute dedupes duplicate clientCommandId within 5s", async () => {
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/dedupe-project" },
+    params: { cwd: testProjectPath("dedupe-project") },
   });
 
   const sharedParams = {
     threadId: start.thread.id,
     command: "/skills",
     arguments: "",
-    directory: "/tmp/dedupe-project",
+    directory: testProjectPath("dedupe-project"),
     clientCommandId: "550e8400-e29b-41d4-a716-446655440000",
   };
 
@@ -338,7 +351,7 @@ test("commandExecute serializes argumentFields before session.command", async ()
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/args-project" },
+    params: { cwd: testProjectPath("args-project") },
   });
 
   const result = await provider.commandExecute({
@@ -347,7 +360,7 @@ test("commandExecute serializes argumentFields before session.command", async ()
     params: {
       threadId: start.thread.id,
       command: "/plan",
-      directory: "/tmp/args-project",
+      directory: testProjectPath("args-project"),
       template: "Plan for $1 with notes $2",
       hints: ["$1", "$2"],
       argumentFields: [
@@ -392,7 +405,7 @@ test("commandExecute rejects requiresArguments commands without argumentFields",
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/reject-project" },
+    params: { cwd: testProjectPath("reject-project") },
   });
 
   await assert.rejects(
@@ -403,7 +416,7 @@ test("commandExecute rejects requiresArguments commands without argumentFields",
         params: {
           threadId: start.thread.id,
           command: "/review",
-          directory: "/tmp/reject-project",
+          directory: testProjectPath("reject-project"),
         },
       }),
     (error) => error?.errorCode === "command_arguments_required",
@@ -464,7 +477,7 @@ test("threadStart creates thread and records ownership", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { model: "openai/gpt-5.5", title: "Test thread", cwd: "/tmp/test" },
+    params: { model: "openai/gpt-5.5", title: "Test thread", cwd: testProjectPath("test") },
   });
 
   assert.ok(result.thread);
@@ -747,6 +760,10 @@ test("turnStart emits turn/started notification", async () => {
     method: "turn/start",
     params: { threadId: start.thread.id, input: "hello world" },
   });
+  const deadline = Date.now() + 500;
+  while (!messages.some((m) => m.method === "turn/started") && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.ok(messages.some((m) => m.method === "turn/started"));
 });
 
@@ -2285,19 +2302,19 @@ test("getHandoffContext ignores untrusted client sessionId and directory", async
     method: "thread/start",
     params: {
       title: "Handoff test",
-      cwd: "/tmp/owned-project",
+      cwd: testProjectPath("owned-project"),
       sessionId: "ses_owned",
     },
   });
 
   const context = await provider.getHandoffContext(start.thread.id, {
     sessionId: "ses_untrusted",
-    directory: "/tmp/evil-path",
+    directory: "/etc/evil-path",
   });
 
   assert.equal(context.threadId, start.thread.id);
   assert.equal(context.sessionId, "ses_owned");
-  assert.equal(context.cwd, "/tmp/owned-project");
+  assert.equal(context.cwd, testProjectPath("owned-project"));
 });
 
 function discoveredListClient(rows = []) {
@@ -2438,6 +2455,175 @@ test("adopt rejects discovered session cwd outside home allowlist", async () => 
       }),
     (error) => error.errorCode === "path_not_allowed",
   );
+});
+
+test("thread/start rejects cwd traversal outside home allowlist", async () => {
+  const provider = makeProvider();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/start",
+        params: { cwd: "/etc" },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
+test("thread/start rejects cwd symlink that resolves outside home", async () => {
+  const homeScratch = fs.mkdtempSync(path.join(os.homedir(), "remodex-thread-start-"));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-thread-outside-"));
+  const linkPath = path.join(homeScratch, "escape-link");
+  fs.symlinkSync(outsideDir, linkPath, "dir");
+
+  try {
+    const provider = makeProvider();
+    await assert.rejects(
+      () =>
+        provider.handleRequest({
+          id: 1,
+          method: "thread/start",
+          params: { cwd: linkPath },
+        }),
+      (error) => error.errorCode === "path_not_allowed",
+    );
+  } finally {
+    fs.rmSync(homeScratch, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("command/execute rejects directory traversal outside home allowlist", async () => {
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_path_guard" }),
+            command: async () => ({ info: {}, parts: [] }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: path.join(os.homedir(), "remodex-cmd-guard-project") },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 2,
+        method: "command/execute",
+        params: {
+          threadId: start.thread.id,
+          command: "/skills",
+          directory: "/etc",
+        },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
+test("command/execute rejects rehydrated sdk directory when store cwd is empty", async () => {
+  const sessionStore = fakeSessionStore();
+  const ownershipStore = fakeOwnershipStore();
+  sessionStore.set("opencode-thread-rehydrate-bad-cwd", "ses_rehydrate_bad", {
+    cwd: "",
+    model: "openai/gpt-5.5",
+    agent: "build",
+  });
+  ownershipStore.setOwnership("opencode-thread-rehydrate-bad-cwd", "opencode");
+
+  const provider = makeProvider({
+    sessionStore,
+    ownershipStore,
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            get: async () => ({
+              sessionID: "ses_rehydrate_bad",
+              directory: "/etc",
+            }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 1,
+        method: "command/execute",
+        params: {
+          threadId: "opencode-thread-rehydrate-bad-cwd",
+          command: "/skills",
+        },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
+test("command/execute rejects directory symlink that resolves outside home", async () => {
+  const homeScratch = fs.mkdtempSync(path.join(os.homedir(), "remodex-cmd-exec-"));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-cmd-outside-"));
+  const linkPath = path.join(homeScratch, "escape-link");
+  fs.symlinkSync(outsideDir, linkPath, "dir");
+
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_symlink_guard" }),
+            command: async () => ({ info: {}, parts: [] }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  try {
+    const start = await provider.handleRequest({
+      id: 1,
+      method: "thread/start",
+      params: { cwd: path.join(homeScratch, "owned-project") },
+    });
+
+    await assert.rejects(
+      () =>
+        provider.commandExecute({
+          id: 2,
+          method: "command/execute",
+          params: {
+            threadId: start.thread.id,
+            command: "/skills",
+            directory: linkPath,
+          },
+        }),
+      (error) => error.errorCode === "path_not_allowed",
+    );
+  } finally {
+    fs.rmSync(homeScratch, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
 });
 
 test("thread/read adopts discovered session", async () => {
@@ -2754,6 +2940,87 @@ test("discover uses stale cache when ensureStarted exceeds cap", async (t) => {
   assert.equal(listCalls, 1, "stale cache should avoid blocking refresh on ensureStarted timeout");
 });
 
+test("listThreads returns degraded ownership stubs when owned wake exceeds cap", async (t) => {
+  let blockStart = false;
+  let running = false;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  ownershipStore.setOwnership("opencode-thread-degraded", "opencode");
+  sessionStore.set("opencode-thread-degraded", "ses_degraded", {
+    cwd: "/Users/me/work/degraded",
+    title: "Degraded owned chat",
+  });
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.map((entry) => String(entry)).join(" "));
+  };
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for degraded-owned test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => fakeClient(),
+  });
+  t.after(async () => {
+    console.log = originalLog;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await provider.shutdown();
+  });
+
+  await provider.listModels();
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+
+  const list = await provider.listThreads();
+  const row = list.data.find((thread) => thread.id === "opencode-thread-degraded");
+  assert.ok(row, "owned stub should appear in degraded wake mode");
+  assert.equal(row.metadata?.degradedWake, true);
+
+  const parsedLogs = logs
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  assert.ok(
+    parsedLogs.some((entry) => entry.event === "opencode_list_threads_wake_timeout"),
+    "wake timeout event expected",
+  );
+  assert.ok(
+    parsedLogs.some((entry) => entry.event === "opencode_list_threads_degraded_stubs"),
+    "degraded stub event expected",
+  );
+});
+
 test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t) => {
   let blockStart = false;
   let running = false;
@@ -2765,7 +3032,7 @@ test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t)
     env: {
       REMODEX_ENABLE_OPENCODE: "1",
       REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
-      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_OPENCODE_SERVE_WAKE_MS: "25",
       REMODEX_OPENCODE_DISCOVER_TTL_MS: "60000",
       REMODEX_TEST: "1",
     },
@@ -2812,6 +3079,103 @@ test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t)
   assert.deepEqual(read.thread.turns, []);
 });
 
+test("listThreads surfaces materializationBlocked in response meta", async () => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  for (let index = 0; index < 6; index += 1) {
+    const threadId = `opencode-thread-meta-${index}`;
+    sessionStore.set(threadId, `ses_meta_${index}`);
+    ownershipStore.setOwnership(threadId, "opencode");
+  }
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_LIST_THREADS_VALIDATE_CAP: "2",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => ({}),
+      getMessages: async () => [{ role: "assistant", text: "activity" }],
+    }),
+  });
+  await provider.warmup();
+
+  const list = await provider.listThreads();
+  assert.equal(list.meta.materializationBlocked, 4);
+  assert.equal(list.meta.sdkValidationsCap, 2);
+  assert.equal(list.meta.sdkValidations, 2);
+  assert.equal(list.data.length, 2);
+});
+
+test("listThreads validation cache avoids repeat SDK calls within TTL", async () => {
+  let getSessionCalls = 0;
+  let getMessagesCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  sessionStore.set("opencode-thread-cache", "ses_cache", { title: "Cached stub" });
+  ownershipStore.setOwnership("opencode-thread-cache", "opencode");
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS: "60000",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+      getMessages: async () => {
+        getMessagesCalls += 1;
+        return [{ role: "assistant", text: "activity" }];
+      },
+    }),
+  });
+  await provider.warmup();
+
+  await provider.listThreads();
+  await provider.listThreads();
+
+  assert.equal(getSessionCalls, 1);
+  assert.equal(getMessagesCalls, 1);
+});
+
+test("discover refresh coalesces concurrent listThreads polls", async () => {
+  let listCalls = 0;
+  const provider = makeProvider({
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_DISCOVER_TTL_MS: "1",
+    },
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      listSessions: async () => {
+        listCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return { data: [externalDiscoveredRow()] };
+      },
+    }),
+  });
+  await provider.warmup();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const [first, second] = await Promise.all([
+    provider.listThreads({ discoverOpenCodeSessions: true }),
+    provider.listThreads({ discoverOpenCodeSessions: true }),
+  ]);
+
+  assert.equal(first.data.length, 1);
+  assert.equal(second.data.length, 1);
+  assert.equal(listCalls, 1, "concurrent discover refresh should share one in-flight mutex");
+});
+
 test("ownership stub includes cwd for sidebar grouping", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();
@@ -2836,4 +3200,153 @@ test("ownership stub includes cwd for sidebar grouping", async () => {
   const row = list.data.find((thread) => thread.id === "opencode-thread-stub-cwd");
   assert.ok(row);
   assert.equal(row.cwd, "/Users/me/work/stub-project");
+});
+
+test("serve wake cap defaults to 8s while list wake cap stays 4s", () => {
+  assert.equal(resolveEnsureStartedServeWakeCapMs({}), DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS);
+  assert.equal(DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS, 8_000);
+  assert.equal(resolveEnsureStartedListCapMs({}), DEFAULT_ENSURE_STARTED_LIST_CAP_MS);
+  assert.equal(DEFAULT_ENSURE_STARTED_LIST_CAP_MS, 4_000);
+  assert.equal(resolveValidationRpcLimitPerMin({}), DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN);
+  assert.equal(DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN, 120);
+});
+
+test("turn/started emits only after ensureStartedWithCap succeeds", async () => {
+  const messages = [];
+  let blockStart = false;
+  let running = false;
+  const provider = makeProvider({
+    send: (msg) => messages.push(JSON.parse(msg)),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_SERVE_WAKE_MS: "25",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for turn-started ordering test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => ({
+      ...fakeClient(),
+      prompt: async () => {},
+      subscribeToEvents: () => () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello after wake" },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(messages.some((entry) => entry.method === "turn/started"), false);
+  assert.ok(messages.some((entry) => entry.method === "turn/completed"));
+});
+
+test("validation RPC token bucket limits SDK validation calls", async () => {
+  let getSessionCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  for (let index = 0; index < 3; index += 1) {
+    const threadId = `opencode-thread-rate-${index}`;
+    sessionStore.set(threadId, `ses_rate_${index}`);
+    ownershipStore.setOwnership(threadId, "opencode");
+  }
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_VALIDATION_RPC_LIMIT_PER_MIN: "2",
+      REMODEX_LIST_THREADS_VALIDATE_CAP: "10",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+      getMessages: async () => [{ role: "assistant", text: "activity" }],
+    }),
+  });
+  await provider.warmup();
+  provider.__test.resetValidationRpcTokenBucket();
+
+  const list = await provider.listThreads();
+  assert.equal(getSessionCalls, 1, "token bucket should allow one getSession before refill");
+  assert.equal(list.meta.materializationBlocked, 2);
+  assert.equal(list.data.length, 1);
+});
+
+test("SSE resubscribe hydrates active turn from session messages", async () => {
+  const ASSISTANT_REPLY = "Recovered after SSE resubscribe.";
+  let onResubscribe;
+  const messages = [];
+  const provider = makeProvider({
+    send: (msg) => messages.push(JSON.parse(msg)),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler, options = {}) => {
+        onResubscribe = options.onResubscribe;
+        return () => {};
+      },
+      getMessages: async () => [
+        { role: "user", text: "hello" },
+        { role: "assistant", text: ASSISTANT_REPLY },
+      ],
+      prompt: async () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello" },
+  });
+
+  const subscribeDeadline = Date.now() + 500;
+  while (!onResubscribe && Date.now() < subscribeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(onResubscribe);
+
+  await onResubscribe({ attempt: 1, reason: "error" });
+  const hydrateDeadline = Date.now() + 500;
+  while (
+    !messages.some((entry) => entry.method === "item/completed")
+    && Date.now() < hydrateDeadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  const completed = messages.filter((entry) => entry.method === "item/completed");
+  assert.equal(completed.length, 1);
+  assert.match(completed[0].params.message, /Recovered after SSE resubscribe/);
 });

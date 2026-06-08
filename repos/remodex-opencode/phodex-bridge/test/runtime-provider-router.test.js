@@ -11,27 +11,38 @@ const os = require("os");
 const path = require("path");
 const { createProjectRegistry } = require("../src/project-registry");
 const {
+  CODEX_THREAD_LIST_BUDGET_MS,
   DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
+  DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS,
   MODEL_LIST_PROVIDER_BUDGET_MS,
   buildCatalogOpenCodeRuntime,
   capOpenCodeModelsForMobileList,
+  codexThreadListBudgetMs,
   computeCatalogFingerprint,
   computeCatalogRevision,
   createRuntimeProviderRouter,
   isOpenCodeDiscoverProjectsEnabled,
+  listProviderThreadsForThreadList,
   mergeModelListResult,
   mergeSkillsAcrossProviders,
   mergeThreadListResult,
   opencodeModelListBudgetMs,
+  opencodeThreadListBudgetMs,
   providerForRequest,
   providerModelsForModelList,
   readDiscoverProjectTtlMs,
   resetCatalogPushState,
   resetOpenCodeProjectDiscoverState,
+  resetThreadListInFlightState,
+  THREAD_LIST_BUDGET_CEILING_MS,
   resolvePrimaryProvider,
   shouldWarmProviderInventory,
   stripRuntimeProviderFieldsForCodex,
 } = require("../src/runtime-provider-router");
+
+test.afterEach(() => {
+  resetThreadListInFlightState();
+});
 
 function makeProvider(ownedThreadIds = []) {
   const owned = new Set(ownedThreadIds);
@@ -160,6 +171,83 @@ test("mergeModelListResult attaches opencode meta when provided", () => {
     },
   );
   assert.equal(result.opencode.reasonCode, "no_connected_providers");
+});
+
+test("mergeThreadListResult omits discovered stub when owned thread shares sessionId", () => {
+  const result = mergeThreadListResult(
+    { data: [] },
+    [
+      {
+        id: "opencode-session-ses_shared",
+        title: "Mac CLI session",
+        modelProvider: "opencode",
+        metadata: {
+          provider: "opencode",
+          discoveredExternally: true,
+          sessionId: "ses_shared",
+        },
+      },
+      {
+        id: "opencode-thread-owned",
+        title: "Phone-owned session",
+        modelProvider: "opencode",
+        metadata: {
+          provider: "opencode",
+          sessionId: "ses_shared",
+        },
+      },
+    ],
+  );
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-thread-owned");
+});
+
+test("mergeThreadListResult passes through provider meta", () => {
+  const result = mergeThreadListResult(
+    { data: [{ id: "thread-1", title: "Codex", modelProvider: "codex" }] },
+    [],
+    {
+      meta: {
+        materializationBlocked: 3,
+        sdkValidationsCap: 20,
+      },
+    },
+  );
+
+  assert.equal(result.meta.materializationBlocked, 3);
+  assert.equal(result.meta.sdkValidationsCap, 20);
+});
+
+test("mergeThreadListResult keeps owned thread when duplicate sessionId stubs collide", () => {
+  const result = mergeThreadListResult(
+    { data: [] },
+    [
+      {
+        id: "opencode-thread-owned",
+        title: "Owned copy",
+        modelProvider: "opencode",
+        updatedAt: "2026-06-08T10:00:00.000Z",
+        metadata: {
+          provider: "opencode",
+          sessionId: "ses_dup",
+        },
+      },
+      {
+        id: "opencode-thread-stale",
+        title: "Stale duplicate",
+        modelProvider: "opencode",
+        updatedAt: "2026-06-08T09:00:00.000Z",
+        metadata: {
+          provider: "opencode",
+          sessionId: "ses_dup",
+        },
+      },
+    ],
+  );
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].id, "opencode-thread-owned");
 });
 
 test("mergeThreadListResult deduplicates provider-owned thread copies", () => {
@@ -1442,6 +1530,53 @@ test("routes providerless owned thread RPCs by durable ownership", async () => {
   }
 });
 
+test("permission/reply rejects explicit provider switches on owned threads", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-perm-ownership-"));
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned", "opencode");
+
+    const responses = [];
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({}),
+      sendApplicationResponse: (message) => {
+        responses.push(JSON.parse(message));
+      },
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [makeProvider(["thread-owned"])],
+    });
+
+    const handled = router.handleApplicationMessage(
+      JSON.stringify({
+        id: "perm-ownership-mismatch",
+        method: "permission/reply",
+        params: {
+          permissionId: "perm-owned",
+          allow: true,
+          threadId: "thread-owned",
+          modelProvider: "codex",
+        },
+      }),
+    );
+
+    assert.equal(handled, true);
+    await waitOneTick();
+    const response = responses.find((entry) => entry.id === "perm-ownership-mismatch");
+    assert.equal(response?.error?.data?.errorCode, "thread_provider_mismatch");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("permission/reply routes to opencode provider", async () => {
   const handledRequests = [];
   const responses = [];
@@ -2091,10 +2226,18 @@ test("thread/list logs thread_list_wall_ms and opencode_discover_on_list when di
           }
         })
         .filter(Boolean);
+      const codexLog = parsedLogs.find((entry) => entry.event === "thread_list_codex_ms");
+      const opencodeLog = parsedLogs.find((entry) => entry.event === "thread_list_opencode_ms");
       const wallLog = parsedLogs.find((entry) => entry.event === "thread_list_wall_ms");
       const discoverLog = parsedLogs.find((entry) => entry.event === "opencode_discover_on_list");
+      assert.ok(codexLog, "thread_list_codex_ms log present");
+      assert.ok(opencodeLog, "thread_list_opencode_ms log present");
       assert.ok(wallLog, "thread_list_wall_ms log present");
+      assert.equal(typeof codexLog.ms, "number");
+      assert.equal(typeof opencodeLog.ms, "number");
       assert.equal(typeof wallLog.wallMs, "number");
+      assert.equal(typeof wallLog.codexMs, "number");
+      assert.equal(typeof wallLog.opencodeMs, "number");
       assert.equal(wallLog.discoverProjectsEnabled, true);
       assert.ok(discoverLog, "opencode_discover_on_list log present");
       assert.equal(discoverLog.ttlMs, 120_000);
@@ -2102,6 +2245,598 @@ test("thread/list logs thread_list_wall_ms and opencode_discover_on_list when di
     } finally {
       console.log = originalLog;
     }
+  });
+});
+
+test("thread/list returns Codex threads when OpenCode listThreads never resolves", async () => {
+  const previousBudget = process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS;
+  process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS = "200";
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const startedAt = Date.now();
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({
+      data: [{ id: "codex-thread-only", modelProvider: "codex" }],
+    }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        listThreads() {
+          return new Promise(() => {});
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-opencode-hang",
+      method: "thread/list",
+      params: {},
+    }),
+  );
+  await responsePromise;
+
+  const elapsedMs = Date.now() - startedAt;
+  const opencodeBudgetMs = opencodeThreadListBudgetMs();
+  assert.ok(
+    elapsedMs < opencodeBudgetMs + 500,
+    `expected thread/list within OpenCode budget, took ${elapsedMs}ms`,
+  );
+  assert.equal(responsePayload.result.data.length, 1);
+  assert.equal(responsePayload.result.data[0].id, "codex-thread-only");
+  if (previousBudget === undefined) {
+    delete process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS;
+  } else {
+    process.env.REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS = previousBudget;
+  }
+});
+
+test("thread/list returns OpenCode threads when Codex thread/list never resolves", async () => {
+  const previousBudget = process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS;
+  process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS = "200";
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const startedAt = Date.now();
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: () => new Promise(() => {}),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads() {
+          return {
+            data: [{ id: "opencode-thread-only", modelProvider: "opencode" }],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-codex-hang",
+      method: "thread/list",
+      params: {},
+    }),
+  );
+  await responsePromise;
+
+  const elapsedMs = Date.now() - startedAt;
+  const codexBudgetMs = codexThreadListBudgetMs();
+  assert.ok(
+    elapsedMs < codexBudgetMs + 500,
+    `expected thread/list within Codex budget, took ${elapsedMs}ms`,
+  );
+  assert.equal(responsePayload.result.data.length, 1);
+  assert.equal(responsePayload.result.data[0].id, "opencode-thread-only");
+  if (previousBudget === undefined) {
+    delete process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS;
+  } else {
+    process.env.REMODEX_THREAD_LIST_CODEX_BUDGET_MS = previousBudget;
+  }
+});
+
+test("thread/list still returns OpenCode threads when Codex thread/list fails", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => {
+      throw new Error("codex offline");
+    },
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads() {
+          return {
+            data: [{ id: "opencode-thread-only", modelProvider: "opencode" }],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-codex-fail",
+      method: "thread/list",
+      params: {},
+    }),
+  );
+  await responsePromise;
+
+  assert.equal(responsePayload.result.data.length, 1);
+  assert.equal(responsePayload.result.data[0].id, "opencode-thread-only");
+});
+
+test("thread/list runs Codex and OpenCode legs in parallel", async () => {
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const legDelayMs = 60;
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => {
+      await new Promise((resolve) => setTimeout(resolve, legDelayMs));
+      return { data: [{ id: "codex-parallel", modelProvider: "codex" }] };
+    },
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads() {
+          await new Promise((resolve) => setTimeout(resolve, legDelayMs));
+          return {
+            data: [{ id: "opencode-parallel", modelProvider: "opencode" }],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  const startedAt = Date.now();
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-parallel",
+      method: "thread/list",
+      params: {},
+    }),
+  );
+  await responsePromise;
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.ok(
+    elapsedMs < legDelayMs * 2,
+    `expected parallel thread/list (~${legDelayMs}ms), took ${elapsedMs}ms`,
+  );
+  assert.equal(responsePayload.result.data.length, 2);
+});
+
+test("codexThreadListBudgetMs and opencodeThreadListBudgetMs honor env overrides", () => {
+  assert.equal(codexThreadListBudgetMs({}), CODEX_THREAD_LIST_BUDGET_MS);
+  assert.equal(
+    codexThreadListBudgetMs({ REMODEX_THREAD_LIST_CODEX_BUDGET_MS: "9000" }),
+    9_000,
+  );
+  assert.equal(
+    codexThreadListBudgetMs({ REMODEX_THREAD_LIST_CODEX_BUDGET_MS: "60000" }),
+    THREAD_LIST_BUDGET_CEILING_MS,
+  );
+  assert.equal(opencodeThreadListBudgetMs({}), DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS);
+  assert.equal(
+    opencodeThreadListBudgetMs({ REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS: "8500" }),
+    8_500,
+  );
+});
+
+function percentile(values, p) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
+  );
+  return sorted[index];
+}
+
+test("thread/list wall-clock p99 stays under 11s with KD-10 discover-on fixtures", async () => {
+  const codexDelayMs = 1_200;
+  const coldServeDelayMs = 1_500;
+  const stubCount = 20;
+  const samples = [];
+  const iterations = 3;
+
+  for (let index = 0; index < iterations; index += 1) {
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => {
+        await new Promise((resolve) => setTimeout(resolve, codexDelayMs));
+        return { data: [{ id: `codex-slo-${index}`, modelProvider: "codex" }] };
+      },
+      sendApplicationResponse() {
+        resolveResponse();
+      },
+      providers: [
+        {
+          id: "opencode",
+          async listModels() {
+            return [];
+          },
+          async listThreads(params) {
+            assert.equal(params.discoverOpenCodeSessions, true);
+            await new Promise((resolve) => setTimeout(resolve, coldServeDelayMs));
+            const data = [];
+            for (let stubIndex = 0; stubIndex < stubCount; stubIndex += 1) {
+              data.push({
+                id: `opencode-session-ses_kd10_${stubIndex}`,
+                title: `KD10 stub ${stubIndex}`,
+                modelProvider: "opencode",
+                metadata: {
+                  provider: "opencode",
+                  discoveredExternally: true,
+                  sessionId: `ses_kd10_${stubIndex}`,
+                },
+              });
+            }
+            return { data };
+          },
+          ownsThread() {
+            return false;
+          },
+          handleRequest() {
+            return {};
+          },
+        },
+      ],
+    });
+
+    const startedAt = Date.now();
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: `threads-slo-${index}`,
+        method: "thread/list",
+        params: { discoverOpenCodeSessions: true, discoverOpenCodeProjects: true },
+      }),
+    );
+    await responsePromise;
+    samples.push(Date.now() - startedAt);
+  }
+
+  const p99 = percentile(samples, 99);
+  assert.ok(
+    p99 < 11_000,
+    `expected thread/list p99 < 11s, got ${p99}ms from samples=${samples.join(",")}`,
+  );
+  assert.ok(
+    p99 < codexDelayMs + coldServeDelayMs - 1_000,
+    `expected parallel wall < sequential sum, got ${p99}ms`,
+  );
+});
+
+test("thread/list wall-clock p95 stays under 3s on warm-cache fixtures", async () => {
+  const legDelayMs = 40;
+  const samples = [];
+  const iterations = 12;
+
+  for (let index = 0; index < iterations; index += 1) {
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => {
+        await new Promise((resolve) => setTimeout(resolve, legDelayMs));
+        return { data: [{ id: `codex-warm-${index}`, modelProvider: "codex" }] };
+      },
+      sendApplicationResponse() {
+        resolveResponse();
+      },
+      providers: [
+        {
+          id: "opencode",
+          async listModels() {
+            return [];
+          },
+          async listThreads() {
+            await new Promise((resolve) => setTimeout(resolve, legDelayMs));
+            return {
+              data: [{ id: `opencode-warm-${index}`, modelProvider: "opencode" }],
+            };
+          },
+          ownsThread() {
+            return false;
+          },
+          handleRequest() {
+            return {};
+          },
+        },
+      ],
+    });
+
+    const startedAt = Date.now();
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: `threads-warm-${index}`,
+        method: "thread/list",
+        params: { discoverOpenCodeSessions: true, discoverOpenCodeProjects: true },
+      }),
+    );
+    await responsePromise;
+    samples.push(Date.now() - startedAt);
+  }
+
+  const p95 = percentile(samples, 95);
+  assert.ok(
+    p95 < 3_000,
+    `expected thread/list p95 cache-hit < 3s, got ${p95}ms from samples=${samples.join(",")}`,
+  );
+});
+
+test("thread/list merges client-param session discover when env discover is unset", async () => {
+  const previousSessions = process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  let responsePayload = null;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const router = createRuntimeProviderRouter({
+    sendCodexRequest: async () => ({ data: [] }),
+    sendApplicationResponse(payload) {
+      responsePayload = JSON.parse(payload);
+      resolveResponse();
+    },
+    providers: [
+      {
+        id: "opencode",
+        async listModels() {
+          return [];
+        },
+        async listThreads(params) {
+          assert.equal(params.discoverOpenCodeSessions, true);
+          return {
+            data: [
+              {
+                id: "opencode-session-ses_client_param",
+                title: "Mac CLI session",
+                modelProvider: "opencode",
+                metadata: {
+                  provider: "opencode",
+                  discoveredExternally: true,
+                  sessionId: "ses_client_param",
+                },
+              },
+            ],
+          };
+        },
+        ownsThread() {
+          return false;
+        },
+        handleRequest() {
+          return {};
+        },
+      },
+    ],
+  });
+
+  router.handleApplicationMessage(
+    JSON.stringify({
+      id: "threads-client-discover",
+      method: "thread/list",
+      params: { discoverOpenCodeSessions: true },
+    }),
+  );
+  await responsePromise;
+
+  assert.equal(responsePayload.result.data.length, 1);
+  assert.equal(responsePayload.result.data[0].id, "opencode-session-ses_client_param");
+  if (previousSessions === undefined) {
+    delete process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS;
+  } else {
+    process.env.REMODEX_OPENCODE_DISCOVER_SESSIONS = previousSessions;
+  }
+});
+
+test("thread/list skips OpenCode leg when cursor is present", async () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.map((entry) => String(entry)).join(" "));
+  };
+
+  try {
+    let listThreadsCalls = 0;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({
+        data: [{ id: "codex-page-2", modelProvider: "codex" }],
+      }),
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      providers: [
+        {
+          id: "opencode",
+          async listModels() {
+            return [];
+          },
+          async listThreads() {
+            listThreadsCalls += 1;
+            throw new Error("OpenCode listThreads should not run with cursor");
+          },
+          ownsThread() {
+            return false;
+          },
+          handleRequest() {
+            return {};
+          },
+        },
+      ],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "threads-cursor-page",
+        method: "thread/list",
+        params: { cursor: "page-2" },
+      }),
+    );
+    await responsePromise;
+
+    assert.equal(listThreadsCalls, 0);
+    assert.equal(responsePayload.result.data.length, 1);
+    assert.equal(responsePayload.result.data[0].id, "codex-page-2");
+    const parsedLogs = logs
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    const opencodeLog = parsedLogs.find((entry) => entry.event === "thread_list_opencode_ms");
+    assert.ok(opencodeLog, "thread_list_opencode_ms log present");
+    assert.equal(opencodeLog.ms, 0);
+  } finally {
+    console.log = originalLog;
+    resetThreadListInFlightState();
+  }
+});
+
+test("thread/list coalesces concurrent OpenCode listThreads calls per provider", async () => {
+  resetThreadListInFlightState();
+  let listThreadsCalls = 0;
+  const provider = {
+    id: "opencode",
+    async listModels() {
+      return [];
+    },
+    async listThreads() {
+      listThreadsCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return { data: [{ id: "opencode-coalesced", modelProvider: "opencode" }] };
+    },
+    ownsThread() {
+      return false;
+    },
+    handleRequest() {
+      return {};
+    },
+  };
+
+  const first = listProviderThreadsForThreadList([provider], {});
+  const second = listProviderThreadsForThreadList([provider], {});
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.equal(listThreadsCalls, 1);
+  assert.equal(firstResult.threads.length, 1);
+  assert.equal(secondResult.threads.length, 1);
+  resetThreadListInFlightState();
+});
+
+test("thread/list with DISABLE_OPENCODE and iOS-default discover params stays Codex-only", async () => {
+  await withDiscoverEnv({ discoverProjects: "1", disableOpenCode: "1" }, async () => {
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ data: [{ id: "codex-ios-shaped" }] }),
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      projectRegistry: makeDiscoverProjectRegistryFixture().registry,
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({
+        id: "discover-disable-ios-params",
+        method: "thread/list",
+        params: {
+          discoverOpenCodeSessions: true,
+          discoverOpenCodeProjects: true,
+        },
+      }),
+    );
+    await responsePromise;
+
+    assert.deepEqual(
+      router.providers.map((provider) => provider.id),
+      [],
+      "OpenCode provider should not register when DISABLE_OPENCODE=1",
+    );
+    assert.equal(responsePayload.result.data.length, 1);
+    assert.equal(responsePayload.result.data[0].id, "codex-ios-shaped");
   });
 });
 

@@ -7,8 +7,8 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **771/771** green |
-| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **345/345** green (CI gate on `opencode-*` touches) |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **778/778** green |
+| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **352/352** green (CI gate on `opencode-*` touches) |
 | Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
@@ -28,8 +28,10 @@ Before Kartik runs steps O0–O17 on device:
 | *(unset)* `REMODEX_DISABLE_OPENCODE` | Default — OpenCode enabled (step O1) |
 | `REMODEX_OPENCODE_HANDOFF=1` | Mac bridge: **O13/O16** RPC QA anytime; **O12/O14** UI/TUI after PR8 flip; required on operator Macs once handoff is promoted |
 | `REMODEX_DISABLE_OPENCODE=1` | Codex regression only (step O17) |
-| `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` | Mac→iPhone external session parity (steps **O18**) |
-| `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` | Hot-path OpenCode project registry sync (steps **O19**) |
+| *(default on)* iOS `discoverOpenCodeSessions` / `discoverOpenCodeProjects` | App sends both on every `thread/list` when user has not opted out — steps **O18–O19** |
+| `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` | Optional Mac override; env `=0` hard-kills class (e) merge |
+| `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` | Optional Mac override; env `=0` hard-kills hot-path project discover |
+| `REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS` | Default **60000** — owned stub SDK validation cache (PR 5) |
 
 **Start bridge (from remodex-opencode repo):**
 
@@ -93,9 +95,9 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 |------|--------|----------------|
 | O17 | Codex-only bridge | `REMODEX_DISABLE_OPENCODE=1` — existing Codex thread flow unchanged; OpenCode unavailable banner if user had OpenCode threads |
 
-## External discovery parity (PR-3 / PR-4 / PR-6)
+## External discovery parity (PR 5 gate — before PR 7 stage 3)
 
-**Prerequisites:** `REMODEX_OPENCODE_DISCOVER_SESSIONS=1` and `REMODEX_OPENCODE_DISCOVER_PROJECTS=1` on Mac bridge. Do **not** set `REMODEX_DISABLE_OPENCODE=1`.
+**Prerequisites:** Discovery **ON** (iOS default; Mac env unset or `=1`). Do **not** set `REMODEX_DISABLE_OPENCODE=1`. Capture template: [testflight-beta-runbook.md](testflight-beta-runbook.md).
 
 | Step | Check | Pass criterion |
 |------|--------|----------------|
@@ -112,7 +114,7 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 | Warm (`opencode serve` already running) | Session visible on first poll ≤10s |
 | Cold (serve idle >10 min) | First poll may return owned threads + stale discovery cache; must complete <12s. Second poll ≤10s later shows fresh Mac session. Bridge logs `discover_refresh_async` acceptable. |
 
-**O18 SLO evidence:** Record `thread_list_wall_ms` from bridge logs; p95 cache miss <8s over 5-minute window with both discover flags on.
+**O18 SLO evidence:** Record `thread_list_wall_ms` from bridge logs; p95 cache miss <8s over 5-minute window with discovery on. Also record `materializationBlocked` from `thread/list` response `meta` or bridge `opencode_list_threads_filtered` — expect **0** on clean pairing.
 
 ## Evidence bar (sign-off)
 
@@ -135,7 +137,7 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | O0 | Bridge + relay ≥10 min | Terminal screenshot + `lsof` |
 | O1 | OpenCode enabled (no `REMODEX_DISABLE_OPENCODE`) | Settings/runtime catalog |
 | O2 | `REMODEX_OPENCODE_HANDOFF=1` on Mac | `launchctl`/`run-local-remodex` env |
-| O3 | 771/771 + 345/345 automated | CI log or local run |
+| O3 | 778/778 + 352/352 automated | CI log or local run |
 | O4 | `runtime/catalog` OpenCode enabled | Screenshot |
 | O5 | Model picker + All Models sheet | Find model beyond 120 cap |
 | O6 | Streaming + Stop mid-turn | Screen recording |
@@ -152,7 +154,7 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 | O15 | Codex thread blocks handoff | Error/hidden |
 | O16 | Handoff env-off regression | `opencode_handoff_disabled` |
 | O17 | `REMODEX_DISABLE_OPENCODE=1` Codex regression | Screenshot |
-| **O18** | Mac CLI session listed ≤10s warm | Sidebar screenshot + bridge log `thread_list_wall_ms` |
+| **O18** | Mac CLI session listed ≤10s warm | Sidebar screenshot + bridge log `thread_list_wall_ms` + `materializationBlocked` meta |
 | **O18b** | Tap → adopt → turn succeeds | Screen recording |
 | **O19** | Project picker shows Mac OpenCode folder | Picker screenshot + `known-projects.json` mode |
 | **O20** | Discover flags off → no external rows | Screenshot |

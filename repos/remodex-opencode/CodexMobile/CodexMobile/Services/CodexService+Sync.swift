@@ -1079,7 +1079,8 @@ extension CodexService {
             )
             didRunMirroredCatchup = outcome.didRunForcedResume
 
-            guard !outcome.didRefreshTurnState || !outcome.isRunning else {
+            // B-20: never force thread/read while live SSE/socket delivery is still running.
+            guard !outcome.isRunning else {
                 return
             }
         }

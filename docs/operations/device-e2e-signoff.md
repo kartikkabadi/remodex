@@ -2,7 +2,19 @@
 
 **Status:** **Signed off** on `main` (OpenCode core parity on physical iPhone + Mac).  
 **Canonical base commit:** `12542248efa6b9d99b4d49b177e2b41f45961939` (`1254224`)  
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-08
+
+## Ship target — iPhone + Mac (iPad non-blocking)
+
+**TestFlight / production ship target is iPhone + Mac pairing only** (user decision 2026-06-08).
+
+| Platform | Role |
+|----------|------|
+| **iPhone + Mac** | **Authoritative** device E2E bar — core sign-off complete on `main` |
+| **iPad** | Kartik's test device only — addendum rows **A–H** below are a **targeted re-check**, not a ship blocker |
+| **O18–O20** (external discovery) | Runs on **physical iPhone + Mac** — see [`device-e2e-opencode.md`](device-e2e-opencode.md) |
+
+Do not treat pending iPad evidence as "device E2E incomplete" for iPhone TestFlight.
 
 ## Addendum — composer + ghost fix stack (execute-plan `5bdac085`)
 
@@ -24,7 +36,7 @@
 | H | Custom `command/foo.md` with hints → arguments sheet → execute |
 | O17 | `REMODEX_DISABLE_OPENCODE=1` → Codex threads/slash unchanged |
 
-**Device / evidence:** _Pending Kartik iPad + Mac pairing run._
+**Device / evidence:** _Pending Kartik iPad + Mac pairing run — **non-blocking** for iPhone TestFlight (see ship target above)._
 
 ## Why this file exists
 

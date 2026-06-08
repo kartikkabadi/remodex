@@ -7,6 +7,7 @@
 const { createHash } = require("crypto");
 const os = require("os");
 
+const { resolveOpenCodeHandoffEnabled } = require("./bridge-operator-profile");
 const { readString, resolvedParam } = require("./normalize");
 const { projectDiscoverFromOpenCode } = require("./opencode-project-discover-handler");
 const { createOpenCodeProvider } = require("./opencode-provider");
@@ -170,11 +171,54 @@ function createRuntimeProviderRouter({
     if (method === "thread/list") {
       respondAsync(parsed, async () => {
         const startedAt = Date.now();
-        const codexResult = await sendCodexRequest("thread/list", parsed.params || {});
-        const shouldIncludeProviders = !hasCursor(parsed.params);
-        const providerThreads = shouldIncludeProviders
-          ? await listProviderThreads(runtimeProviders, parsed.params || {})
-          : [];
+        const threadListParams = parsed.params || {};
+        const shouldIncludeProviders = !hasCursor(threadListParams);
+        const codexLegPromise = (async () => {
+          const legStarted = Date.now();
+          const result = await withThreadListBudget(
+            sendCodexRequest("thread/list", threadListParams).catch((error) => {
+              console.log(
+                JSON.stringify({
+                  event: "thread_list_codex_failed",
+                  message: readString(error?.message) || "Codex thread/list failed",
+                }),
+              );
+              return { data: [] };
+            }),
+            codexThreadListBudgetMs(process.env),
+            { data: [] },
+            { leg: "codex" },
+          );
+          return { result, ms: Date.now() - legStarted };
+        })();
+        const opencodeLegPromise = shouldIncludeProviders
+          ? (async () => {
+              const legStarted = Date.now();
+              const result = await listProviderThreadsForThreadList(
+                runtimeProviders,
+                threadListParams,
+                logPrefix,
+              );
+              return { result, ms: Date.now() - legStarted };
+            })()
+          : Promise.resolve({ result: [], ms: 0 });
+        const [codexLeg, opencodeLeg] = await Promise.all([
+          codexLegPromise,
+          opencodeLegPromise,
+        ]);
+        const codexResult = codexLeg.result;
+        const providerLeg = opencodeLeg.result;
+        const providerThreads = Array.isArray(providerLeg?.threads)
+          ? providerLeg.threads
+          : Array.isArray(providerLeg)
+            ? providerLeg
+            : [];
+        const providerMeta =
+          providerLeg && typeof providerLeg === "object" && !Array.isArray(providerLeg)
+            ? providerLeg.meta
+            : null;
+        const codexMs = codexLeg.ms;
+        const opencodeMs = opencodeLeg.ms;
         registerThreadProjects(projectRegistry, threadsFromListResult(codexResult), {
           source: "codex-thread-list",
           provider: CODEX_PROVIDER_ID,
@@ -182,8 +226,7 @@ function createRuntimeProviderRouter({
         registerThreadProjects(projectRegistry, providerThreads, {
           source: "provider-thread-list",
         });
-        const merged = mergeThreadListResult(codexResult, providerThreads);
-        const threadListParams = parsed.params || {};
+        const merged = mergeThreadListResult(codexResult, providerThreads, { meta: providerMeta });
         maybeDiscoverOpenCodeProjects({
           opencodeProvider,
           projectRegistry,
@@ -193,14 +236,19 @@ function createRuntimeProviderRouter({
           logPrefix,
         });
         const wallMs = Date.now() - startedAt;
+        const discoverProjectsEnabled = resolveDiscoverProjectsEnabled(
+          process.env,
+          threadListParams,
+        );
+        console.log(JSON.stringify({ event: "thread_list_codex_ms", ms: codexMs }));
+        console.log(JSON.stringify({ event: "thread_list_opencode_ms", ms: opencodeMs }));
         console.log(
           JSON.stringify({
             event: "thread_list_wall_ms",
             wallMs,
-            discoverProjectsEnabled: resolveDiscoverProjectsEnabled(
-              process.env,
-              threadListParams,
-            ),
+            codexMs,
+            opencodeMs,
+            discoverProjectsEnabled,
           }),
         );
         return merged;
@@ -252,6 +300,10 @@ function createRuntimeProviderRouter({
 
     if (method === "permission/reply") {
       respondAsync(parsed, async () => {
+        const ownershipMismatch = resolveThreadOwnershipMismatch(parsed, threadOwnership);
+        if (ownershipMismatch) {
+          throw ownershipMismatch;
+        }
         const opencodeProvider = runtimeProviders.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
         if (!opencodeProvider || typeof opencodeProvider.handleRequest !== "function") {
           const error = new Error("OpenCode provider unavailable for permission/reply");
@@ -337,6 +389,11 @@ async function listProviderModels(providers) {
 
 const CODEX_MODEL_LIST_BUDGET_MS = 3_000;
 const MODEL_LIST_PROVIDER_BUDGET_MS = 3_000;
+const CODEX_THREAD_LIST_BUDGET_MS = 10_000;
+const THREAD_LIST_PROVIDER_BUDGET_MS = 10_000;
+const DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS = 10_000;
+const THREAD_LIST_BUDGET_CEILING_MS = 11_000;
+const threadListInFlightByProvider = new Map();
 // Cold `opencode serve` can take START_TIMEOUT_MS + health polling; 8s was too short on device.
 const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
   START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
@@ -511,6 +568,30 @@ function opencodeModelListBudgetMs(env = process.env) {
   );
 }
 
+function readThreadListBudgetMs(env, key, fallbackMs) {
+  const numeric = Number(readString(env?.[key]));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallbackMs;
+  }
+  return Math.min(Math.floor(numeric), THREAD_LIST_BUDGET_CEILING_MS);
+}
+
+function codexThreadListBudgetMs(env = process.env) {
+  return readThreadListBudgetMs(
+    env,
+    "REMODEX_THREAD_LIST_CODEX_BUDGET_MS",
+    CODEX_THREAD_LIST_BUDGET_MS,
+  );
+}
+
+function opencodeThreadListBudgetMs(env = process.env) {
+  return readThreadListBudgetMs(
+    env,
+    "REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS",
+    DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS,
+  );
+}
+
 // Caps one leg of model/list so Codex and OpenCode discovery stay within mobile budgets.
 function withModelListBudget(promise, budgetMs, fallback) {
   let timeoutId;
@@ -520,6 +601,30 @@ function withModelListBudget(promise, budgetMs, fallback) {
 
   return Promise.race([promise, budget]).finally(() => {
     clearTimeout(timeoutId);
+  });
+}
+
+// Caps one leg of thread/list; logs abandonment when the budget fallback wins the race.
+function withThreadListBudget(promise, budgetMs, fallback, options = {}) {
+  let timeoutId;
+  let budgetWon = false;
+  const budget = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      budgetWon = true;
+      console.log(
+        JSON.stringify({
+          event: "thread_list_leg_abandoned",
+          leg: readString(options.leg) || null,
+          budgetMs,
+        }),
+      );
+      resolve(fallback);
+    }, budgetMs);
+  });
+
+  return Promise.race([promise, budget]).finally(() => {
+    clearTimeout(timeoutId);
+    void budgetWon;
   });
 }
 
@@ -613,17 +718,73 @@ async function listProviderModelsForModelList(
   return { models, opencodeMeta };
 }
 
-async function listProviderThreads(providers, params) {
+function resetThreadListInFlightState() {
+  threadListInFlightByProvider.clear();
+}
+
+async function listProviderThreadsForThreadList(
+  providers,
+  params,
+  logPrefix = "[remodex]",
+  options = {},
+) {
+  const env = options.env || process.env;
   const settled = await Promise.allSettled(
-    providers.map((provider) => provider.listThreads(params)),
+    providers.map((provider) => {
+      const inFlightKey = readString(provider?.id);
+      if (inFlightKey && threadListInFlightByProvider.has(inFlightKey)) {
+        return threadListInFlightByProvider.get(inFlightKey);
+      }
+
+      const budgetMs =
+        provider.id === OPENCODE_PROVIDER_ID
+          ? opencodeThreadListBudgetMs(env)
+          : THREAD_LIST_PROVIDER_BUDGET_MS;
+      const listWork = provider.listThreads(params).catch((error) => {
+        console.log(
+          JSON.stringify({
+            event: "thread_list_provider_failed",
+            providerId: provider.id,
+            message: readString(error?.message) || `${provider.id} thread/list failed`,
+          }),
+        );
+        return { data: [], meta: null };
+      });
+      const listPromise = withThreadListBudget(
+        listWork,
+        budgetMs,
+        { data: [], meta: null },
+        { leg: provider.id },
+      );
+
+      if (inFlightKey) {
+        const shared = listPromise.finally(() => {
+          if (threadListInFlightByProvider.get(inFlightKey) === shared) {
+            threadListInFlightByProvider.delete(inFlightKey);
+          }
+        });
+        threadListInFlightByProvider.set(inFlightKey, shared);
+        return shared;
+      }
+
+      return listPromise;
+    }),
   );
-  return settled.flatMap((result) => {
+  const threads = [];
+  let meta = null;
+  for (const result of settled) {
     if (result.status !== "fulfilled") {
-      return [];
+      continue;
     }
     const payload = result.value;
-    return Array.isArray(payload?.data) ? payload.data : [];
-  });
+    if (Array.isArray(payload?.data)) {
+      threads.push(...payload.data);
+    }
+    if (payload?.meta && typeof payload.meta === "object") {
+      meta = { ...(meta || {}), ...payload.meta };
+    }
+  }
+  return { threads, meta };
 }
 
 function logBridgeTurnStartAudit(request, ownershipStore) {
@@ -855,27 +1016,126 @@ function mergeModelListResult(codexResult, providerModels, extras = {}) {
   return merged;
 }
 
-function mergeThreadListResult(codexResult, providerThreads) {
+function mergeThreadListResult(codexResult, providerThreads, extras = {}) {
   const result = codexResult && typeof codexResult === "object" ? codexResult : {};
   const key = firstArrayKey(result, ["data", "items", "threads"]) || "data";
   const codexThreads = Array.isArray(result[key]) ? result[key] : [];
   const merged = dedupeMergedThreads(codexThreads, providerThreads).toSorted(
     compareThreadsByUpdatedAt,
   );
-
-  return {
+  const mergedResult = {
     ...result,
     [key]: merged,
   };
+  if (extras.meta && typeof extras.meta === "object") {
+    mergedResult.meta = {
+      ...(result.meta && typeof result.meta === "object" ? result.meta : {}),
+      ...extras.meta,
+    };
+  }
+  return mergedResult;
+}
+
+function readThreadSessionId(thread) {
+  const metadata = thread?.metadata;
+  const fromMetadata = metadata && typeof metadata === "object" ? metadata.sessionId : null;
+  const threadId = readThreadIdentifier(thread);
+  return (
+    readString(fromMetadata) ||
+    readString(thread?.sessionId) ||
+    parseDiscoveredThreadSessionId(threadId)
+  );
+}
+
+function isDiscoveredExternalThreadRow(thread) {
+  const metadata = thread?.metadata;
+  if (metadata && typeof metadata === "object" && metadata.discoveredExternally === true) {
+    return true;
+  }
+  const threadId = readThreadIdentifier(thread);
+  return Boolean(threadId && threadId.startsWith(DISCOVERED_THREAD_ID_PREFIX));
+}
+
+function parseDiscoveredThreadSessionId(threadId) {
+  const normalized = readString(threadId);
+  if (!normalized || !normalized.startsWith(DISCOVERED_THREAD_ID_PREFIX)) {
+    return "";
+  }
+  return readString(normalized.slice(DISCOVERED_THREAD_ID_PREFIX.length));
+}
+
+function threadMergePreferenceScore(thread) {
+  const threadId = readThreadIdentifier(thread);
+  let score = 0;
+  if (threadId && threadId.startsWith("opencode-thread-")) {
+    score += 4;
+  }
+  if (hasProviderThreadMetadata(thread)) {
+    score += 2;
+  }
+  if (isDiscoveredExternalThreadRow(thread)) {
+    score -= 8;
+  }
+  const updatedAt = Date.parse(readString(thread?.updatedAt) || "") || 0;
+  return { score, updatedAt };
+}
+
+function shouldReplaceThreadForSessionId(existingThread, candidateThread) {
+  const existing = threadMergePreferenceScore(existingThread);
+  const candidate = threadMergePreferenceScore(candidateThread);
+  if (candidate.score !== existing.score) {
+    return candidate.score > existing.score;
+  }
+  return candidate.updatedAt >= existing.updatedAt;
 }
 
 function dedupeMergedThreads(codexThreads, providerThreads) {
   const mergedById = new Map();
-  for (const thread of codexThreads) {
+  const ownedSessionIds = new Set();
+  const sessionIdToThreadId = new Map();
+
+  const rememberOwnedSession = (thread) => {
+    const sessionId = readThreadSessionId(thread);
+    if (!sessionId || isDiscoveredExternalThreadRow(thread)) {
+      return;
+    }
+    ownedSessionIds.add(sessionId);
     const threadId = readThreadIdentifier(thread);
     if (threadId) {
+      sessionIdToThreadId.set(sessionId, threadId);
+    }
+  };
+
+  const upsertThread = (thread) => {
+    const threadId = readThreadIdentifier(thread);
+    if (!threadId) {
+      return;
+    }
+    const sessionId = readThreadSessionId(thread);
+    if (sessionId && !isDiscoveredExternalThreadRow(thread)) {
+      const existingThreadId = sessionIdToThreadId.get(sessionId);
+      if (existingThreadId && existingThreadId !== threadId) {
+        const existingThread = mergedById.get(existingThreadId);
+        if (existingThread && !shouldReplaceThreadForSessionId(existingThread, thread)) {
+          return;
+        }
+        mergedById.delete(existingThreadId);
+      }
+      sessionIdToThreadId.set(sessionId, threadId);
+      ownedSessionIds.add(sessionId);
+    }
+    if (!mergedById.has(threadId) || hasProviderThreadMetadata(thread)) {
       mergedById.set(threadId, thread);
     }
+  };
+
+  for (const thread of codexThreads) {
+    upsertThread(thread);
+    rememberOwnedSession(thread);
+  }
+
+  for (const thread of providerThreads) {
+    rememberOwnedSession(thread);
   }
 
   for (const thread of providerThreads) {
@@ -884,9 +1144,14 @@ function dedupeMergedThreads(codexThreads, providerThreads) {
       continue;
     }
 
-    if (!mergedById.has(threadId) || hasProviderThreadMetadata(thread)) {
-      mergedById.set(threadId, thread);
+    if (isDiscoveredExternalThreadRow(thread)) {
+      const sessionId = readThreadSessionId(thread);
+      if (sessionId && ownedSessionIds.has(sessionId)) {
+        continue;
+      }
     }
+
+    upsertThread(thread);
   }
   return Array.from(mergedById.values());
 }
@@ -1121,8 +1386,7 @@ async function buildCatalogOpenCodeRuntime(providers, env, sendRuntimeMessage = 
       : buildOpenCodeRuntimeStatus({
           enabled: false,
           command: hasCommand,
-          handoffEnvEnabled: readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "1"
-            || readString(env.REMODEX_OPENCODE_HANDOFF).toLowerCase() === "true",
+          handoffEnvEnabled: resolveOpenCodeHandoffEnabled(env),
         });
 
   const inventoryBefore = Array.isArray(runtimeStatus?.providerInventory)
@@ -1447,22 +1711,31 @@ module.exports = {
   computeCatalogRevision,
   countAuthenticated,
   CODEX_MODEL_LIST_BUDGET_MS,
+  CODEX_THREAD_LIST_BUDGET_MS,
   DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS,
+  DEFAULT_OPENCODE_THREAD_LIST_BUDGET_MS,
   MODEL_LIST_PROVIDER_BUDGET_MS,
+  THREAD_LIST_BUDGET_CEILING_MS,
+  THREAD_LIST_PROVIDER_BUDGET_MS,
+  codexThreadListBudgetMs,
+  opencodeThreadListBudgetMs,
   maybeEmitCatalogUpdated,
   opencodeModelListBudgetMs,
   createRuntimeProviderRouter,
   capOpenCodeModelsForMobileList,
   catalogOpenCodeSnapshotForModelList,
   listProviderModelsForModelList,
+  listProviderThreadsForThreadList,
   resetCatalogPushState,
   resetOpenCodeProjectDiscoverState,
+  resetThreadListInFlightState,
   isOpenCodeDiscoverProjectsEnabled,
   readDiscoverProjectTtlMs,
   maybeDiscoverOpenCodeProjects,
   shouldWarmProviderInventory,
   shortHash,
   withModelListBudget,
+  withThreadListBudget,
   mergeModelListResult,
   mergeSkillsAcrossProviders,
   mergeSkillsListResult,

@@ -86,6 +86,26 @@ All fields optional. Omit for first page.
 
 **Routing behavior:** Bridge fetches Codex models via `codex.send("model/list")`, fetches OpenCode models via `provider.listModels()`, merges both arrays into `items`, adds `modelProvider` and `capabilities` fields to every model. Codex models always come first.
 
+Router runs Codex `model/list` and OpenCode `provider.listModels()` **in parallel** (`Promise.all`), mirroring `thread/list`. Each leg has an independent race budget; Codex failures are isolated via `.catch()` and return `{ items: [] }`.
+
+#### `model/list` parallel merge and SLOs
+
+| Env knob | Default | Purpose |
+|----------|---------|---------|
+| `CODEX_MODEL_LIST_BUDGET_MS` | `3000` (internal constant) | Codex leg race cap |
+| `REMODEX_MODEL_LIST_OPENCODE_BUDGET_MS` | `START_TIMEOUT + HEALTH_TIMEOUT + 5s` | OpenCode leg race cap (cold serve) |
+| `REMODEX_MODEL_LIST_OPENCODE_FULL_BUDGET_MS` | `15000` | `params.full: true` All Models sheet only |
+
+**Wall-clock SLOs** (picker first page vs lazy All Models sheet):
+
+| Metric | Budget | Notes |
+|--------|--------|-------|
+| `model/list` p95 (warm, first page) | **< 3s** | Model picker initial load |
+| `model/list` p95 (`full: true`) | **< 8s** | All Models sheet; iOS loads lazily on sheet open |
+| OpenCode leg on budget timeout | fallback `[]` | Codex items still returned; OpenCode omitted for that response |
+
+See `docs/operations/performance-limits.md` § `model/list`.
+
 **`modelProvider` values:** `"codex"`, `"opencode"`, or future provider IDs.
 
 **`upstreamProviderId`:** For OpenCode models only — the underlying provider (e.g. `"anthropic"`, `"openai"`, `"google"`). For Codex models this field is absent.
@@ -96,8 +116,16 @@ All fields optional. Omit for first page.
 
 **Params:**
 ```
-{ cursor?: string, limit?: number, includeArchived?: boolean }
+{
+  cursor?: string,
+  limit?: number,
+  includeArchived?: boolean,
+  discoverOpenCodeSessions?: boolean,
+  discoverOpenCodeProjects?: boolean
+}
 ```
+
+The Remodex iOS app sends `discoverOpenCodeSessions` / `discoverOpenCodeProjects: true` on foreground sidebar polls when the user has not opted out (`openCodeExternalDiscoveryEnabled`, default **on**). Bridge policy honors client params when env is unset; `REMODEX_OPENCODE_DISCOVER_SESSIONS=0` hard-kills session discover; `REMODEX_OPENCODE_DISCOVER_PROJECTS=0` hard-kills hot-path project discover.
 
 **Result:**
 ```json
@@ -126,9 +154,16 @@ All fields optional. Omit for first page.
       }
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "meta": {
+    "materializationBlocked": 0,
+    "sdkValidations": 2,
+    "sdkValidationsCap": 20
+  }
 }
 ```
+
+**`meta` (OpenCode leg, PR 5):** When the OpenCode provider participates, merged responses may include `meta.materializationBlocked` — count of owned stubs omitted by validation cap or anti-ghost policy. iOS records this in `lastThreadListMaterializationBlocked` and logs when >0. Bridge also logs `opencode_list_threads_filtered.materialization_blocked`.
 
 **Routing behavior:** Merged from Codex `thread/list` + OpenCode `provider.listThreads()`. Provider threads only included on first page (no cursor). Deduplicated by thread ID. Sorted by `updatedAt` descending. Provider-owned threads carry `modelProvider` and `metadata.provider` fields for sidebar badges.
 
@@ -173,7 +208,7 @@ When `REMODEX_OPENCODE_DISCOVER_SESSIONS=1`, the bridge calls SDK `session.list`
 
 #### `thread/list` discovery flags and SLOs
 
-Phased rollout uses dual feature flags (both default **`0`** until device matrix O18–O20 passes):
+External discovery is **client-true by default** — no Mac env flip is required for production. The **Remodex iOS app** sends `discoverOpenCodeSessions` / `discoverOpenCodeProjects: true` on every `thread/list` poll when the user has not opted out (`openCodeExternalDiscoveryEnabled`, default **on**). Bridge policy (`opencode-discovery-policy.js`) honors client params when env is unset; env `=0` hard-kills; env `=1` enables without client params. O18–O20 device evidence gates promotion docs, not the runtime default.
 
 | Env knob | Default | Purpose |
 |----------|---------|---------|
@@ -184,6 +219,9 @@ Phased rollout uses dual feature flags (both default **`0`** until device matrix
 | `REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS` | `120000` | Debounce hot-path `project/discover` |
 | `REMODEX_OPENCODE_ENSURE_STARTED_MS` | `4000` | Cap blocking `ensureStarted` on discover path |
 | `REMODEX_LIST_THREADS_VALIDATE_CAP` | `20` | Owned stub validation budget only — **not** shared with discover |
+| `REMODEX_LIST_THREADS_VALIDATE_CACHE_TTL_MS` | `60000` | TTL cache for per-`sessionId` SDK validation on owned stubs |
+| `REMODEX_VALIDATION_RPC_LIMIT_PER_MIN` | `120` | Global token bucket for `getSession` / `getMessages` validation RPCs |
+| `REMODEX_OPENCODE_SERVE_WAKE_MS` | `8000` | Cap blocking `ensureStarted` on `turn/start` and other serve wakes (distinct from list-path 4s cap) |
 
 **Wall-clock SLOs** (iOS foreground poll every **10s**; secure transport per-message timeout **12s**):
 
@@ -194,7 +232,42 @@ Phased rollout uses dual feature flags (both default **`0`** until device matrix
 | `thread/list` p99 (any) | **< 11s** | Must not exceed transport timeout |
 | `ensureStarted` on discover path | **< 4s** | On timeout: serve stale discovery cache + schedule async refresh |
 
-Router emits `thread_list_wall_ms` histogram logs. When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
+Router runs Codex `thread/list` and OpenCode `provider.listThreads()` **in parallel** (`Promise.all`), mirroring `model/list`. Each leg has an independent race budget; Codex failures are isolated via `.catch()` and return an empty `data` array.
+
+| Env knob | Default | Purpose |
+|----------|---------|---------|
+| `REMODEX_THREAD_LIST_CODEX_BUDGET_MS` | `10000` | Cap blocking Codex leg |
+| `REMODEX_THREAD_LIST_OPENCODE_BUDGET_MS` | `10000` | Cap blocking OpenCode leg |
+
+**Telemetry** (JSON logs per `thread/list` response):
+
+| Event | Fields | Meaning |
+|-------|--------|---------|
+| `thread_list_codex_ms` | `ms` | Codex leg wall time |
+| `thread_list_opencode_ms` | `ms` | OpenCode leg wall time (0 when paginated with cursor) |
+| `thread_list_wall_ms` | `wallMs`, `codexMs`, `opencodeMs`, `discoverProjectsEnabled` | End-to-end merge time |
+| `thread_list_leg_abandoned` | `leg`, `budgetMs` | Per-leg race hit fallback before underlying work finished |
+| `thread_list_codex_failed` | `message` | Codex leg `.catch()` isolation |
+| `thread_list_provider_failed` | `providerId`, `message` | OpenCode/provider leg `.catch()` isolation |
+| `opencode_list_threads_filtered` | `materialization_blocked`, `sdk_validations`, `sdk_validations_cap`, … | OpenCode anti-ghost summary (see `observability.md`) |
+| `opencode_validation_rpc_rate_limited` | `limitPerMin` | Validation token bucket exhausted |
+
+See also `docs/operations/performance-limits.md` and `docs/operations/observability.md` § `thread/list`.
+
+#### Secure transport outbound buffer
+
+During relay disconnect, the bridge queues encrypted application messages in a bounded catch-up buffer (`secure-transport.js`). On `trusted_reconnect`, `resumeState` replays entries with `bridgeOutboundSeq` greater than the phone's `lastAppliedBridgeOutboundSeq`.
+
+| Knob | Default | Purpose |
+|------|---------|---------|
+| `MAX_BRIDGE_OUTBOUND_MESSAGES` | `100` | Message count cap (override: `REMODEX_BRIDGE_OUTBOUND_CAP`) |
+| `MAX_BRIDGE_OUTBOUND_BYTES` | `10 MiB` | Byte cap |
+| `REMODEX_BRIDGE_PRIORITY_OUTBOUND` | `1` | Priority-tier trim; protects `turn/completed` and `item/completed` over RPC responses |
+| `REMODEX_BRIDGE_OUTBOUND_RECENT_TURNS` | `2` | Recent turns whose lifecycle/stream entries are pin-protected |
+
+Logs: `bridge_outbound_buffered` (pre-resume queue), `bridge_outbound_dropped` (trim under cap pressure). Full field reference: `observability.md` § Secure transport outbound buffer.
+
+When `REMODEX_OPENCODE_DISCOVER_PROJECTS=1`, `maybeDiscoverOpenCodeProjects` runs fire-and-forget after merge (TTL 120s, non-blocking); response is never blocked by slow `project.list`.
 
 **Cold-serve / first-poll:** If `ensureStarted` exceeds `REMODEX_OPENCODE_ENSURE_STARTED_MS`, return immediately with last-known discovered rows (TTL may be expired) + owned threads; log `discover_refresh_async`. O18 “≤10s visible” accepts **second poll** on cold serve; first poll must not block >12s.
 

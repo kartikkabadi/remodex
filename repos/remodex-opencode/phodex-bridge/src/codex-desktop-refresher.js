@@ -7,6 +7,10 @@
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const {
+  resolveBridgeProfile,
+  resolveOpenCodeHandoffEnabled,
+} = require("./bridge-operator-profile");
 const { readDaemonConfig } = require("./daemon-state");
 const { createThreadRolloutActivityWatcher } = require("./rollout-watch");
 
@@ -559,7 +563,10 @@ function readBridgeConfig({
     : null;
   // Desktop refresh is opt-in for now because Codex.app still lacks true live updates.
   const defaultRefreshEnabled = false;
+  const bridgeProfile = resolveBridgeProfile(env);
   return {
+    bridgeProfile,
+    opencodeHandoffEnabled: resolveOpenCodeHandoffEnabled(env),
     relayUrl,
     pushServiceUrl: readFirstDefinedEnv(
       ["REMODEX_PUSH_SERVICE_URL"],
@@ -772,4 +779,6 @@ function isDesktopUnavailableError(message) {
 module.exports = {
   CodexDesktopRefresher,
   readBridgeConfig,
+  resolveBridgeProfile,
+  resolveOpenCodeHandoffEnabled,
 };

@@ -8,8 +8,11 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("os");
 const { pathToFileURL } = require("url");
 const path = require("path");
+
+const TEST_PROJECT = path.join(os.homedir(), ".remodex-test-project");
 const {
   buildPromptFromTurnInput,
   skillItemToPromptPart,
@@ -134,7 +137,7 @@ test("turn/start forwards structured parts to OpenCode session.prompt", async ()
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/project" },
+    params: { cwd: TEST_PROJECT },
   });
 
   await provider.handleRequest({

@@ -168,6 +168,7 @@ struct TurnComposerHostView: View {
         )
         let selectedModelID = codex.visibleSelectedModelIDForComposer(threadId: thread.id)
         let isRuntimeSelectionLoading = codex.isRuntimeSelectionLoadingForComposer(threadId: thread.id)
+        let isRuntimeCapabilitiesLoading = codex.isRuntimeCapabilitiesLoadingForComposer(threadId: thread.id)
         let hasComposerWorkingDirectory = thread.gitWorkingDirectory != nil
             && !SidebarThreadGrouping.isRootlessChatThread(thread)
 
@@ -210,6 +211,7 @@ struct TurnComposerHostView: View {
             remainingAttachmentSlots: viewModel.remainingAttachmentSlots,
             isComposerInteractionLocked: viewModel.isComposerInteractionLocked(activeTurnID: activeTurnID),
             isSendDisabled: isVoiceInputActive
+                || isRuntimeCapabilitiesLoading
                 || viewModel.isSendDisabled(isConnected: codex.isConnected, activeTurnID: activeTurnID),
             isSending: viewModel.isSending,
             isPlanModeArmed: viewModel.isPlanModeArmed,

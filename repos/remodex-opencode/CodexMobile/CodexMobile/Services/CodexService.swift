@@ -652,6 +652,8 @@ final class CodexService {
     @ObservationIgnored var canonicalHistoryReconcileRetryTaskByThreadID: [String: Task<Void, Never>] = [:]
     // Coalesces sidebar/bootstrap thread/list refreshes so launch paths do not duplicate the same fetch.
     @ObservationIgnored var threadListFetchTaskByLimit: [Int: (id: UUID, task: Task<[CodexThread], Error>)] = [:]
+    // Last OpenCode listThreads materialization cap overflow count surfaced by bridge meta.
+    @ObservationIgnored var lastThreadListMaterializationBlocked: Int = 0
     var isAppInForeground = true
     var threadListSyncTask: Task<Void, Never>?
     var activeThreadSyncTask: Task<Void, Never>?

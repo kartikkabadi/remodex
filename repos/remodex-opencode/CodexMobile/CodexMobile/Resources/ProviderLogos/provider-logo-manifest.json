@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "assetNamePattern": "provider-{logoProviderId}-logo",
+  "coreProviderIds": [
+    "codex",
+    "opencode",
+    "opencode-go",
+    "opencode-zen"
+  ],
+  "committedExternalProviderIds": [
+    "anthropic",
+    "openai",
+    "google",
+    "xai",
+    "groq",
+    "deepseek",
+    "mistral",
+    "cohere",
+    "perplexity",
+    "together",
+    "amazon",
+    "azure",
+    "openrouter",
+    "github",
+    "bedrock",
+    "alibaba",
+    "cerebras",
+    "cloudflare",
+    "databricks",
+    "deepinfra",
+    "fireworks",
+    "gitlab",
+    "google-vertex",
+    "huggingface",
+    "lmstudio",
+    "minimax",
+    "nebius",
+    "novita",
+    "ovhcloud",
+    "scaleway"
+  ],
+  "aliases": {
+    "amazon-bedrock": "bedrock",
+    "github-copilot": "github",
+    "vertex": "google-vertex",
+    "google-vertex-anthropic": "google-vertex",
+    "aws": "amazon",
+    "gemini": "google"
+  }
+}

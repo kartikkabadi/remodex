@@ -82,7 +82,7 @@ test("desktop/continueOpenCode returns opencode_handoff_disabled when env gate i
     responses.push(JSON.parse(response));
   }, {
     platform: "darwin",
-    env: {},
+    env: { REMODEX_OPENCODE_HANDOFF: "0" },
     ownershipStore,
     opencodeProvider: {
       id: "opencode",

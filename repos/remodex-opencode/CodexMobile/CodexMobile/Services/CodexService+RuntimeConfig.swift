@@ -187,7 +187,7 @@ extension CodexService {
     }
 
     /// Catalog-driven providers for logo resolution (id, name, logoAssetId? from BRAND-1).
-    /// Used by catalog resolver stub in RuntimeProviderLogo (SF fallback when no logoAssetId).
+    /// Used by ProviderLogoView catalog resolver; see provider-branding.md for emergency SF fallback.
     var openCodeCatalogProviders: [OpenCodeCatalogProvider] {
         openCodeRuntimeCatalogEntry?.opencode?.providers ?? []
     }
@@ -625,8 +625,19 @@ extension CodexService {
     }
 
     func refreshRuntimeMetadataSequential() async {
-        try? await listModels(refreshProviders: true)
-        try? await fetchRuntimeCatalog()
+        await refreshRuntimeMetadataParallel()
+    }
+
+    // Warms model inventory and runtime/catalog (logo providers) concurrently so composer
+    // chrome and sidebar badges settle faster after connect.
+    func refreshRuntimeMetadataParallel() async {
+        async let modelsRefresh: Void = {
+            try? await self.listModels(refreshProviders: true)
+        }()
+        async let catalogRefresh: Void = {
+            try? await self.fetchRuntimeCatalog()
+        }()
+        _ = await (modelsRefresh, catalogRefresh)
     }
 
     func noteOpenCodeCatalogRevisionAfterFetch() {
@@ -655,10 +666,7 @@ extension CodexService {
     }
 
     func supportsImageAttachments(forThreadId threadId: String?) -> Bool {
-        if let env = ProcessInfo.processInfo.environment["REMODEX_OPENCODE_ATTACHMENTS"], env == "0" {
-            return false
-        }
-        return providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
+        providerCapabilitiesForTurn(threadId: threadId).supportsImageAttachments
     }
 
     // Remodex app drives Mac-started OpenCode session/project discovery via thread/list params.
@@ -675,6 +683,16 @@ extension CodexService {
            CodexModelOption.normalizedProvider(model.modelProvider) == provider {
             return model.capabilities
         }
+        if isRuntimeCapabilitiesLoadingForComposer(threadId: threadId) {
+            if provider == "opencode", let catalogCapabilities = openCodeRuntimeCatalogEntry?.capabilities {
+                return catalogCapabilities
+            }
+            if let runtime = availableRuntimes.first(where: {
+                CodexModelOption.normalizedProvider($0.id) == provider
+            }) {
+                return runtime.capabilities
+            }
+        }
         if provider == "opencode" {
             return openCodeRuntimeCatalogEntry?.capabilities ?? .defaultOpenCode
         }
@@ -688,6 +706,20 @@ extension CodexService {
 
     func supportsDesktopHandoffForTurn(threadId: String?) -> Bool {
         providerCapabilitiesForTurn(threadId: threadId).supportsDesktopHandoff
+    }
+
+    /// True when catalog advertises handoff and the Mac bridge reports handoff RPC is available.
+    func isDesktopHandoffActionAvailable(forThreadId threadId: String?) -> Bool {
+        guard supportsDesktopHandoffForTurn(threadId: threadId) else {
+            return false
+        }
+
+        let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        guard provider == "opencode" else {
+            return true
+        }
+
+        return openCodeRuntimeDetails?.handoffEnvEnabled == true
     }
 
     func selectedModelOption() -> CodexModelOption? {
@@ -754,6 +786,15 @@ extension CodexService {
             return false
         }
         return isBootstrappingConnectionSync || isLoadingThreads || isLoadingModels
+    }
+
+    // Blocks composer send/attach until the first catalog or model/list snapshot resolves.
+    func isRuntimeCapabilitiesLoadingForComposer(threadId: String? = nil) -> Bool {
+        _ = threadId
+        guard availableModels.isEmpty else {
+            return false
+        }
+        return isBootstrappingConnectionSync || isLoadingModels || availableRuntimes.isEmpty
     }
 
     func selectedGitWriterModelOption() -> CodexModelOption? {
@@ -892,6 +933,16 @@ extension CodexService {
             return capabilities
         }
         let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        if isRuntimeCapabilitiesLoadingForComposer(threadId: threadId) {
+            if provider == "opencode", let catalogCapabilities = openCodeRuntimeCatalogEntry?.capabilities {
+                return catalogCapabilities
+            }
+            if let runtime = availableRuntimes.first(where: {
+                CodexModelOption.normalizedProvider($0.id) == provider
+            }) {
+                return runtime.capabilities
+            }
+        }
         if let runtime = availableRuntimes.first(where: {
             CodexModelOption.normalizedProvider($0.id) == provider
         }) {

@@ -15,10 +15,12 @@ function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "remodex-ownership-"));
 }
 
-function makeStore(tempDir) {
+function makeStore(tempDir, options = {}) {
   return createThreadOwnershipStore({
     storagePath: path.join(tempDir, "thread-ownership.json"),
     fsImpl: fs,
+    writeDebounceMs: 0,
+    ...options,
   });
 }
 
@@ -92,6 +94,7 @@ test("persists thread-ownership.json with mode 0o600", () => {
     const store = createThreadOwnershipStore({
       storagePath,
       fsImpl: fs,
+      writeDebounceMs: 0,
     });
     store.setOwnership("thread-secure", "opencode");
 
@@ -171,6 +174,120 @@ test("ignores empty or invalid thread/provider ids", () => {
 
     assert.equal(store.removeOwnership(""), false);
     assert.equal(store.removeOwnership("nonexistent"), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+test("rejects unsafe thread ids (SEC-13)", () => {
+  const tempDir = makeTempDir();
+  try {
+    const store = makeStore(tempDir);
+
+    assert.equal(store.setOwnership("../etc/passwd", "opencode"), false);
+    assert.equal(store.setOwnership("thread with spaces", "opencode"), false);
+    assert.equal(store.setOwnership("a".repeat(300), "opencode"), false);
+    assert.equal(store.getOwnership("../etc/passwd"), null);
+    assert.equal(store.removeOwnership("../etc/passwd"), false);
+    assert.equal(store.size(), 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+test("salvages ownership from corrupt JSON and writes a backup", () => {
+  const tempDir = makeTempDir();
+  const storagePath = path.join(tempDir, "thread-ownership.json");
+  try {
+    fs.writeFileSync(
+      storagePath,
+      `{
+  "ownership": {
+    "thread-salvaged": {
+      "providerId": "opencode",
+      "assignedAt": "2026-05-30T12:00:00.000Z"
+    },
+    "thread-truncated": {
+      "providerId": "codex",
+      "assignedAt": "2026-05-29T18:30:00.000Z"
+    TRUNCATED`,
+      "utf8",
+    );
+
+    const store = makeStore(tempDir);
+    assert.equal(store.getOwnership("thread-salvaged"), "opencode");
+    assert.ok(store.size() >= 1);
+
+    const backups = fs.readdirSync(tempDir).filter((name) => name.includes(".corrupt."));
+    assert.equal(backups.length, 1);
+
+    const repaired = JSON.parse(fs.readFileSync(storagePath, "utf8"));
+    assert.equal(repaired.ownership["thread-salvaged"].providerId, "opencode");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+test("filters invalid thread ids loaded from disk", () => {
+  const tempDir = makeTempDir();
+  const storagePath = path.join(tempDir, "thread-ownership.json");
+  try {
+    fs.writeFileSync(
+      storagePath,
+      JSON.stringify({
+        ownership: {
+          "thread-valid": {
+            providerId: "opencode",
+            assignedAt: "2026-05-30T12:00:00.000Z",
+          },
+          "../evil": {
+            providerId: "codex",
+            assignedAt: "2026-05-30T12:00:00.000Z",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const store = makeStore(tempDir);
+    assert.equal(store.getOwnership("thread-valid"), "opencode");
+    assert.equal(store.getOwnership("../evil"), null);
+    assert.equal(store.size(), 1);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+test("debounces writes for 500ms", async () => {
+  const tempDir = makeTempDir();
+  const storagePath = path.join(tempDir, "thread-ownership.json");
+  try {
+    const store = makeStore(tempDir, { writeDebounceMs: 500 });
+    store.setOwnership("thread-1", "opencode");
+    store.setOwnership("thread-2", "codex");
+
+    assert.equal(fs.existsSync(storagePath), false);
+
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const persisted = JSON.parse(fs.readFileSync(storagePath, "utf8"));
+    assert.equal(persisted.ownership["thread-1"].providerId, "opencode");
+    assert.equal(persisted.ownership["thread-2"].providerId, "codex");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+test("flush persists debounced writes immediately", () => {
+  const tempDir = makeTempDir();
+  const storagePath = path.join(tempDir, "thread-ownership.json");
+  try {
+    const store = makeStore(tempDir, { writeDebounceMs: 500 });
+    store.setOwnership("thread-flush", "opencode");
+    assert.equal(fs.existsSync(storagePath), false);
+
+    store.flush();
+    const persisted = JSON.parse(fs.readFileSync(storagePath, "utf8"));
+    assert.equal(persisted.ownership["thread-flush"].providerId, "opencode");
   } finally {
     fs.rmSync(tempDir, { recursive: true });
   }

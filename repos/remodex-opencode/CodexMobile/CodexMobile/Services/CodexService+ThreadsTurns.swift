@@ -1118,6 +1118,7 @@ extension CodexService {
             guard let resultObject = response.result?.objectValue else {
                 throw CodexServiceError.invalidResponse("thread/list response missing payload")
             }
+            captureThreadListDiagnostics(from: resultObject)
 
             let page =
                 resultObject["data"]?.arrayValue
@@ -1150,6 +1151,25 @@ extension CodexService {
             "exec",
             "unknown",
         ]
+    }
+
+    // Records bridge-side ghost/materialization diagnostics for sync observability.
+    private func captureThreadListDiagnostics(from resultObject: RPCObject) {
+        guard let meta = resultObject["meta"]?.objectValue else {
+            return
+        }
+
+        let blocked =
+            meta["materializationBlocked"]?.intValue
+            ?? meta["materialization_blocked"]?.intValue
+        guard let blocked else {
+            return
+        }
+
+        lastThreadListMaterializationBlocked = blocked
+        if blocked > 0 {
+            debugSyncLog("thread/list materialization_blocked=\(blocked)")
+        }
     }
 
     // Accepts both modern and legacy cursor field names from thread/list responses.
@@ -1550,8 +1570,10 @@ extension CodexService {
                     includeServiceTier: includesServiceTier
                 )
                 traceTurnStartRequest(threadId: threadId, rpcId: nil, params: requestParams)
-                // The pre-turn snapshot must settle before the runtime can mutate files.
-                if let messageStartCheckpointTask {
+                // Defer checkpoint await only when the thread has a validated cwd (B-16 / REV-022).
+                // Rootless chats skip the blocking wait; project threads fire turn/start immediately.
+                if let messageStartCheckpointTask,
+                   !threadHasValidatedWorkingDirectory(for: threadId) {
                     await messageStartCheckpointTask.value
                 }
                 let response = try await sendRequestWithSandboxFallback(

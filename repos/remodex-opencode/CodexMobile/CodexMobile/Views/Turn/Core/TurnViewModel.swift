@@ -19,11 +19,13 @@ struct TurnComposerSendAvailability {
     let hasReviewSelection: Bool
     let hasPendingReviewSelection: Bool
     let hasSubagentsSelection: Bool
+    let isRuntimeCapabilitiesLoading: Bool
 
     // Evaluates whether sending is allowed for the current composer state.
     var isSendDisabled: Bool {
         isSending
             || !isConnected
+            || isRuntimeCapabilitiesLoading
             || hasPendingReviewSelection
             || (
                 trimmedInput.isEmpty

@@ -70,3 +70,43 @@ test("OpenCode turn/completed triggers push tracker completion preview", async (
   assert.equal(notifications[0].title, "OpenCode auth fix");
   assert.equal(notifications[0].body, "Response ready");
 });
+
+test("OpenCode turn/completed does not call push client when base URL is unconfigured (T-09)", async () => {
+  const notifications = [];
+  const tracker = createPushNotificationTracker({
+    sessionId: "session-opencode-unconfigured",
+    pushServiceClient: {
+      hasConfiguredBaseUrl: false,
+      async notifyCompletion(payload) {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    },
+  });
+
+  const threadId = "opencode-thread-unconfigured";
+  const turnId = "opencode-turn-unconfigured";
+
+  tracker.handleOutbound(
+    JSON.stringify({
+      method: "thread/started",
+      params: {
+        thread: { id: threadId, title: "Silent push" },
+      },
+    }),
+  );
+  tracker.handleOutbound(
+    JSON.stringify({
+      method: "turn/completed",
+      params: {
+        threadId,
+        turnId,
+        status: "completed",
+      },
+    }),
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(notifications.length, 0);
+});

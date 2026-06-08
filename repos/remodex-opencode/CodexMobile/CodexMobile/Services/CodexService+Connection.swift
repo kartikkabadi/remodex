@@ -588,10 +588,12 @@ extension CodexService {
     // Paint chats first; runtime metadata is useful composer chrome but must
     // never block thread sync on bridges where model/list is slow.
     func performPostConnectSyncPass(preferredThreadId: String? = nil) async {
-        await syncThreadsList()
+        _ = applyProgressiveSidebarFromStaleCacheIfNeeded()
+        scheduleRuntimeOptionRefresh()
+        async let threadListRefresh: Void = syncThreadsList()
         if await routePendingNotificationOpenIfPossible(refreshIfNeeded: false) {
+            await threadListRefresh
             scheduleCompleteThreadListHydration()
-            scheduleRuntimeOptionRefresh()
             return
         }
         let resolvedPreferredThreadId = normalizedInterruptIdentifier(preferredThreadId)
@@ -622,8 +624,43 @@ extension CodexService {
                 )
             }
         }
+        await threadListRefresh
         scheduleCompleteThreadListHydration()
-        scheduleRuntimeOptionRefresh()
+    }
+
+    // Paints pinned/local thread snapshots before the first thread/list RPC returns so the
+    // sidebar can render in <2s on reconnect while discovery sync continues in the background.
+    @discardableResult
+    func applyProgressiveSidebarFromStaleCacheIfNeeded() -> Bool {
+        guard threads.isEmpty else {
+            return true
+        }
+
+        var mergedThreadsByID: [String: CodexThread] = [:]
+        let deletedThreadIDs = locallyDeletedThreadIDs
+        let injectedThreadIDs = injectPinnedSnapshotThreads(
+            into: &mergedThreadsByID,
+            deletedThreadIDs: deletedThreadIDs
+        )
+        guard !mergedThreadsByID.isEmpty else {
+            return false
+        }
+
+        for threadID in Array(mergedThreadsByID.keys) {
+            guard var thread = mergedThreadsByID[threadID] else { continue }
+            applyPersistedThreadRename(to: &thread)
+            mergedThreadsByID[threadID] = thread
+        }
+
+        threads = sortThreads(Array(mergedThreadsByID.values))
+        snapshotOnlyPinnedThreadIDs.formUnion(injectedThreadIDs)
+        if activeThreadId == nil {
+            activeThreadId = firstLiveThreadID()
+        }
+        debugSyncLog(
+            "progressive sidebar painted cached=\(mergedThreadsByID.count) injected=\(injectedThreadIDs.count)"
+        )
+        return true
     }
 
     // Refreshes capped sidebar metadata without keeping initial reconnect in the loading state.
@@ -641,7 +678,7 @@ extension CodexService {
     // runtimes can answer chats while model/list is still slow or unavailable.
     private func scheduleRuntimeOptionRefresh() {
         pendingRuntimeOptionRefresh = true
-        flushPendingRuntimeOptionRefreshIfPossible(delayNanoseconds: 1_000_000_000)
+        flushPendingRuntimeOptionRefreshIfPossible()
     }
 
     // Runs runtime metadata independently from chat hydration. Settings already uses this
@@ -675,7 +712,7 @@ extension CodexService {
                 }
             }
             guard self.isConnected, self.isInitialized else { return }
-            await self.refreshRuntimeMetadataSequential()
+            await self.refreshRuntimeMetadataParallel()
             if self.runtimeOptionRefreshToken == refreshToken {
                 self.pendingRuntimeOptionRefresh = false
             }

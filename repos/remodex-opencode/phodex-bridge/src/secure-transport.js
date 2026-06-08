@@ -34,6 +34,7 @@ const MAX_BRIDGE_OUTBOUND_MESSAGES = 100;
 const MAX_BRIDGE_OUTBOUND_BYTES = 10 * 1024 * 1024;
 const LIFECYCLE_STREAM_BYTE_RESERVE_RATIO = 0.3;
 const DEFAULT_RECENT_TURN_PROTECT_COUNT = 2;
+const DEFAULT_NOTIFY_EVICTION_MAX_AGE_MS = 120_000;
 const OUTBOUND_PRIORITY = {
   LIFECYCLE: 0,
   STREAM: 1,
@@ -49,6 +50,9 @@ const SYSTEM_OUTBOUND_METHODS = new Set([
   "runtime/auth/error",
   "runtime/warning",
   "account/rateLimits/updated",
+]);
+const PERMISSION_PROTECTED_OUTBOUND_METHODS = new Set([
+  "permission/request",
 ]);
 
 function createBridgeSecureTransport({
@@ -559,6 +563,7 @@ function createBridgeSecureTransport({
 
   function trimOutboundBufferPriority(messageCap) {
     const droppedEntries = [];
+    let stallDropCount = 0;
 
     while (
       outboundBuffer.length > messageCap
@@ -567,19 +572,65 @@ function createBridgeSecureTransport({
       const protectedIndices = computeProtectedEntryIndices(outboundBuffer, {
         turnRegistrationOrder,
       });
-      const dropIndex = selectPriorityDropIndex(outboundBuffer, protectedIndices);
+      let dropIndex = selectPriorityDropIndex(outboundBuffer, protectedIndices);
+      let dropReason = "overflow";
+
+      if (dropIndex < 0) {
+        dropIndex = selectAgeBasedNotifyDropIndex(outboundBuffer);
+        if (dropIndex >= 0) {
+          dropReason = "notify_age_eviction";
+          stallDropCount += 1;
+        }
+      }
+
+      if (dropIndex < 0) {
+        dropIndex = selectOldestRpcDropIndex(outboundBuffer);
+        if (dropIndex >= 0) {
+          dropReason = "stall_rpc_eviction";
+          stallDropCount += 1;
+        }
+      }
+
+      if (dropIndex < 0) {
+        dropIndex = selectOldestStreamDropIndex(outboundBuffer);
+        if (dropIndex >= 0) {
+          dropReason = "stall_stream_eviction";
+          stallDropCount += 1;
+        }
+      }
+
+      if (dropIndex < 0 && outboundBuffer.length > 0) {
+        dropIndex = 0;
+        dropReason = "stall_fifo_eviction";
+        stallDropCount += 1;
+      }
+
       if (dropIndex < 0) {
         break;
       }
 
       const [entry] = outboundBuffer.splice(dropIndex, 1);
       outboundBufferBytes = Math.max(0, outboundBufferBytes - entry.sizeBytes);
-      droppedEntries.push(entry);
+      droppedEntries.push({ entry, reason: dropReason });
+    }
+
+    if (stallDropCount > 0) {
+      console.log(
+        JSON.stringify({
+          event: "bridge_outbound_drop_stalled",
+          stallDropCount,
+          bufferLength: outboundBuffer.length,
+          bufferBytes: outboundBufferBytes,
+        })
+      );
     }
 
     if (droppedEntries.length > 0) {
-      const droppedBytes = droppedEntries.reduce((total, entry) => total + entry.sizeBytes, 0);
-      logOutboundDropped(droppedEntries, droppedBytes, "overflow");
+      const entriesOnly = droppedEntries.map((dropped) => dropped.entry);
+      const droppedBytes = entriesOnly.reduce((total, entry) => total + entry.sizeBytes, 0);
+      const reasons = new Set(droppedEntries.map((dropped) => dropped.reason));
+      const reason = reasons.size === 1 ? [...reasons][0] : "overflow";
+      logOutboundDropped(entriesOnly, droppedBytes, reason);
     }
   }
 
@@ -894,6 +945,20 @@ function readRecentTurnProtectCount() {
   return Math.floor(parsed);
 }
 
+function readNotifyEvictionMaxAgeMs() {
+  const raw = process.env.REMODEX_BRIDGE_NOTIFY_EVICTION_MAX_AGE_MS;
+  if (!raw) {
+    return DEFAULT_NOTIFY_EVICTION_MAX_AGE_MS;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_NOTIFY_EVICTION_MAX_AGE_MS;
+  }
+
+  return Math.floor(parsed);
+}
+
 function classifyOutboundPriority(payload) {
   if (!payload || typeof payload !== "object") {
     return OUTBOUND_PRIORITY.NOTIFY;
@@ -924,6 +989,8 @@ function classifyOutboundPriority(payload) {
   case "item/toolCall":
   case "item/toolCallUpdate":
     return OUTBOUND_PRIORITY.TOOL;
+  case "permission/request":
+    return OUTBOUND_PRIORITY.NOTIFY;
   default:
     return OUTBOUND_PRIORITY.NOTIFY;
   }
@@ -1031,6 +1098,16 @@ function computeSystemProtectedIndices(entries) {
   return protectedIndices;
 }
 
+function computePermissionProtectedIndices(entries) {
+  const protectedIndices = new Set();
+  entries.forEach((entry, index) => {
+    if (entry.method && PERMISSION_PROTECTED_OUTBOUND_METHODS.has(entry.method)) {
+      protectedIndices.add(index);
+    }
+  });
+  return protectedIndices;
+}
+
 function computeRecentTurnProtectedIndices(
   entries,
   recentCount = readRecentTurnProtectCount(),
@@ -1075,6 +1152,7 @@ function computeProtectedEntryIndices(entries, options = {}) {
   const protectedIndices = new Set([
     ...computePinnedEntryIndices(entries),
     ...computeSystemProtectedIndices(entries),
+    ...computePermissionProtectedIndices(entries),
     ...computeRecentTurnProtectedIndices(entries, readRecentTurnProtectCount(), options),
   ]);
   return protectedIndices;
@@ -1142,6 +1220,84 @@ function selectPriorityDropIndex(entries, protectedIndices) {
       selectedIndex = index;
     }
   }
+
+  return selectedIndex;
+}
+
+function selectAgeBasedNotifyDropIndex(entries, now = Date.now()) {
+  const maxAgeMs = readNotifyEvictionMaxAgeMs();
+  let selectedIndex = -1;
+  let selectedSeq = Infinity;
+
+  entries.forEach((entry, index) => {
+    const priority = entry.priority ?? OUTBOUND_PRIORITY.NOTIFY;
+    if (priority !== OUTBOUND_PRIORITY.NOTIFY && priority !== OUTBOUND_PRIORITY.TOOL) {
+      return;
+    }
+
+    const ageMs = now - (entry.queuedAt ?? 0);
+    if (ageMs < maxAgeMs) {
+      return;
+    }
+
+    if (entry.bridgeOutboundSeq < selectedSeq) {
+      selectedSeq = entry.bridgeOutboundSeq;
+      selectedIndex = index;
+    }
+  });
+
+  if (selectedIndex >= 0) {
+    return selectedIndex;
+  }
+
+  entries.forEach((entry, index) => {
+    const priority = entry.priority ?? OUTBOUND_PRIORITY.NOTIFY;
+    if (priority !== OUTBOUND_PRIORITY.NOTIFY && priority !== OUTBOUND_PRIORITY.TOOL) {
+      return;
+    }
+
+    if (entry.bridgeOutboundSeq < selectedSeq) {
+      selectedSeq = entry.bridgeOutboundSeq;
+      selectedIndex = index;
+    }
+  });
+
+  return selectedIndex;
+}
+
+function selectOldestRpcDropIndex(entries) {
+  let selectedIndex = -1;
+  let selectedSeq = Infinity;
+
+  entries.forEach((entry, index) => {
+    if ((entry.priority ?? OUTBOUND_PRIORITY.NOTIFY) !== OUTBOUND_PRIORITY.RPC_RESPONSE) {
+      return;
+    }
+
+    if (entry.bridgeOutboundSeq < selectedSeq) {
+      selectedSeq = entry.bridgeOutboundSeq;
+      selectedIndex = index;
+    }
+  });
+
+  return selectedIndex;
+}
+
+function selectOldestStreamDropIndex(entries) {
+  let selectedIndex = -1;
+  let selectedSeq = Infinity;
+
+  entries.forEach((entry, index) => {
+    const priority = entry.priority ?? OUTBOUND_PRIORITY.NOTIFY;
+    if (priority !== OUTBOUND_PRIORITY.STREAM && priority !== OUTBOUND_PRIORITY.TOOL) {
+      return;
+    }
+
+    if (entry.bridgeOutboundSeq < selectedSeq) {
+      selectedSeq = entry.bridgeOutboundSeq;
+      selectedIndex = index;
+    }
+  });
 
   return selectedIndex;
 }
@@ -1229,6 +1385,7 @@ module.exports = {
   PAIRING_QR_VERSION,
   SECURE_PROTOCOL_VERSION,
   classifyOutboundPriority,
+  computePermissionProtectedIndices,
   computeProtectedEntryIndices,
   computeRecentTurnProtectedIndices,
   computeSystemProtectedIndices,
@@ -1236,4 +1393,8 @@ module.exports = {
   extractTurnContextKey,
   extractTurnPinKey,
   nonceForDirection,
+  readNotifyEvictionMaxAgeMs,
+  selectAgeBasedNotifyDropIndex,
+  selectOldestRpcDropIndex,
+  selectOldestStreamDropIndex,
 };

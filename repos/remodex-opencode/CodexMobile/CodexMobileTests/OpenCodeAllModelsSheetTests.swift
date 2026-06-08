@@ -121,21 +121,40 @@ final class OpenCodeAllModelsSheetTests: XCTestCase {
         XCTAssertTrue(service.supportsImageAttachments(forThreadId: "thread-img"))
     }
 
-    func testSupportsImageAttachmentsDisabledWhenFlagZero() {
-        let prior = setenv("REMODEX_OPENCODE_ATTACHMENTS", "0", 1)
-        defer {
-            if prior == 0 {
-                unsetenv("REMODEX_OPENCODE_ATTACHMENTS")
-            }
-        }
-
+    func testSupportsImageAttachmentsDisabledWhenCatalogCapabilityFalse() {
         let service = makeService()
+        let base = ProviderCapabilities.defaultOpenCode
+        let capabilities = ProviderCapabilities(
+            supportsAgentSelection: base.supportsAgentSelection,
+            supportsReasoningEffort: base.supportsReasoningEffort,
+            supportsFastMode: base.supportsFastMode,
+            supportsPlanMode: base.supportsPlanMode,
+            supportsStreamingTools: base.supportsStreamingTools,
+            supportsApprovals: base.supportsApprovals,
+            supportsFork: base.supportsFork,
+            supportsVoice: base.supportsVoice,
+            supportsDesktopHandoff: base.supportsDesktopHandoff,
+            supportsSlashCommands: base.supportsSlashCommands,
+            supportsSlashCommandExecute: base.supportsSlashCommandExecute,
+            supportsMCP: base.supportsMCP,
+            supportsWorktree: base.supportsWorktree,
+            supportsSkillAutocomplete: base.supportsSkillAutocomplete,
+            supportsStructuredSkillInput: base.supportsStructuredSkillInput,
+            supportsSkillFileInjection: base.supportsSkillFileInjection,
+            supportsImageAttachments: false,
+            supportsSteer: base.supportsSteer,
+            supportsQueue: base.supportsQueue
+        )
         service.availableRuntimes = [
             RuntimeInfo(
                 id: "opencode",
-                name: "OpenCode",
+                label: "OpenCode",
                 enabled: true,
-                capabilities: .defaultOpenCode
+                unavailableReason: nil,
+                reasonCode: nil,
+                showsBetaLabel: true,
+                capabilities: capabilities,
+                agents: []
             ),
         ]
         service.upsertThread(CodexThread(id: "thread-img", title: "OC", modelProvider: "opencode"))
