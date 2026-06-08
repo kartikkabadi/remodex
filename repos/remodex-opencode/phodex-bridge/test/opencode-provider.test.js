@@ -6,6 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const {
@@ -16,6 +17,10 @@ const {
 const { createOpenCodeProvider } = require("../src/opencode-provider");
 const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+
+function testProjectPath(name) {
+  return path.join(os.homedir(), `.remodex-test-${name}`);
+}
 
 const activeProviders = [];
 
@@ -231,7 +236,7 @@ test("commandExecute forwards /skills to session.command command skills", async 
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/skills-project" },
+    params: { cwd: testProjectPath("skills-project") },
   });
 
   const result = await provider.commandExecute({
@@ -241,7 +246,7 @@ test("commandExecute forwards /skills to session.command command skills", async 
       threadId: start.thread.id,
       command: "/skills",
       arguments: "",
-      directory: "/tmp/skills-project",
+      directory: testProjectPath("skills-project"),
     },
   });
 
@@ -277,14 +282,14 @@ test("commandExecute dedupes duplicate clientCommandId within 5s", async () => {
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/dedupe-project" },
+    params: { cwd: testProjectPath("dedupe-project") },
   });
 
   const sharedParams = {
     threadId: start.thread.id,
     command: "/skills",
     arguments: "",
-    directory: "/tmp/dedupe-project",
+    directory: testProjectPath("dedupe-project"),
     clientCommandId: "550e8400-e29b-41d4-a716-446655440000",
   };
 
@@ -338,7 +343,7 @@ test("commandExecute serializes argumentFields before session.command", async ()
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/args-project" },
+    params: { cwd: testProjectPath("args-project") },
   });
 
   const result = await provider.commandExecute({
@@ -347,7 +352,7 @@ test("commandExecute serializes argumentFields before session.command", async ()
     params: {
       threadId: start.thread.id,
       command: "/plan",
-      directory: "/tmp/args-project",
+      directory: testProjectPath("args-project"),
       template: "Plan for $1 with notes $2",
       hints: ["$1", "$2"],
       argumentFields: [
@@ -392,7 +397,7 @@ test("commandExecute rejects requiresArguments commands without argumentFields",
   const start = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { cwd: "/tmp/reject-project" },
+    params: { cwd: testProjectPath("reject-project") },
   });
 
   await assert.rejects(
@@ -403,7 +408,7 @@ test("commandExecute rejects requiresArguments commands without argumentFields",
         params: {
           threadId: start.thread.id,
           command: "/review",
-          directory: "/tmp/reject-project",
+          directory: testProjectPath("reject-project"),
         },
       }),
     (error) => error?.errorCode === "command_arguments_required",
@@ -464,7 +469,7 @@ test("threadStart creates thread and records ownership", async () => {
   const result = await provider.handleRequest({
     id: 1,
     method: "thread/start",
-    params: { model: "openai/gpt-5.5", title: "Test thread", cwd: "/tmp/test" },
+    params: { model: "openai/gpt-5.5", title: "Test thread", cwd: testProjectPath("test") },
   });
 
   assert.ok(result.thread);
@@ -2285,19 +2290,19 @@ test("getHandoffContext ignores untrusted client sessionId and directory", async
     method: "thread/start",
     params: {
       title: "Handoff test",
-      cwd: "/tmp/owned-project",
+      cwd: testProjectPath("owned-project"),
       sessionId: "ses_owned",
     },
   });
 
   const context = await provider.getHandoffContext(start.thread.id, {
     sessionId: "ses_untrusted",
-    directory: "/tmp/evil-path",
+    directory: "/etc/evil-path",
   });
 
   assert.equal(context.threadId, start.thread.id);
   assert.equal(context.sessionId, "ses_owned");
-  assert.equal(context.cwd, "/tmp/owned-project");
+  assert.equal(context.cwd, testProjectPath("owned-project"));
 });
 
 function discoveredListClient(rows = []) {
@@ -2438,6 +2443,130 @@ test("adopt rejects discovered session cwd outside home allowlist", async () => 
       }),
     (error) => error.errorCode === "path_not_allowed",
   );
+});
+
+test("thread/start rejects cwd traversal outside home allowlist", async () => {
+  const provider = makeProvider();
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/start",
+        params: { cwd: "/etc" },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
+test("thread/start rejects cwd symlink that resolves outside home", async () => {
+  const homeScratch = fs.mkdtempSync(path.join(os.homedir(), "remodex-thread-start-"));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-thread-outside-"));
+  const linkPath = path.join(homeScratch, "escape-link");
+  fs.symlinkSync(outsideDir, linkPath, "dir");
+
+  try {
+    const provider = makeProvider();
+    await assert.rejects(
+      () =>
+        provider.handleRequest({
+          id: 1,
+          method: "thread/start",
+          params: { cwd: linkPath },
+        }),
+      (error) => error.errorCode === "path_not_allowed",
+    );
+  } finally {
+    fs.rmSync(homeScratch, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("command/execute rejects directory traversal outside home allowlist", async () => {
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_path_guard" }),
+            command: async () => ({ info: {}, parts: [] }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  const start = await provider.handleRequest({
+    id: 1,
+    method: "thread/start",
+    params: { cwd: path.join(os.homedir(), "remodex-cmd-guard-project") },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.commandExecute({
+        id: 2,
+        method: "command/execute",
+        params: {
+          threadId: start.thread.id,
+          command: "/skills",
+          directory: "/etc",
+        },
+      }),
+    (error) => error.errorCode === "path_not_allowed",
+  );
+});
+
+test("command/execute rejects directory symlink that resolves outside home", async () => {
+  const homeScratch = fs.mkdtempSync(path.join(os.homedir(), "remodex-cmd-exec-"));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-cmd-outside-"));
+  const linkPath = path.join(homeScratch, "escape-link");
+  fs.symlinkSync(outsideDir, linkPath, "dir");
+
+  const provider = makeProvider({
+    clientFactory: ({ baseUrl, logPrefix }) =>
+      createOpenCodeClient({
+        baseUrl,
+        logPrefix,
+        createOpencodeClientImpl: () => ({
+          session: {
+            create: async () => ({ sessionID: "ses_symlink_guard" }),
+            command: async () => ({ info: {}, parts: [] }),
+          },
+          command: {
+            list: async () => [],
+          },
+        }),
+      }),
+  });
+
+  try {
+    const start = await provider.handleRequest({
+      id: 1,
+      method: "thread/start",
+      params: { cwd: path.join(homeScratch, "owned-project") },
+    });
+
+    await assert.rejects(
+      () =>
+        provider.commandExecute({
+          id: 2,
+          method: "command/execute",
+          params: {
+            threadId: start.thread.id,
+            command: "/skills",
+            directory: linkPath,
+          },
+        }),
+      (error) => error.errorCode === "path_not_allowed",
+    );
+  } finally {
+    fs.rmSync(homeScratch, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
 });
 
 test("thread/read adopts discovered session", async () => {

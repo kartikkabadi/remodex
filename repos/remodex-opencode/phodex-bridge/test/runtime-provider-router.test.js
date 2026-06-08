@@ -1483,6 +1483,53 @@ test("routes providerless owned thread RPCs by durable ownership", async () => {
   }
 });
 
+test("permission/reply rejects explicit provider switches on owned threads", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-router-perm-ownership-"));
+
+  try {
+    const ownershipStore = createThreadOwnershipStore({
+      storagePath: path.join(tempDir, "thread-ownership.json"),
+      fsImpl: fs,
+    });
+    ownershipStore.setOwnership("thread-owned", "opencode");
+
+    const responses = [];
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({}),
+      sendApplicationResponse: (message) => {
+        responses.push(JSON.parse(message));
+      },
+      sendRuntimeMessage: () => {},
+      ownershipStore,
+      providers: [makeProvider(["thread-owned"])],
+    });
+
+    const handled = router.handleApplicationMessage(
+      JSON.stringify({
+        id: "perm-ownership-mismatch",
+        method: "permission/reply",
+        params: {
+          permissionId: "perm-owned",
+          allow: true,
+          threadId: "thread-owned",
+          modelProvider: "codex",
+        },
+      }),
+    );
+
+    assert.equal(handled, true);
+    await waitOneTick();
+    const response = responses.find((entry) => entry.id === "perm-ownership-mismatch");
+    assert.equal(response?.error?.data?.errorCode, "thread_provider_mismatch");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("permission/reply routes to opencode provider", async () => {
   const handledRequests = [];
   const responses = [];

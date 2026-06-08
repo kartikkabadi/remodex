@@ -290,6 +290,10 @@ function createRuntimeProviderRouter({
 
     if (method === "permission/reply") {
       respondAsync(parsed, async () => {
+        const ownershipMismatch = resolveThreadOwnershipMismatch(parsed, threadOwnership);
+        if (ownershipMismatch) {
+          throw ownershipMismatch;
+        }
         const opencodeProvider = runtimeProviders.find((provider) => provider.id === OPENCODE_PROVIDER_ID);
         if (!opencodeProvider || typeof opencodeProvider.handleRequest !== "function") {
           const error = new Error("OpenCode provider unavailable for permission/reply");

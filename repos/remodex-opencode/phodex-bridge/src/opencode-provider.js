@@ -145,6 +145,21 @@ function assertOwnershipPersisted(ok, threadId) {
   throw error;
 }
 
+function pathNotAllowedError() {
+  const error = new Error("That folder is outside the allowed local project locations.");
+  error.errorCode = "path_not_allowed";
+  error.userMessage = error.message;
+  return error;
+}
+
+async function resolveAllowedDirectory(candidatePath) {
+  const validation = await validateDirectory(candidatePath);
+  if (!validation.isAllowed) {
+    throw pathNotAllowedError();
+  }
+  return validation.path;
+}
+
 const SENSITIVE_PERMISSION_ARG_KEYS = new Set(["command", "script", "token", "secret", "password"]);
 const ATTACHMENT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -1073,14 +1088,7 @@ function createOpenCodeProvider({
         );
 
         const cwdCandidate = readString(discoveredMeta.cwd) || process.cwd();
-        const cwdValidation = await validateDirectory(cwdCandidate);
-        if (!cwdValidation.isAllowed) {
-          const error = new Error("That folder is outside the allowed local project locations.");
-          error.errorCode = "path_not_allowed";
-          error.userMessage = error.message;
-          throw error;
-        }
-        const cwd = cwdValidation.path;
+        const cwd = await resolveAllowedDirectory(cwdCandidate);
         const title = readString(discoveredMeta.title) || "OpenCode chat";
         const model = normalizeOpenCodeModel(discoveredMeta.model);
         const agent = readString(discoveredMeta.agent) || "build";
@@ -1526,10 +1534,14 @@ function createOpenCodeProvider({
     const requestedCwd = resolvedParam(params, 'cwd', 'current_working_directory', 'working_directory');
     const threadId = `${OPENCODE_PROVIDER_ID}-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const resolvedSessionId = resolvedParam(params, 'sessionId', 'session_id');
+    let cwd = process.cwd();
+    if (requestedCwd) {
+      cwd = await resolveAllowedDirectory(requestedCwd);
+    }
     const thread = {
       id: threadId,
       title: readString(params.title) || "OpenCode chat",
-      cwd: requestedCwd || process.cwd(),
+      cwd,
       model: normalizeOpenCodeModel(params.model),
       agent: readString(params.agent) || "build",
       createdAt: now,
@@ -2608,7 +2620,7 @@ function createOpenCodeProvider({
         sessionId: newSessionId,
         model: thread.model,
         agent: thread.agent,
-        cwd: thread.cwd,
+        ...(thread.hasProjectCwd ? { cwd: thread.cwd } : {}),
       },
     });
   }
@@ -2718,8 +2730,12 @@ function createOpenCodeProvider({
       commandExecuteDedupeByKey.set(dedupeKey, Date.now());
     }
 
-    const directory =
-      readString(params.directory || params.cwd) || readString(thread.cwd) || process.cwd();
+    const explicitDirectory = readString(params.directory || params.cwd);
+    const directoryCandidate = explicitDirectory || readString(thread.cwd) || process.cwd();
+    let directory = directoryCandidate;
+    if (explicitDirectory || thread.hasProjectCwd) {
+      directory = await resolveAllowedDirectory(directoryCandidate);
+    }
     const allowedCommands = await listCommands(directory);
     const allowedTokens = new Set(
       allowedCommands.map((entry) => normalizeCommandTokenForAllowlist(entry.token)),
