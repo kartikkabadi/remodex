@@ -14,7 +14,15 @@ const {
   createOpenCodeClient,
   dispatchEvent,
 } = require("../src/opencode-client");
-const { createOpenCodeProvider } = require("../src/opencode-provider");
+const {
+  createOpenCodeProvider,
+  DEFAULT_ENSURE_STARTED_LIST_CAP_MS,
+  DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS,
+  DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+  resolveEnsureStartedListCapMs,
+  resolveEnsureStartedServeWakeCapMs,
+  resolveValidationRpcLimitPerMin,
+} = require("../src/opencode-provider");
 const { createOpenCodeSessionStore } = require("../src/opencode-session-store");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
@@ -752,6 +760,10 @@ test("turnStart emits turn/started notification", async () => {
     method: "turn/start",
     params: { threadId: start.thread.id, input: "hello world" },
   });
+  const deadline = Date.now() + 500;
+  while (!messages.some((m) => m.method === "turn/started") && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.ok(messages.some((m) => m.method === "turn/started"));
 });
 
@@ -3020,7 +3032,7 @@ test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t)
     env: {
       REMODEX_ENABLE_OPENCODE: "1",
       REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
-      REMODEX_OPENCODE_ENSURE_STARTED_MS: "25",
+      REMODEX_OPENCODE_SERVE_WAKE_MS: "25",
       REMODEX_OPENCODE_DISCOVER_TTL_MS: "60000",
       REMODEX_TEST: "1",
     },
@@ -3188,4 +3200,153 @@ test("ownership stub includes cwd for sidebar grouping", async () => {
   const row = list.data.find((thread) => thread.id === "opencode-thread-stub-cwd");
   assert.ok(row);
   assert.equal(row.cwd, "/Users/me/work/stub-project");
+});
+
+test("serve wake cap defaults to 8s while list wake cap stays 4s", () => {
+  assert.equal(resolveEnsureStartedServeWakeCapMs({}), DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS);
+  assert.equal(DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS, 8_000);
+  assert.equal(resolveEnsureStartedListCapMs({}), DEFAULT_ENSURE_STARTED_LIST_CAP_MS);
+  assert.equal(DEFAULT_ENSURE_STARTED_LIST_CAP_MS, 4_000);
+  assert.equal(resolveValidationRpcLimitPerMin({}), DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN);
+  assert.equal(DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN, 120);
+});
+
+test("turn/started emits only after ensureStartedWithCap succeeds", async () => {
+  const messages = [];
+  let blockStart = false;
+  let running = false;
+  const provider = makeProvider({
+    send: (msg) => messages.push(JSON.parse(msg)),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_SERVE_WAKE_MS: "25",
+      REMODEX_TEST: "1",
+    },
+    serverFactory: () => ({
+      get baseUrl() {
+        return running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return running;
+      },
+      start: async () => {
+        if (blockStart) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          throw new Error("blocked start for turn-started ordering test");
+        }
+        running = true;
+      },
+      stop: async () => {
+        running = false;
+      },
+    }),
+    clientFactory: async () => ({
+      ...fakeClient(),
+      prompt: async () => {},
+      subscribeToEvents: () => () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  blockStart = true;
+  running = false;
+  provider.__test.setHealthy(false);
+  provider.__test.setClient(null);
+
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello after wake" },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(messages.some((entry) => entry.method === "turn/started"), false);
+  assert.ok(messages.some((entry) => entry.method === "turn/completed"));
+});
+
+test("validation RPC token bucket limits SDK validation calls", async () => {
+  let getSessionCalls = 0;
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  for (let index = 0; index < 3; index += 1) {
+    const threadId = `opencode-thread-rate-${index}`;
+    sessionStore.set(threadId, `ses_rate_${index}`);
+    ownershipStore.setOwnership(threadId, "opencode");
+  }
+
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_VALIDATION_RPC_LIMIT_PER_MIN: "2",
+      REMODEX_LIST_THREADS_VALIDATE_CAP: "10",
+    },
+    clientFactory: async () => ({
+      ...fakeClient(),
+      getSession: async () => {
+        getSessionCalls += 1;
+        return {};
+      },
+      getMessages: async () => [{ role: "assistant", text: "activity" }],
+    }),
+  });
+  await provider.warmup();
+  provider.__test.resetValidationRpcTokenBucket();
+
+  const list = await provider.listThreads();
+  assert.equal(getSessionCalls, 1, "token bucket should allow one getSession before refill");
+  assert.equal(list.meta.materializationBlocked, 2);
+  assert.equal(list.data.length, 1);
+});
+
+test("SSE resubscribe hydrates active turn from session messages", async () => {
+  const ASSISTANT_REPLY = "Recovered after SSE resubscribe.";
+  let onResubscribe;
+  const messages = [];
+  const provider = makeProvider({
+    send: (msg) => messages.push(JSON.parse(msg)),
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: () => ({
+      ...fakeClient(),
+      subscribeToEvents: (handler, options = {}) => {
+        onResubscribe = options.onResubscribe;
+        return () => {};
+      },
+      getMessages: async () => [
+        { role: "user", text: "hello" },
+        { role: "assistant", text: ASSISTANT_REPLY },
+      ],
+      prompt: async () => {},
+    }),
+  });
+
+  const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+  await provider.handleRequest({
+    id: 2,
+    method: "turn/start",
+    params: { threadId: start.thread.id, input: "hello" },
+  });
+
+  const subscribeDeadline = Date.now() + 500;
+  while (!onResubscribe && Date.now() < subscribeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(onResubscribe);
+
+  await onResubscribe({ attempt: 1, reason: "error" });
+  const hydrateDeadline = Date.now() + 500;
+  while (
+    !messages.some((entry) => entry.method === "item/completed")
+    && Date.now() < hydrateDeadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  const completed = messages.filter((entry) => entry.method === "item/completed");
+  assert.equal(completed.length, 1);
+  assert.match(completed[0].params.message, /Recovered after SSE resubscribe/);
 });

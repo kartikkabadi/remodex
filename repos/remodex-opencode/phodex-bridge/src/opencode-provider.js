@@ -71,7 +71,9 @@ const STARTUP_PRUNE_SESSION_VALIDATE_CAP = 20;
 const DEFAULT_DISCOVER_SESSIONS_CAP = 30;
 const DEFAULT_DISCOVER_SESSIONS_TTL_MS = 60_000;
 const DEFAULT_LIST_THREADS_VALIDATE_CACHE_TTL_MS = 60_000;
-const DEFAULT_ENSURE_STARTED_CAP_MS = 4_000;
+const DEFAULT_ENSURE_STARTED_LIST_CAP_MS = 4_000;
+const DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS = 8_000;
+const DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN = 120;
 const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
 const OPENCODE_PRUNE_OPS_HINT =
@@ -101,12 +103,66 @@ function resolveDiscoverSessionsTtlMs(env = process.env) {
   return DEFAULT_DISCOVER_SESSIONS_TTL_MS;
 }
 
-function resolveEnsureStartedCapMs(env = process.env) {
+function resolveEnsureStartedListCapMs(env = process.env) {
   const fromEnv = Number(env?.REMODEX_OPENCODE_ENSURE_STARTED_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) {
     return fromEnv;
   }
-  return DEFAULT_ENSURE_STARTED_CAP_MS;
+  return DEFAULT_ENSURE_STARTED_LIST_CAP_MS;
+}
+
+function resolveEnsureStartedServeWakeCapMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_SERVE_WAKE_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS;
+}
+
+function resolveValidationRpcLimitPerMin(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_VALIDATION_RPC_LIMIT_PER_MIN);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN;
+}
+
+function createValidationRpcTokenBucket({
+  limitPerMin = DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+  now = () => Date.now(),
+} = {}) {
+  let tokens = limitPerMin;
+  let lastRefillAt = now();
+
+  return {
+    tryConsume(cost = 1) {
+      const normalizedCost = Number.isFinite(cost) && cost > 0 ? cost : 1;
+      const current = now();
+      const elapsed = current - lastRefillAt;
+      if (elapsed > 0) {
+        tokens = Math.min(limitPerMin, tokens + (elapsed / 60_000) * limitPerMin);
+        lastRefillAt = current;
+      }
+      if (tokens < normalizedCost) {
+        return false;
+      }
+      tokens -= normalizedCost;
+      return true;
+    },
+    getAvailableTokens() {
+      const current = now();
+      const elapsed = current - lastRefillAt;
+      if (elapsed > 0) {
+        tokens = Math.min(limitPerMin, tokens + (elapsed / 60_000) * limitPerMin);
+        lastRefillAt = current;
+      }
+      return tokens;
+    },
+    reset() {
+      tokens = limitPerMin;
+      lastRefillAt = now();
+    },
+  };
 }
 
 function resolveListThreadsValidateCacheTtlMs(env = process.env) {
@@ -235,6 +291,22 @@ function createOpenCodeProvider({
   /** @type {Map<string, { valid?: boolean, hasActivity?: boolean, fetchedAt: number }>} */
   const sessionValidationCache = new Map();
   const adoptMutexes = new Map();
+  const validationRpcTokenBucket = createValidationRpcTokenBucket({
+    limitPerMin: resolveValidationRpcLimitPerMin(env),
+  });
+
+  function consumeValidationRpcToken(cost = 1) {
+    if (validationRpcTokenBucket.tryConsume(cost)) {
+      return true;
+    }
+    console.log(
+      JSON.stringify({
+        event: "opencode_validation_rpc_rate_limited",
+        limitPerMin: resolveValidationRpcLimitPerMin(env),
+      }),
+    );
+    return false;
+  }
 
   function readSessionValidationCache(sessionId) {
     const normalizedSessionId = readString(sessionId);
@@ -323,6 +395,11 @@ function createOpenCodeProvider({
     const cached = readSessionValidationCache(sessionId);
     if (cached?.valid !== undefined) {
       return cached.valid;
+    }
+    if (!consumeValidationRpcToken()) {
+      const error = new Error("OpenCode validation RPC rate limit exceeded.");
+      error.errorCode = "opencode_validation_rate_limited";
+      throw error;
     }
     try {
       await client.getSession(sessionId);
@@ -704,6 +781,11 @@ function createOpenCodeProvider({
     if (cached?.hasActivity !== undefined) {
       return cached.hasActivity;
     }
+    if (!consumeValidationRpcToken()) {
+      const error = new Error("OpenCode validation RPC rate limit exceeded.");
+      error.errorCode = "opencode_validation_rate_limited";
+      throw error;
+    }
     try {
       const messages = normalizeSessionMessagesResponse(
         await client.getMessages(sessionId, { limit: 1 }),
@@ -936,8 +1018,11 @@ function createOpenCodeProvider({
     }).catch(() => {});
   }
 
-  async function ensureStartedWithCap({ onTimeout } = {}) {
-    const capMs = resolveEnsureStartedCapMs(env);
+  async function ensureStartedWithCap({ onTimeout, capMs } = {}) {
+    const resolvedCapMs =
+      Number.isFinite(capMs) && capMs > 0
+        ? capMs
+        : resolveEnsureStartedServeWakeCapMs(env);
     const startedAt = Date.now();
     let timeoutId;
     try {
@@ -946,20 +1031,20 @@ function createOpenCodeProvider({
         new Promise((_, reject) => {
           timeoutId = setTimeout(
             () => reject(new Error("ensure_started_timeout")),
-            capMs,
+            resolvedCapMs,
           );
           if (readString(env.REMODEX_TEST) === "1" && typeof timeoutId?.unref === "function") {
             timeoutId.unref();
           }
         }),
       ]);
-      return { started: true, ms: Date.now() - startedAt };
+      return { started: true, ms: Date.now() - startedAt, capMs: resolvedCapMs };
     } catch (error) {
       if (readString(error?.message) === "ensure_started_timeout") {
         if (typeof onTimeout === "function") {
           onTimeout();
         }
-        return { started: false, ms: Date.now() - startedAt };
+        return { started: false, ms: Date.now() - startedAt, capMs: resolvedCapMs };
       }
       throw error;
     } finally {
@@ -971,6 +1056,7 @@ function createOpenCodeProvider({
 
   async function ensureStartedWithDiscoverCap() {
     const result = await ensureStartedWithCap({
+      capMs: resolveEnsureStartedListCapMs(env),
       onTimeout: () => {
         console.log(
           JSON.stringify({
@@ -1253,11 +1339,12 @@ function createOpenCodeProvider({
     if ((!healthy || !client) && hasOwnedThreadState) {
       try {
         const wakeResult = await ensureStartedWithCap({
+          capMs: resolveEnsureStartedListCapMs(env),
           onTimeout: () => {
             console.log(
               JSON.stringify({
                 event: "opencode_list_threads_wake_timeout",
-                capMs: resolveEnsureStartedCapMs(env),
+                capMs: resolveEnsureStartedListCapMs(env),
               }),
             );
           },
@@ -1763,8 +1850,6 @@ function createOpenCodeProvider({
       thread.id,
     );
 
-    emit("turn/started", { threadId: thread.id, turnId, turn: { id: turnId, status: "running" } });
-
     setImmediate(() => executeTurn(active, model, thread.agent, effort, prompt, parts, thread.cwd, structuredSkills));
     return { turnId, turn: { id: turnId, threadId: thread.id, status: "running" } };
   }
@@ -2005,12 +2090,32 @@ function createOpenCodeProvider({
     const threadId = active.thread.id;
     inFlightThreadIds.add(threadId);
     try {
-      const ensureStartedResult = await ensureStartedWithCap();
+      const ensureStartedResult = await ensureStartedWithCap({
+        capMs: resolveEnsureStartedServeWakeCapMs(env),
+      });
       if (!ensureStartedResult.started) {
         const error = new Error("OpenCode is still starting. Try again in a moment.");
         error.errorCode = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.errorCode;
         error.action = ERROR_CODES.OPENCODE_SERVER_UNREACHABLE.action;
         throw error;
+      }
+
+      if (!active.started) {
+        active.started = true;
+        emit("turn/started", {
+          threadId: active.thread.id,
+          turnId: active.turn.id,
+          turn: { id: active.turn.id, status: "running" },
+        });
+        console.log(
+          JSON.stringify({
+            event: "opencode_turn_started_after_wake",
+            threadId: active.thread.id,
+            turnId: active.turn.id,
+            ensureStartedMs: ensureStartedResult.ms,
+            capMs: ensureStartedResult.capMs,
+          }),
+        );
       }
 
       if (!active.thread.sessionId) {
@@ -2200,6 +2305,13 @@ function createOpenCodeProvider({
         reconnectEnabled: sseReconnectEnabled,
         onResubscribe: () => {
           sseReconnectCount += 1;
+          void hydrateAssistantFromSessionMessages(active)
+            .then((hydrated) => {
+              if (hydrated) {
+                tryCompleteTurnWhenAssistantReady(active, "sse_resubscribe_hydrate");
+              }
+            })
+            .catch(() => {});
         },
       });
       eventUnsubscribers.set(active.turn.id, unsubscribe);
@@ -2255,9 +2367,6 @@ function createOpenCodeProvider({
       }
       if (!active.completed) {
         tryCompleteTurnWhenAssistantReady(active, "prompt_post_poll");
-      }
-      if (!active.completed) {
-        active.started = true;
       }
     } catch (error) {
       if (!active.completed) {
@@ -3232,6 +3341,10 @@ function createOpenCodeProvider({
       setDiscoverCache: (rows, fetchedAt = Date.now()) => {
         discoveredSessionsCache = { rows, fetchedAt };
       },
+      getValidationRpcAvailableTokens: () => validationRpcTokenBucket.getAvailableTokens(),
+      resetValidationRpcTokenBucket: () => {
+        validationRpcTokenBucket.reset();
+      },
     },
   };
 }
@@ -3288,4 +3401,13 @@ function activeTurnError(threadId) {
   return error;
 }
 
-module.exports = { createOpenCodeProvider };
+module.exports = {
+  createOpenCodeProvider,
+  createValidationRpcTokenBucket,
+  resolveEnsureStartedListCapMs,
+  resolveEnsureStartedServeWakeCapMs,
+  resolveValidationRpcLimitPerMin,
+  DEFAULT_ENSURE_STARTED_LIST_CAP_MS,
+  DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS,
+  DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN,
+};

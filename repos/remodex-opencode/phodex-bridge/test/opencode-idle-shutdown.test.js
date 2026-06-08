@@ -346,3 +346,68 @@ test("listThreads wakes idle-stopped server before validating owned sessions", a
     restoreTimers();
   }
 });
+
+test("post-idle turn start wakes server within serve cap and emits turn/started", async () => {
+  installFakeTimers();
+  try {
+    let starts = 0;
+    let _running = false;
+    const messages = [];
+    const server = {
+      get baseUrl() {
+        return _running ? "http://127.0.0.1:4291" : "";
+      },
+      get isRunning() {
+        return _running;
+      },
+      start() {
+        starts += 1;
+        _running = true;
+        return Promise.resolve();
+      },
+      stop() {
+        _running = false;
+        return Promise.resolve();
+      },
+    };
+
+    const provider = createOpenCodeProvider({
+      sendApplicationMessage: (msg) => messages.push(JSON.parse(msg)),
+      env: {
+        REMODEX_ENABLE_OPENCODE: "1",
+        REMODEX_OPENCODE_SERVE_WAKE_MS: "8000",
+        REMODEX_TEST: "1",
+      },
+      serverFactory: () => server,
+      clientFactory: () => ({
+        ...fakeClient(),
+        prompt: async () => {},
+        subscribeToEvents: () => () => {},
+      }),
+      ownershipStore: fakeOwnershipStore(),
+    });
+
+    await provider.listModels();
+    const idleTimeout = timeoutCalls.find((t) => t.ms === HEALTH_IDLE_SHUTDOWN_MS);
+    await idleTimeout.fn();
+
+    const start = await provider.handleRequest({ id: 1, method: "thread/start", params: {} });
+    const startedAt = Date.now();
+    await provider.handleRequest({
+      id: 2,
+      method: "turn/start",
+      params: { threadId: start.thread.id, input: "wake after idle" },
+    });
+
+    const deadline = Date.now() + 500;
+    while (!messages.some((entry) => entry.method === "turn/started") && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.ok(starts >= 2, "turn/start should restart OpenCode after idle shutdown");
+    assert.ok(messages.some((entry) => entry.method === "turn/started"));
+    assert.ok(Date.now() - startedAt < 8_000, "post-idle turn start should stay within 8s serve cap");
+  } finally {
+    restoreTimers();
+  }
+});

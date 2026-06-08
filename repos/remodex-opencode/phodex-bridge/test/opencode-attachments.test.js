@@ -168,6 +168,19 @@ test("imageItemToPromptPart accepts files stored in the attachment store", () =>
   assert.match(part.url, /^file:\/\//);
 });
 
+test("attachment store rejects declared MIME that mismatches magic bytes (SEC-05)", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
+  const store = createAttachmentStore({ rootDir });
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  assert.throws(
+    () => store.storeImageBuffer(png, { filename: "evil.gif", mime: "image/gif" }),
+    /mime_mismatch|does not match/i,
+  );
+});
+
 test("imageItemToPromptPart stores data URLs via attachment store", () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-attach-"));
   const store = createAttachmentStore({ rootDir });

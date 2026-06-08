@@ -77,7 +77,19 @@ function createAttachmentStore({
       throw attachmentError("image_too_large", `Images must be <= ${MAX_IMAGE_BYTES} bytes.`);
     }
 
-    const detectedMime = readString(mime) || sniffMime(buffer);
+    const sniffedMime = sniffMime(buffer);
+    const declaredMime = readString(mime);
+    if (
+      declaredMime
+      && declaredMime.startsWith("image/")
+      && sniffedMime.startsWith("image/")
+      && declaredMime !== sniffedMime
+    ) {
+      throw attachmentError("mime_mismatch", "Declared MIME does not match file content.");
+    }
+    const detectedMime = sniffedMime.startsWith("image/")
+      ? sniffedMime
+      : (declaredMime || sniffedMime);
     if (!detectedMime.startsWith("image/")) {
       throw attachmentError("invalid_mime", "Only image attachments are supported.");
     }
