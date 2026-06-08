@@ -24,6 +24,7 @@ const DESKTOP_RESUME_METHODS = new Set(["thread/read", "thread/resume"]);
 // bridge notifications so the phone can render live thinking/tool activity.
 function createRolloutLiveMirrorController({
   sendApplicationResponse,
+  getCodexLaunchState = null,
   logPrefix = "[remodex]",
   fsModule = fs,
   now = () => Date.now(),
@@ -40,6 +41,10 @@ function createRolloutLiveMirrorController({
     const request = safeParseJSON(rawMessage);
     const method = readString(request?.method);
     if (!DESKTOP_RESUME_METHODS.has(method)) {
+      return;
+    }
+
+    if (!isCodexRolloutMirrorAvailable(getCodexLaunchState)) {
       return;
     }
 
@@ -1128,6 +1133,10 @@ function firstNonEmptyString(values) {
     }
   }
   return "";
+}
+
+function isCodexRolloutMirrorAvailable(getCodexLaunchState) {
+  return typeof getCodexLaunchState !== "function" || getCodexLaunchState() === "connected";
 }
 
 module.exports = {

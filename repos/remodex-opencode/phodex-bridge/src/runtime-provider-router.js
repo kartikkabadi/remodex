@@ -70,6 +70,7 @@ function createRuntimeProviderRouter({
   ownershipStore = null,
   homeDir = null,
   logPrefix = "[remodex]",
+  getCodexLaunchState = null,
 } = {}) {
   const resolvedHomeDir = readString(homeDir) || os.homedir();
   const threadOwnership = ownershipStore || createThreadOwnershipStore();
@@ -129,7 +130,11 @@ function createRuntimeProviderRouter({
         const catalogOpenCode = catalogOpenCodeSnapshotForModelList(runtimeProviders, process.env);
         const [codexResult, providerListResult] = await Promise.all([
           withModelListBudget(
-            sendCodexRequest("model/list", params).catch((error) => {
+            resolveCodexLegPromise(
+              getCodexLaunchState,
+              () => sendCodexRequest("model/list", params),
+              { items: [] },
+            ).catch((error) => {
               console.warn(
                 `${logPrefix} Codex model/list failed: ${error?.message || error}`,
               );
@@ -176,7 +181,11 @@ function createRuntimeProviderRouter({
         const codexLegPromise = (async () => {
           const legStarted = Date.now();
           const result = await withThreadListBudget(
-            sendCodexRequest("thread/list", threadListParams).catch((error) => {
+            resolveCodexLegPromise(
+              getCodexLaunchState,
+              () => sendCodexRequest("thread/list", threadListParams),
+              { data: [] },
+            ).catch((error) => {
               console.log(
                 JSON.stringify({
                   event: "thread_list_codex_failed",
@@ -257,7 +266,8 @@ function createRuntimeProviderRouter({
     }
 
     if (method === "runtime/catalog") {
-      respondAsync(parsed, async () => buildRuntimeCatalog(runtimeProviders, process.env, sendRuntimeMessage));
+      respondAsync(parsed, async () =>
+        buildRuntimeCatalog(runtimeProviders, process.env, sendRuntimeMessage, getCodexLaunchState));
       return true;
     }
 
@@ -294,7 +304,8 @@ function createRuntimeProviderRouter({
     }
 
     if (method === "skills/list") {
-      respondAsync(parsed, async () => mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest));
+      respondAsync(parsed, async () =>
+        mergeSkillsListResult(parsed.params || {}, runtimeProviders, sendCodexRequest, getCodexLaunchState));
       return true;
     }
 
@@ -1610,7 +1621,26 @@ function mergeSkillsAcrossProviders(skills) {
     );
 }
 
-async function mergeSkillsListResult(params, providers, sendCodexRequest) {
+function isCodexRuntimeUnavailable(getCodexLaunchState) {
+  if (typeof getCodexLaunchState !== "function") {
+    return false;
+  }
+  const state = getCodexLaunchState();
+  return state === "degraded" || state === "error";
+}
+
+function isCodexRuntimeConnected(getCodexLaunchState) {
+  return !isCodexRuntimeUnavailable(getCodexLaunchState);
+}
+
+function resolveCodexLegPromise(getCodexLaunchState, runCodexLeg, fallback) {
+  if (!isCodexRuntimeConnected(getCodexLaunchState)) {
+    return Promise.resolve(fallback);
+  }
+  return runCodexLeg();
+}
+
+async function mergeSkillsListResult(params, providers, sendCodexRequest, getCodexLaunchState = null) {
   const cwds = resolveSkillsListCwds(params);
   const codexParams = { ...params };
   if (!Array.isArray(codexParams.cwds) || codexParams.cwds.length === 0) {
@@ -1618,7 +1648,11 @@ async function mergeSkillsListResult(params, providers, sendCodexRequest) {
   }
 
   const [codexResult, opencodeBuckets] = await Promise.all([
-    sendCodexRequest("skills/list", codexParams).catch((error) => {
+    resolveCodexLegPromise(
+      getCodexLaunchState,
+      () => sendCodexRequest("skills/list", codexParams),
+      { data: [] },
+    ).catch((error) => {
       console.warn(`[remodex] Codex skills/list failed: ${error?.message || error}`);
       return { data: [] };
     }),
@@ -1682,14 +1716,19 @@ function mergeSkillsBuckets(codexBuckets, opencodeBuckets) {
   }));
 }
 
-async function buildRuntimeCatalog(providers, env, sendRuntimeMessage = null) {
+async function buildRuntimeCatalog(providers, env, sendRuntimeMessage = null, getCodexLaunchState = null) {
+  const codexConnected = isCodexRuntimeConnected(getCodexLaunchState);
   const runtimes = [
     {
       id: "codex",
       label: "Codex",
-      enabled: true,
+      enabled: codexConnected,
+      codexAvailable: codexConnected,
       showsBetaLabel: false,
-      reasonCode: null,
+      unavailableReason: codexConnected
+        ? null
+        : "Codex CLI is not available on this Mac. OpenCode is carrying the bridge.",
+      reasonCode: codexConnected ? null : "codex_degraded",
       agents: [],
       capabilities: { ...CODEX_CAPABILITIES },
     },
