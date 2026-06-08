@@ -1570,8 +1570,10 @@ extension CodexService {
                     includeServiceTier: includesServiceTier
                 )
                 traceTurnStartRequest(threadId: threadId, rpcId: nil, params: requestParams)
-                // The pre-turn snapshot must settle before the runtime can mutate files.
-                if let messageStartCheckpointTask {
+                // Defer checkpoint await only when the thread has a validated cwd (B-16 / REV-022).
+                // Rootless chats skip the blocking wait; project threads fire turn/start immediately.
+                if let messageStartCheckpointTask,
+                   !threadHasValidatedWorkingDirectory(for: threadId) {
                     await messageStartCheckpointTask.value
                 }
                 let response = try await sendRequestWithSandboxFallback(

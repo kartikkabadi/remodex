@@ -625,8 +625,19 @@ extension CodexService {
     }
 
     func refreshRuntimeMetadataSequential() async {
-        try? await listModels(refreshProviders: true)
-        try? await fetchRuntimeCatalog()
+        await refreshRuntimeMetadataParallel()
+    }
+
+    // Warms model inventory and runtime/catalog (logo providers) concurrently so composer
+    // chrome and sidebar badges settle faster after connect.
+    func refreshRuntimeMetadataParallel() async {
+        async let modelsRefresh: Void = {
+            try? await self.listModels(refreshProviders: true)
+        }()
+        async let catalogRefresh: Void = {
+            try? await self.fetchRuntimeCatalog()
+        }()
+        _ = await (modelsRefresh, catalogRefresh)
     }
 
     func noteOpenCodeCatalogRevisionAfterFetch() {
@@ -674,6 +685,16 @@ extension CodexService {
         if let model = selectedModelOption(threadId: threadId),
            CodexModelOption.normalizedProvider(model.modelProvider) == provider {
             return model.capabilities
+        }
+        if isRuntimeCapabilitiesLoadingForComposer(threadId: threadId) {
+            if provider == "opencode", let catalogCapabilities = openCodeRuntimeCatalogEntry?.capabilities {
+                return catalogCapabilities
+            }
+            if let runtime = availableRuntimes.first(where: {
+                CodexModelOption.normalizedProvider($0.id) == provider
+            }) {
+                return runtime.capabilities
+            }
         }
         if provider == "opencode" {
             return openCodeRuntimeCatalogEntry?.capabilities ?? .defaultOpenCode
@@ -754,6 +775,15 @@ extension CodexService {
             return false
         }
         return isBootstrappingConnectionSync || isLoadingThreads || isLoadingModels
+    }
+
+    // Blocks composer send/attach until the first catalog or model/list snapshot resolves.
+    func isRuntimeCapabilitiesLoadingForComposer(threadId: String? = nil) -> Bool {
+        _ = threadId
+        guard availableModels.isEmpty else {
+            return false
+        }
+        return isBootstrappingConnectionSync || isLoadingModels || availableRuntimes.isEmpty
     }
 
     func selectedGitWriterModelOption() -> CodexModelOption? {
@@ -892,6 +922,16 @@ extension CodexService {
             return capabilities
         }
         let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
+        if isRuntimeCapabilitiesLoadingForComposer(threadId: threadId) {
+            if provider == "opencode", let catalogCapabilities = openCodeRuntimeCatalogEntry?.capabilities {
+                return catalogCapabilities
+            }
+            if let runtime = availableRuntimes.first(where: {
+                CodexModelOption.normalizedProvider($0.id) == provider
+            }) {
+                return runtime.capabilities
+            }
+        }
         if let runtime = availableRuntimes.first(where: {
             CodexModelOption.normalizedProvider($0.id) == provider
         }) {
