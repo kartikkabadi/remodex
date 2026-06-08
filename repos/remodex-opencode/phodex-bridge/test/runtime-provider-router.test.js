@@ -14,13 +14,16 @@ const {
   computeCatalogFingerprint,
   computeCatalogRevision,
   createRuntimeProviderRouter,
+  isOpenCodeDiscoverProjectsEnabled,
   mergeModelListResult,
   mergeSkillsAcrossProviders,
   mergeThreadListResult,
   opencodeModelListBudgetMs,
   providerForRequest,
   providerModelsForModelList,
+  readDiscoverProjectTtlMs,
   resetCatalogPushState,
+  resetOpenCodeProjectDiscoverState,
   resolvePrimaryProvider,
   shouldWarmProviderInventory,
   stripRuntimeProviderFieldsForCodex,
@@ -1761,6 +1764,277 @@ test("computeCatalogFingerprint changes when only connectedOnServe flips", () =>
     authDiscoveryReasonCode: "ok",
     providerInventoryPartial: false,
   }));
+});
+
+function makeDiscoverProvider(overrides = {}) {
+  return {
+    id: "opencode",
+    async listModels() {
+      return [];
+    },
+    async listThreads() {
+      return { data: [] };
+    },
+    ownsThread() {
+      return false;
+    },
+    handleRequest() {
+      return {};
+    },
+    ...overrides,
+  };
+}
+
+function withDiscoverEnv(overrides = {}, fn) {
+  const previous = {
+    discoverProjects: process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS,
+    discoverTtl: process.env.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS,
+    disableOpenCode: process.env.REMODEX_DISABLE_OPENCODE,
+  };
+  resetOpenCodeProjectDiscoverState();
+  if (overrides.discoverProjects !== undefined) {
+    process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS = overrides.discoverProjects;
+  } else {
+    delete process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS;
+  }
+  if (overrides.discoverTtl !== undefined) {
+    process.env.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS = overrides.discoverTtl;
+  } else {
+    delete process.env.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS;
+  }
+  if (overrides.disableOpenCode !== undefined) {
+    process.env.REMODEX_DISABLE_OPENCODE = overrides.disableOpenCode;
+  } else {
+    delete process.env.REMODEX_DISABLE_OPENCODE;
+  }
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      resetOpenCodeProjectDiscoverState();
+      if (previous.discoverProjects === undefined) {
+        delete process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS;
+      } else {
+        process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS = previous.discoverProjects;
+      }
+      if (previous.discoverTtl === undefined) {
+        delete process.env.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS;
+      } else {
+        process.env.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS = previous.discoverTtl;
+      }
+      if (previous.disableOpenCode === undefined) {
+        delete process.env.REMODEX_DISABLE_OPENCODE;
+      } else {
+        process.env.REMODEX_DISABLE_OPENCODE = previous.disableOpenCode;
+      }
+    });
+}
+
+test("isOpenCodeDiscoverProjectsEnabled defaults off and honors REMODEX_OPENCODE_DISCOVER_PROJECTS=1", () => {
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({}), false);
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "0" }), false);
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "1" }), true);
+  assert.equal(isOpenCodeDiscoverProjectsEnabled({ REMODEX_OPENCODE_DISCOVER_PROJECTS: "true" }), true);
+});
+
+test("readDiscoverProjectTtlMs defaults to 120s and honors env override", () => {
+  assert.equal(readDiscoverProjectTtlMs({}), 120_000);
+  assert.equal(readDiscoverProjectTtlMs({ REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS: "5000" }), 5_000);
+});
+
+test("thread/list skips hot-path project discover when REMODEX_OPENCODE_DISCOVER_PROJECTS=0", async () => {
+  await withDiscoverEnv({}, async () => {
+    let discoverCalls = 0;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ data: [] }),
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      projectRegistry: { rememberProjectsFromThreads() {} },
+      providers: [
+        makeDiscoverProvider({
+          async discoverProjects() {
+            discoverCalls += 1;
+            return [];
+          },
+        }),
+      ],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({ id: "discover-flag-off", method: "thread/list", params: {} }),
+    );
+    await responsePromise;
+    await waitOneTick();
+
+    assert.equal(responsePayload.id, "discover-flag-off");
+    assert.equal(discoverCalls, 0);
+  });
+});
+
+test("thread/list debounces project discover within TTL", async () => {
+  await withDiscoverEnv({ discoverProjects: "1", discoverTtl: "60000" }, async () => {
+    let discoverCalls = 0;
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ data: [] }),
+      sendApplicationResponse: () => {},
+      projectRegistry: { rememberProjectsFromThreads() {} },
+      providers: [
+        makeDiscoverProvider({
+          async discoverProjects() {
+            discoverCalls += 1;
+            return [{ id: "proj-1", path: "/Users/me/work/demo", name: "Demo" }];
+          },
+        }),
+      ],
+    });
+
+    const request = JSON.stringify({ id: "discover-debounce", method: "thread/list", params: {} });
+    router.handleApplicationMessage(request);
+    await waitOneTick();
+    router.handleApplicationMessage(request);
+    await waitOneTick();
+    await waitOneTick();
+
+    assert.equal(discoverCalls, 1);
+  });
+});
+
+test("thread/list returns before slow project discover completes", async () => {
+  await withDiscoverEnv({ discoverProjects: "1" }, async () => {
+    let discoverStarted = false;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ data: [{ id: "codex-thread", cwd: "/Users/me/codex" }] }),
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      projectRegistry: { rememberProjectsFromThreads() {} },
+      providers: [
+        makeDiscoverProvider({
+          discoverProjects() {
+            discoverStarted = true;
+            return new Promise(() => {});
+          },
+        }),
+      ],
+    });
+
+    const startedAt = Date.now();
+    router.handleApplicationMessage(
+      JSON.stringify({ id: "discover-nonblocking", method: "thread/list", params: {} }),
+    );
+    await responsePromise;
+
+    assert.ok(Date.now() - startedAt < 500);
+    assert.equal(responsePayload.id, "discover-nonblocking");
+    assert.equal(responsePayload.result.data.length, 1);
+    assert.equal(discoverStarted, true);
+  });
+});
+
+test("thread/list logs thread_list_wall_ms and opencode_discover_on_list when discover enabled", async () => {
+  await withDiscoverEnv({ discoverProjects: "1" }, async () => {
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+      logs.push(args.map((entry) => String(entry)).join(" "));
+    };
+
+    try {
+      let responsePayload = null;
+      let resolveResponse;
+      const responsePromise = new Promise((resolve) => {
+        resolveResponse = resolve;
+      });
+      const router = createRuntimeProviderRouter({
+        sendCodexRequest: async () => ({ data: [] }),
+        sendApplicationResponse(payload) {
+          responsePayload = JSON.parse(payload);
+          resolveResponse();
+        },
+        projectRegistry: { rememberProjectsFromThreads() {} },
+        providers: [
+          makeDiscoverProvider({
+            async discoverProjects() {
+              return [];
+            },
+          }),
+        ],
+      });
+
+      router.handleApplicationMessage(
+        JSON.stringify({ id: "discover-logs", method: "thread/list", params: {} }),
+      );
+      await responsePromise;
+
+      const parsedLogs = logs
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const wallLog = parsedLogs.find((entry) => entry.event === "thread_list_wall_ms");
+      const discoverLog = parsedLogs.find((entry) => entry.event === "opencode_discover_on_list");
+      assert.ok(wallLog, "thread_list_wall_ms log present");
+      assert.equal(typeof wallLog.wallMs, "number");
+      assert.equal(wallLog.discoverProjectsEnabled, true);
+      assert.ok(discoverLog, "opencode_discover_on_list log present");
+      assert.equal(discoverLog.ttlMs, 120_000);
+      assert.equal(responsePayload.id, "discover-logs");
+    } finally {
+      console.log = originalLog;
+    }
+  });
+});
+
+test("thread/list does not call project discover when REMODEX_DISABLE_OPENCODE=1", async () => {
+  await withDiscoverEnv({ discoverProjects: "1", disableOpenCode: "1" }, async () => {
+    let discoverCalls = 0;
+    let responsePayload = null;
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    const router = createRuntimeProviderRouter({
+      sendCodexRequest: async () => ({ data: [{ id: "codex-only" }] }),
+      sendApplicationResponse(payload) {
+        responsePayload = JSON.parse(payload);
+        resolveResponse();
+      },
+      projectRegistry: { rememberProjectsFromThreads() {} },
+      providers: [
+        makeDiscoverProvider({
+          async discoverProjects() {
+            discoverCalls += 1;
+            return [];
+          },
+        }),
+      ],
+    });
+
+    router.handleApplicationMessage(
+      JSON.stringify({ id: "discover-disabled-runtime", method: "thread/list", params: {} }),
+    );
+    await responsePromise;
+    await waitOneTick();
+
+    assert.equal(responsePayload.id, "discover-disabled-runtime");
+    assert.equal(discoverCalls, 0);
+  });
 });
 
 test("auth inventory change via model/list pushes runtime/catalog/updated once", async () => {

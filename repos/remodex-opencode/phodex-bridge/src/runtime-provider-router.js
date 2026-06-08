@@ -5,8 +5,10 @@
 // Depends on: ./opencode-models, ./opencode-provider, ./provider-capabilities, ./thread-ownership-store, ./opencode-provider-inventory (for logo catalog RP-BRAND-1)
 
 const { createHash } = require("crypto");
+const os = require("os");
 
 const { readString, resolvedParam } = require("./normalize");
+const { projectDiscoverFromOpenCode } = require("./opencode-project-discover-handler");
 const { createOpenCodeProvider } = require("./opencode-provider");
 const {
   CODEX_PROVIDER_ID,
@@ -59,8 +61,10 @@ function createRuntimeProviderRouter({
   providers = null,
   projectRegistry = null,
   ownershipStore = null,
+  homeDir = null,
   logPrefix = "[remodex]",
 } = {}) {
+  const resolvedHomeDir = readString(homeDir) || os.homedir();
   const threadOwnership = ownershipStore || createThreadOwnershipStore();
   const runtimeProviders = resolveProviders({
     providers,
@@ -159,6 +163,7 @@ function createRuntimeProviderRouter({
 
     if (method === "thread/list") {
       respondAsync(parsed, async () => {
+        const startedAt = Date.now();
         const codexResult = await sendCodexRequest("thread/list", parsed.params || {});
         const shouldIncludeProviders = !hasCursor(parsed.params);
         const providerThreads = shouldIncludeProviders
@@ -171,7 +176,23 @@ function createRuntimeProviderRouter({
         registerThreadProjects(projectRegistry, providerThreads, {
           source: "provider-thread-list",
         });
-        return mergeThreadListResult(codexResult, providerThreads);
+        const merged = mergeThreadListResult(codexResult, providerThreads);
+        maybeDiscoverOpenCodeProjects({
+          opencodeProvider,
+          projectRegistry,
+          homeDir: resolvedHomeDir,
+          env: process.env,
+          logPrefix,
+        });
+        const wallMs = Date.now() - startedAt;
+        console.log(
+          JSON.stringify({
+            event: "thread_list_wall_ms",
+            wallMs,
+            discoverProjectsEnabled: isOpenCodeDiscoverProjectsEnabled(process.env),
+          }),
+        );
+        return merged;
       });
       return true;
     }
@@ -309,8 +330,11 @@ const MODEL_LIST_PROVIDER_BUDGET_MS = 3_000;
 const DEFAULT_OPENCODE_MODEL_LIST_BUDGET_MS =
   START_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 5_000;
 const RUNTIME_CATALOG_AGENT_BUDGET_MS = 2_000;
+const DEFAULT_OPENCODE_DISCOVER_PROJECT_TTL_MS = 120_000;
 let lastOpenCodeCatalogAgents = [];
 let lastEmittedCatalogFingerprint = null;
+let lastOpenCodeProjectDiscoverAt = 0;
+let openCodeProjectDiscoverInFlight = false;
 
 function shortHash(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 8);
@@ -391,6 +415,73 @@ function maybeEmitCatalogUpdated(runtimeStatus, sendRuntimeMessage) {
 
 function resetCatalogPushState() {
   lastEmittedCatalogFingerprint = null;
+}
+
+function resetOpenCodeProjectDiscoverState() {
+  lastOpenCodeProjectDiscoverAt = 0;
+  openCodeProjectDiscoverInFlight = false;
+}
+
+function readDiscoverProjectTtlMs(env = process.env) {
+  const numeric = Number(readString(env?.REMODEX_OPENCODE_DISCOVER_PROJECT_TTL_MS));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return DEFAULT_OPENCODE_DISCOVER_PROJECT_TTL_MS;
+  }
+  return Math.floor(numeric);
+}
+
+function isOpenCodeDiscoverProjectsEnabled(env = process.env) {
+  const raw = readString(env?.REMODEX_OPENCODE_DISCOVER_PROJECTS).toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
+function maybeDiscoverOpenCodeProjects({
+  opencodeProvider,
+  projectRegistry,
+  homeDir,
+  env = process.env,
+  logPrefix = "[remodex]",
+} = {}) {
+  if (!isOpenCodeDiscoverProjectsEnabled(env)) {
+    return false;
+  }
+  if (isOpenCodeRuntimeDisabled(env)) {
+    return false;
+  }
+  if (!opencodeProvider || !projectRegistry) {
+    return false;
+  }
+
+  const ttlMs = readDiscoverProjectTtlMs(env);
+  const now = Date.now();
+  if (now - lastOpenCodeProjectDiscoverAt < ttlMs) {
+    return false;
+  }
+  if (openCodeProjectDiscoverInFlight) {
+    return false;
+  }
+
+  lastOpenCodeProjectDiscoverAt = now;
+  openCodeProjectDiscoverInFlight = true;
+
+  console.log(
+    JSON.stringify({
+      event: "opencode_discover_on_list",
+      ttlMs,
+    }),
+  );
+
+  void projectDiscoverFromOpenCode({}, { homeDir, opencodeProvider, projectRegistry })
+    .catch((error) => {
+      console.warn(
+        `${logPrefix} OpenCode project discover on thread/list failed: ${error?.message || error}`,
+      );
+    })
+    .finally(() => {
+      openCodeProjectDiscoverInFlight = false;
+    });
+
+  return true;
 }
 
 function readModelListBudgetMs(env, key, fallbackMs) {
@@ -1340,6 +1431,10 @@ module.exports = {
   catalogOpenCodeSnapshotForModelList,
   listProviderModelsForModelList,
   resetCatalogPushState,
+  resetOpenCodeProjectDiscoverState,
+  isOpenCodeDiscoverProjectsEnabled,
+  readDiscoverProjectTtlMs,
+  maybeDiscoverOpenCodeProjects,
   shouldWarmProviderInventory,
   shortHash,
   withModelListBudget,

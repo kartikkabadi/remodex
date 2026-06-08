@@ -18,7 +18,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { buildStaticSlashCommands } = require("../src/opencode-client");
 const { createOpenCodeProvider } = require("../src/opencode-provider");
-const { createRuntimeProviderRouter } = require("../src/runtime-provider-router");
+const {
+  createRuntimeProviderRouter,
+  resetOpenCodeProjectDiscoverState,
+} = require("../src/runtime-provider-router");
 const { handleDesktopRequest } = require("../src/desktop-handler");
 const { createThreadOwnershipStore } = require("../src/thread-ownership-store");
 
@@ -569,6 +572,55 @@ test("desktop/continueOpenCode succeeds when handoff env gate is on", async () =
     delete process.env.REMODEX_OPENCODE_HANDOFF;
   } else {
     process.env.REMODEX_OPENCODE_HANDOFF = previousHandoff;
+  }
+});
+
+test("DISABLE_OPENCODE=1 thread/list does not hot-path discover OpenCode projects", async () => {
+  const previousDisable = process.env.REMODEX_DISABLE_OPENCODE;
+  const previousDiscover = process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS;
+  process.env.REMODEX_DISABLE_OPENCODE = "1";
+  process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS = "1";
+  resetOpenCodeProjectDiscoverState();
+
+  try {
+    let discoverCalls = 0;
+    const { request } = createTestRouter({
+      providers: [
+        mockOpenCodeProvider({
+          async discoverProjects() {
+            discoverCalls += 1;
+            return [{ id: "proj-1", path: "/tmp/demo", name: "Demo" }];
+          },
+        }),
+      ],
+      sendCodexRequest: async () => ({
+        data: [{ id: "codex-thread", cwd: "/tmp/codex", provider: "codex" }],
+      }),
+      projectRegistry: { rememberProjectsFromThreads() {} },
+    });
+
+    const response = await request({
+      id: "thread-list-disable-discover",
+      method: "thread/list",
+      params: {},
+    });
+    await waitOneTick();
+
+    assert.equal(response.id, "thread-list-disable-discover");
+    assert.equal(response.result.data.length, 1);
+    assert.equal(discoverCalls, 0);
+  } finally {
+    resetOpenCodeProjectDiscoverState();
+    if (previousDisable === undefined) {
+      delete process.env.REMODEX_DISABLE_OPENCODE;
+    } else {
+      process.env.REMODEX_DISABLE_OPENCODE = previousDisable;
+    }
+    if (previousDiscover === undefined) {
+      delete process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS;
+    } else {
+      process.env.REMODEX_OPENCODE_DISCOVER_PROJECTS = previousDiscover;
+    }
   }
 });
 
