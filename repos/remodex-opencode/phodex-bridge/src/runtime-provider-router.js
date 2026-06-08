@@ -1621,8 +1621,16 @@ function mergeSkillsAcrossProviders(skills) {
     );
 }
 
+function isCodexRuntimeUnavailable(getCodexLaunchState) {
+  if (typeof getCodexLaunchState !== "function") {
+    return false;
+  }
+  const state = getCodexLaunchState();
+  return state === "degraded" || state === "error";
+}
+
 function isCodexRuntimeConnected(getCodexLaunchState) {
-  return typeof getCodexLaunchState !== "function" || getCodexLaunchState() === "connected";
+  return !isCodexRuntimeUnavailable(getCodexLaunchState);
 }
 
 function resolveCodexLegPromise(getCodexLaunchState, runCodexLeg, fallback) {
