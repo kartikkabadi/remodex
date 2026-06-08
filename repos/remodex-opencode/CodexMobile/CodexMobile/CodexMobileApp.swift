@@ -33,11 +33,11 @@ struct CodexMobileApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .openCodePermissionPresenter()
                 .environment(codexService)
                 .environment(petCompanionStore)
                 .environment(petCompanionStatusStore)
                 .environment(subscriptionService)
-                .openCodePermissionPresenter()
                 .task {
                     await subscriptionService.bootstrap()
                 }

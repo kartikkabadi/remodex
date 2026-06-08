@@ -565,7 +565,11 @@ final class TurnViewModel {
         return isSending
     }
 
-    func isSendDisabled(isConnected: Bool, activeTurnID: String?) -> Bool {
+    func isSendDisabled(
+        isConnected: Bool,
+        activeTurnID: String?,
+        isRuntimeCapabilitiesLoading: Bool = false
+    ) -> Bool {
         _ = activeTurnID
         return TurnComposerSendAvailability(
             isSending: isSending,
@@ -577,7 +581,8 @@ final class TurnViewModel {
             hasPluginSelection: !composerMentionedPlugins.isEmpty,
             hasReviewSelection: hasComposerReviewSelection,
             hasPendingReviewSelection: hasPendingComposerReviewSelection,
-            hasSubagentsSelection: isSubagentsSelectionArmed
+            hasSubagentsSelection: isSubagentsSelectionArmed,
+            isRuntimeCapabilitiesLoading: isRuntimeCapabilitiesLoading
         ).isSendDisabled
     }
 
