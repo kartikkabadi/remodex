@@ -138,6 +138,13 @@ struct SidebarThreadRowView: View {
 
             SidebarThreadStatusIcon(thread: thread, pointSize: 12)
 
+            if thread.isDiscoveredExternalOpenCodeThread {
+                RemodexIcon.image(systemName: "desktopcomputer")
+                    .font(AppFont.caption(weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Started on Mac")
+            }
+
             if let pinnedProjectLabel, !pinnedProjectLabel.isEmpty {
                 Text(pinnedProjectLabel)
                     .font(AppFont.footnote())

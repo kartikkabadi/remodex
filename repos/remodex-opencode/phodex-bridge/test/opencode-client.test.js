@@ -828,6 +828,31 @@ test("sessionV2InfoToDiscoveredThread includes SDK numeric millis and session.pa
   assert.equal(discovered.createdAt, new Date(createdMillis).toISOString());
 });
 
+test("sessionV2InfoToDiscoveredThread reads project.worktree and project.name from global sessions", () => {
+  const discovered = sessionV2InfoToDiscoveredThread({
+    id: "ses_global_proj",
+    title: "Auth refactor",
+    time: { created: "2026-06-08T10:00:00.000Z", updated: "2026-06-08T11:00:00.000Z" },
+    project: { id: "proj_1", name: "auth-service", worktree: "/Users/me/auth-service" },
+  });
+
+  assert.equal(discovered.id, "opencode-session-ses_global_proj");
+  assert.equal(discovered.title, "Auth refactor");
+  assert.equal(discovered.cwd, "/Users/me/auth-service");
+  assert.equal(discovered.metadata.projectName, "auth-service");
+});
+
+test("sessionV2InfoToDiscoveredThread falls back to project name in title when title is missing", () => {
+  const discovered = sessionV2InfoToDiscoveredThread({
+    id: "ses_no_title",
+    time: { created: "2026-06-08T10:00:00.000Z" },
+    project: { id: "proj_1", name: "payments", worktree: "/Users/me/payments" },
+  });
+
+  assert.equal(discovered.title, "payments · OpenCode chat");
+  assert.equal(discovered.cwd, "/Users/me/payments");
+});
+
 test("resolveSessionList parses V2 response.items and cursor.next", () => {
   const result = resolveSessionList({
     items: [
@@ -927,4 +952,49 @@ test("listSessions wraps SDK session.list with directory and start cursor", asyn
   });
   assert.equal(result.data.length, 1);
   assert.equal(result.data[0].id, "opencode-session-ses_external");
+});
+
+test("listSessions falls back to direct fetch when SDK experimental.session.list is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchUrl = null;
+  globalThis.fetch = async (url) => {
+    fetchUrl = String(url);
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name) => (name.toLowerCase() === "x-next-cursor" ? "1719000000" : null),
+      },
+      json: async () => [
+        {
+          id: "ses_direct",
+          title: "Direct fetch session",
+          directory: "/Users/me/direct",
+          time: { created: "2026-06-08T12:00:00.000Z", updated: "2026-06-08T13:00:00.000Z" },
+        },
+      ],
+    };
+  };
+
+  try {
+    const client = await createOpenCodeClient({
+      baseUrl: TEST_BASE_URL,
+      createOpencodeClientImpl: function createOpencodeClient() {
+        return {
+          session: {
+            list: async () => ({ data: [] }),
+          },
+        };
+      },
+    });
+
+    const result = await client.listSessions({ limit: 10 });
+    assert.equal(fetchUrl, "http://127.0.0.1:4291/experimental/session?limit=10");
+    assert.equal(result.data.length, 1);
+    assert.equal(result.data[0].id, "opencode-session-ses_direct");
+    assert.equal(result.data[0].cwd, "/Users/me/direct");
+    assert.equal(result.nextCursor, "1719000000");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -80,8 +80,9 @@ async function createOpenCodeClient({
     throw new Error("OpenCode SDK client requires a baseUrl.");
   }
 
+  const resolvedBaseUrl = readString(baseUrl);
   const createOpencodeClient = createOpencodeClientImpl || (await getSdkClient());
-  const client = createOpencodeClient({ baseUrl });
+  const client = createOpencodeClient({ baseUrl: resolvedBaseUrl });
 
   let inventoryCache = null;
   let inventoryRefreshPromise = null;
@@ -224,6 +225,32 @@ async function createOpenCodeClient({
     }
   }
 
+  async function directGlobalSessionList(query = {}) {
+    if (!resolvedBaseUrl) {
+      return emptySessionListResult();
+    }
+    const url = new URL(`${resolvedBaseUrl.replace(/\/$/, "")}/experimental/session`);
+    if (Number.isFinite(query.limit) && query.limit > 0) {
+      url.searchParams.set("limit", String(Math.floor(query.limit)));
+    }
+    if (query.archived === true) {
+      url.searchParams.set("archived", "true");
+    }
+    if (query.cursor != null) {
+      url.searchParams.set("cursor", String(query.cursor));
+    }
+    const response = await fetch(url.href);
+    if (!response.ok) {
+      throw new Error(`experimental session.list HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const nextCursor = response.headers.get("x-next-cursor") || null;
+    return resolveSessionList({
+      data: Array.isArray(data) ? data : [],
+      nextCursor,
+    });
+  }
+
   async function listSessions({ directory, limit, cursor, archived } = {}) {
     const normalizedDirectory = readString(directory);
     const pagination = resolveSessionListCursor(cursor);
@@ -247,6 +274,14 @@ async function createOpenCodeClient({
           REQUEST_TIMEOUT_MS,
         );
         return resolveSessionList(response);
+      }
+
+      if (!normalizedDirectory && typeof fetch === "function") {
+        const query = { ...baseQuery };
+        if (pagination.numeric !== null) {
+          query.cursor = pagination.numeric;
+        }
+        return await withTimeout(directGlobalSessionList(query), REQUEST_TIMEOUT_MS);
       }
 
       if (typeof client.session?.list !== "function") {

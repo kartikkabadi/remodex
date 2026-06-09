@@ -677,6 +677,10 @@ extension CodexService {
         return defaults.bool(forKey: Self.openCodeExternalDiscoveryDefaultsKey)
     }
 
+    func setOpenCodeExternalDiscoveryEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.openCodeExternalDiscoveryDefaultsKey)
+    }
+
     func providerCapabilitiesForTurn(threadId: String?) -> ProviderCapabilities {
         let provider = CodexModelOption.normalizedProvider(runtimeModelProviderForTurn(threadId: threadId))
         if let model = selectedModelOption(threadId: threadId),

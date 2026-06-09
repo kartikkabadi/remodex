@@ -216,8 +216,11 @@ function sessionV2InfoToDiscoveredThread(session) {
   }
 
   const cwd = readString(
-    session.location?.directory || session.directory || session.path || session.cwd,
+    session.location?.directory || session.directory || session.path || session.cwd || session.project?.worktree,
   );
+  const projectName = readString(session.project?.name);
+  const title = readString(session.title);
+  const displayTitle = title || (projectName ? `${projectName} · OpenCode chat` : "OpenCode chat");
   const createdAt =
     readSessionTimestamp(session, "created") || new Date().toISOString();
   const updatedAt = readSessionTimestamp(session, "updated") || createdAt;
@@ -225,7 +228,8 @@ function sessionV2InfoToDiscoveredThread(session) {
 
   return {
     id: threadId,
-    title: readString(session.title) || "OpenCode chat",
+    title: displayTitle,
+    name: title || "",
     cwd: cwd || "",
     hasProjectCwd: Boolean(cwd),
     model: normalizeOpenCodeModel(session.model),
@@ -238,6 +242,7 @@ function sessionV2InfoToDiscoveredThread(session) {
       provider: OPENCODE_PROVIDER_ID,
       discoveredExternally: true,
       sessionId,
+      projectName: projectName || undefined,
     },
   };
 }

@@ -40,6 +40,15 @@ struct SettingsRuntimeDefaultsCard: View {
                     .foregroundStyle(.secondary)
             }
 
+            if showsOpenCodeAgentPicker {
+                Toggle("Discover Mac sessions", isOn: openCodeExternalDiscoveryBinding)
+                    .tint(settingsAccentColor)
+
+                Text("Show OpenCode sessions started on your Mac in the sidebar.")
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+            }
+
             Picker("Reasoning", selection: runtimeReasoningSelection) {
                 Text("Auto").tag(runtimeAutoValue)
                 ForEach(runtimeReasoningOptions, id: \.id) { option in
@@ -179,6 +188,13 @@ struct SettingsRuntimeDefaultsCard: View {
                     ?? "build"
             },
             set: { codex.setDefaultOpenCodeAgent($0) }
+        )
+    }
+
+    private var openCodeExternalDiscoveryBinding: Binding<Bool> {
+        Binding(
+            get: { codex.openCodeExternalDiscoveryEnabled },
+            set: { codex.setOpenCodeExternalDiscoveryEnabled($0) }
         )
     }
 
