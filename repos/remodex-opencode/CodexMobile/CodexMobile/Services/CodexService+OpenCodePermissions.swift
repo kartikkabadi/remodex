@@ -17,7 +17,9 @@ extension CodexService {
         if let env = ProcessInfo.processInfo.environment["REMODEX_OPENCODE_PERMISSIONS_UI"] {
             return env != "0" && env.lowercased() != "false"
         }
-        return true
+        return defaults.object(forKey: Self.openCodePermissionsUIEnabledDefaultsKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.openCodePermissionsUIEnabledDefaultsKey)
     }
 
     func pendingOpenCodePermission(for threadId: String? = nil) -> OpenCodePermissionRequest? {

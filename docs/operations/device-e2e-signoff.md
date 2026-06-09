@@ -22,7 +22,7 @@ Do not treat pending iPad evidence as "device E2E incomplete" for iPhone TestFli
 
 | Automated gate | Result | Date |
 |----------------|--------|------|
-| Bridge `npm test` on `main` | **645/645 pass** | 2026-06-06 |
+| Bridge `npm test` on `main` | **847/847 pass** | current |
 | `REMODEX_DISABLE_OPENCODE=1` regression | Covered in `opencode-regression.test.js` (incl. `command/execute`) | 2026-06-06 |
 
 **Targeted device re-check required** (rows **A–H** + **O17** per [`ipad-opencode-e2e-composer-fixes-eedfe10f.md`](../design/ipad-opencode-e2e-composer-fixes-eedfe10f.md) acceptance matrix):
@@ -54,8 +54,8 @@ Agents and docs repeatedly claimed device E2E was **not done** because:
 | Check | Result | Evidence |
 |-------|--------|----------|
 | `main` tip | `1254224` | `git rev-parse main` |
-| Bridge tests | **604/604 pass** | `cd repos/remodex-opencode/phodex-bridge && npm test` (2026-06-05) |
-| OpenCode handoff RPC | Env-gated (`REMODEX_OPENCODE_HANDOFF=1`) | `opencode-handoff.js`, `opencode-handoff.test.js` |
+| Bridge tests | **847/847 pass** | `cd repos/remodex-opencode/phodex-bridge && npm test` (2026-06-05) |
+| OpenCode handoff RPC | Enabled by default for operator profile; optional env override | `opencode-handoff.js`, `opencode-handoff.test.js` |
 | Codex regression gate | `REMODEX_DISABLE_OPENCODE=1` tests in tree | `opencode-regression.test.js` |
 
 ## PR8 / catalog promotion

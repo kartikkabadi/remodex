@@ -3079,6 +3079,51 @@ test("adopt degrades with empty turns when ensureStarted exceeds cap", async (t)
   assert.deepEqual(read.thread.turns, []);
 });
 
+test("adopt times out and cleans up partial state when client.getMessages is slow", async (t) => {
+  const ownershipStore = fakeOwnershipStore();
+  const sessionStore = fakeSessionStore();
+  const provider = makeProvider({
+    ownershipStore,
+    sessionStore,
+    env: {
+      REMODEX_ENABLE_OPENCODE: "1",
+      REMODEX_OPENCODE_DISCOVER_SESSIONS: "1",
+      REMODEX_OPENCODE_ADOPT_TIMEOUT_MS: "50",
+      REMODEX_TEST: "1",
+    },
+    clientFactory: async () => ({
+      ...discoveredListClient([externalDiscoveredRow()]),
+      getMessages: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return [{ role: "assistant", text: "late message" }];
+      },
+    }),
+  });
+  t.after(async () => {
+    await provider.shutdown();
+  });
+
+  await provider.listThreads();
+
+  await assert.rejects(
+    () =>
+      provider.handleRequest({
+        id: 1,
+        method: "thread/read",
+        params: { threadId: "opencode-session-ses_external_mac", includeTurns: true },
+      }),
+    (error) => {
+      assert.equal(error.errorCode, "opencode_adopt_timeout");
+      return true;
+    },
+  );
+
+  // Allow background adoptPromise to reach its cancellation check.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(ownershipStore.ownsThread("opencode-session-ses_external_mac", "opencode"), false);
+  assert.equal(sessionStore.get("opencode-session-ses_external_mac"), null);
+});
+
 test("listThreads surfaces materializationBlocked in response meta", async () => {
   const ownershipStore = fakeOwnershipStore();
   const sessionStore = fakeSessionStore();

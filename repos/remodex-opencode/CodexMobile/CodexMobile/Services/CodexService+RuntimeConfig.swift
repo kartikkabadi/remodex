@@ -72,10 +72,29 @@ extension CodexService {
         } else {
             modelsErrorMessageByProvider[normalizedProvider] = trimmed
         }
+        persistModelsErrorMessages()
     }
 
     func clearModelsErrorMessages() {
         modelsErrorMessageByProvider.removeAll()
+        persistModelsErrorMessages()
+    }
+
+    func loadPersistedModelsErrorMessages() {
+        guard let data = defaults.object(forKey: Self.modelsErrorMessageByProviderDefaultsKey) as? Data,
+              let decoded = try? decoder.decode([String: String].self, from: data) else {
+            return
+        }
+        modelsErrorMessageByProvider = decoded
+    }
+
+    private func persistModelsErrorMessages() {
+        if modelsErrorMessageByProvider.isEmpty {
+            defaults.removeObject(forKey: Self.modelsErrorMessageByProviderDefaultsKey)
+            return
+        }
+        guard let data = try? encoder.encode(modelsErrorMessageByProvider) else { return }
+        defaults.set(data, forKey: Self.modelsErrorMessageByProviderDefaultsKey)
     }
 
     // Resolves the effective per-chat override record after normalizing the thread id.

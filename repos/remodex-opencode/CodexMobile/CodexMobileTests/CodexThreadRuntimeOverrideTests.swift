@@ -557,6 +557,114 @@ final class CodexThreadRuntimeOverrideTests: XCTestCase {
         )
     }
 
+    func testTurnComposerRuntimeStateShowsAccessModeWhenCapabilityTrue() {
+        let service = makeService()
+        service.isConnected = true
+        service.availableModels = [makeOpenCodeModelAccessMode(enabled: true)]
+        service.setSelectedModelId("gpt-5.5")
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "opencode",
+                name: "OpenCode",
+                enabled: true,
+                capabilities: ProviderCapabilities(
+                    supportsAgentSelection: true,
+                    supportsReasoningEffort: false,
+                    supportsFastMode: false,
+                    supportsPlanMode: false,
+                    supportsStreamingTools: true,
+                    supportsApprovals: true,
+                    supportsFork: true,
+                    supportsVoice: false,
+                    supportsDesktopHandoff: true,
+                    supportsSlashCommands: true,
+                    supportsMCP: false,
+                    supportsWorktree: false,
+                    supportsSkillAutocomplete: true,
+                    supportsSteer: false,
+                    supportsQueue: true,
+                    supportsAccessMode: true
+                )
+            ),
+        ]
+
+        let state = TurnComposerRuntimeState.resolve(
+            codex: service,
+            reasoningDisplayOptions: []
+        )
+        XCTAssertTrue(state.showsComposerAccessMode)
+    }
+
+    func testTurnComposerRuntimeStateHidesAccessModeWhenCapabilityFalse() {
+        let service = makeService()
+        service.isConnected = true
+        service.availableModels = [makeOpenCodeModelAccessMode(enabled: false)]
+        service.setSelectedModelId("gpt-5.5")
+        service.availableRuntimes = [
+            RuntimeInfo(
+                id: "opencode",
+                name: "OpenCode",
+                enabled: true,
+                capabilities: ProviderCapabilities(
+                    supportsAgentSelection: true,
+                    supportsReasoningEffort: false,
+                    supportsFastMode: false,
+                    supportsPlanMode: false,
+                    supportsStreamingTools: true,
+                    supportsApprovals: true,
+                    supportsFork: true,
+                    supportsVoice: false,
+                    supportsDesktopHandoff: true,
+                    supportsSlashCommands: true,
+                    supportsMCP: false,
+                    supportsWorktree: false,
+                    supportsSkillAutocomplete: true,
+                    supportsSteer: false,
+                    supportsQueue: true,
+                    supportsAccessMode: false
+                )
+            ),
+        ]
+
+        let state = TurnComposerRuntimeState.resolve(
+            codex: service,
+            reasoningDisplayOptions: []
+        )
+        XCTAssertFalse(state.showsComposerAccessMode)
+    }
+
+    private func makeOpenCodeModelAccessMode(enabled: Bool) -> CodexModelOption {
+        CodexModelOption(
+            id: "gpt-5.5",
+            model: "opencode/gpt-5.5",
+            modelProvider: "opencode",
+            displayName: "GPT-5.5",
+            description: "OpenCode model",
+            isDefault: true,
+            supportsFastMode: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: nil,
+            capabilities: ProviderCapabilities(
+                supportsAgentSelection: true,
+                supportsReasoningEffort: false,
+                supportsFastMode: false,
+                supportsPlanMode: false,
+                supportsStreamingTools: true,
+                supportsApprovals: true,
+                supportsFork: true,
+                supportsVoice: false,
+                supportsDesktopHandoff: true,
+                supportsSlashCommands: true,
+                supportsMCP: false,
+                supportsWorktree: false,
+                supportsSkillAutocomplete: true,
+                supportsSteer: false,
+                supportsQueue: true,
+                supportsAccessMode: enabled
+            )
+        )
+    }
+
     private func makeOpenCodeModel() -> CodexModelOption {
         CodexModelOption(
             id: "gpt-5.5",

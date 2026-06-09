@@ -76,6 +76,7 @@ const DEFAULT_ENSURE_STARTED_SERVE_WAKE_CAP_MS = 8_000;
 const DEFAULT_VALIDATION_RPC_LIMIT_PER_MIN = 120;
 const DISCOVERED_THREAD_ID_PREFIX = "opencode-session-";
 const DEFAULT_OPENCODE_TURN_WATCHDOG_MS = 120 * 1000;
+const ADOPT_MUTEX_TIMEOUT_MS = 30_000;
 const OPENCODE_PRUNE_OPS_HINT =
   "node phodex-bridge/scripts/prune-opencode-ownership.js --apply";
 
@@ -202,6 +203,14 @@ function resolveOpenCodeTurnWatchdogMs(env = process.env) {
   return DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
 }
 
+function resolveAdoptMutexTimeoutMs(env = process.env) {
+  const fromEnv = Number(env?.REMODEX_OPENCODE_ADOPT_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return ADOPT_MUTEX_TIMEOUT_MS;
+}
+
 function assertOwnershipPersisted(ok, threadId) {
   if (ok) {
     return;
@@ -284,7 +293,7 @@ function createOpenCodeProvider({
   const pendingPermissions = new Map();
   /** @type {Map<string, Set<string>>} */
   const sessionPermissionGrants = new Map();
-  const PERMISSION_WATCHDOG_MS = DEFAULT_OPENCODE_TURN_WATCHDOG_MS;
+  const PERMISSION_WATCHDOG_MS = resolveOpenCodeTurnWatchdogMs(env);
   const MAX_PENDING_PERMISSIONS = 20;
   let discoveredSessionsCache = { rows: [], fetchedAt: 0 };
   let discoverRefreshInFlight = null;
@@ -1193,6 +1202,16 @@ function createOpenCodeProvider({
       return adoptMutexes.get(normalizedThreadId);
     }
 
+    const adoptionControl = { cancelled: false };
+
+    function abortAdoptError() {
+      const error = new Error("OpenCode session adoption timed out.");
+      error.errorCode = "opencode_adopt_timeout";
+      return error;
+    }
+
+    let racedPromise;
+
     const adoptPromise = (async () => {
       try {
         let discoveredMeta =
@@ -1245,6 +1264,10 @@ function createOpenCodeProvider({
         const agent = readString(discoveredMeta.agent) || "build";
         const now = new Date().toISOString();
 
+        if (adoptionControl.cancelled) {
+          throw abortAdoptError();
+        }
+
         const sessionSetOk = sessions.set(normalizedThreadId, sessionId, {
           cwd,
           title,
@@ -1268,6 +1291,12 @@ function createOpenCodeProvider({
           const error = new Error(`Failed to adopt OpenCode session ${sessionId}`);
           error.errorCode = "opencode_adopt_failed";
           throw error;
+        }
+
+        if (adoptionControl.cancelled) {
+          sessions.remove(normalizedThreadId);
+          ownership.removeOwnership(normalizedThreadId);
+          throw abortAdoptError();
         }
 
         const thread = {
@@ -1298,6 +1327,12 @@ function createOpenCodeProvider({
           }
         }
 
+        if (adoptionControl.cancelled) {
+          sessions.remove(normalizedThreadId);
+          ownership.removeOwnership(normalizedThreadId);
+          throw abortAdoptError();
+        }
+
         threads.set(normalizedThreadId, thread);
         if (typeof sessions.markAdopted === "function") {
           sessions.markAdopted(sessionId);
@@ -1306,12 +1341,30 @@ function createOpenCodeProvider({
         rememberThreadProject(thread, "opencode-discovered-adopt");
         return thread;
       } finally {
-        adoptMutexes.delete(normalizedThreadId);
+        if (adoptionControl.cancelled) {
+          sessions.remove(normalizedThreadId);
+          ownership.removeOwnership(normalizedThreadId);
+          threads.delete(normalizedThreadId);
+        }
+        if (adoptMutexes.get(normalizedThreadId) === racedPromise) {
+          adoptMutexes.delete(normalizedThreadId);
+        }
       }
     })();
 
-    adoptMutexes.set(normalizedThreadId, adoptPromise);
-    return adoptPromise;
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        adoptionControl.cancelled = true;
+        if (adoptMutexes.get(normalizedThreadId) === racedPromise) {
+          adoptMutexes.delete(normalizedThreadId);
+        }
+        reject(abortAdoptError());
+      }, resolveAdoptMutexTimeoutMs(env));
+    });
+
+    racedPromise = Promise.race([adoptPromise, timeoutPromise]);
+    adoptMutexes.set(normalizedThreadId, racedPromise);
+    return racedPromise;
   }
 
   async function listThreads(params = {}) {

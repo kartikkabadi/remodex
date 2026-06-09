@@ -1,7 +1,7 @@
 # ADR-002: Capability Model
 
 **Date:** 2026-05-30  
-**Status:** Accepted (updated 2026-06-08 — 19 flags)
+**Status:** Accepted (updated 2026-06-08 — 20 flags)
 
 ## Context
 
@@ -11,11 +11,11 @@ The iOS app must not make runtime-specific decisions for **visibility** ("if pro
 
 ## Decision
 
-Use **19 capability flags** as the source of truth for what the iOS composer shows, hides, or greys out.
+Use **20 capability flags** as the source of truth for what the iOS composer shows, hides, or greys out.
 
 Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilities.js` (`CAPABILITIES` array).
 
-### The 19 Flags
+### The 20 Flags
 
 | Flag | What it controls |
 |------|-----------------|
@@ -38,6 +38,7 @@ Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilit
 | `supportsImageAttachments` | Multimodal image attachments in composer |
 | `supportsSteer` | Steer on queued drafts |
 | `supportsQueue` | Local draft queue |
+| `supportsAccessMode` | Public/private access mode toggle |
 
 | Flag | Codex default | OpenCode default |
 |------|---------------|------------------|
@@ -45,6 +46,7 @@ Authoritative list: `repos/remodex-opencode/phodex-bridge/src/provider-capabilit
 | `supportsSlashCommandExecute` | `false` | `true` |
 | `supportsSkillFileInjection` | `true` | `true` |
 | `supportsImageAttachments` | `true` | `true` |
+| `supportsAccessMode` | `true` | `false` |
 
 Do not overload `supportsSkillAutocomplete` — autocomplete ≠ structured turn payload. Do not overload `supportsSlashCommands` — list visibility ≠ execute RPC.
 

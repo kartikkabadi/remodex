@@ -27,6 +27,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
     let supportsImageAttachments: Bool
     let supportsSteer: Bool
     let supportsQueue: Bool
+    let supportsAccessMode: Bool
 
     init(
         supportsAgentSelection: Bool,
@@ -47,7 +48,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsSkillFileInjection: Bool = false,
         supportsImageAttachments: Bool = false,
         supportsSteer: Bool,
-        supportsQueue: Bool
+        supportsQueue: Bool,
+        supportsAccessMode: Bool = false
     ) {
         self.supportsAgentSelection = supportsAgentSelection
         self.supportsReasoningEffort = supportsReasoningEffort
@@ -68,6 +70,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         self.supportsImageAttachments = supportsImageAttachments
         self.supportsSteer = supportsSteer
         self.supportsQueue = supportsQueue
+        self.supportsAccessMode = supportsAccessMode
     }
 
     enum CodingKeys: String, CodingKey {
@@ -90,6 +93,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         case supportsImageAttachments
         case supportsSteer
         case supportsQueue
+        case supportsAccessMode
     }
 
     init(from decoder: Decoder) throws {
@@ -117,6 +121,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
             (try? container.decodeIfPresent(Bool.self, forKey: .supportsImageAttachments)) ?? false
         supportsSteer = (try? container.decodeIfPresent(Bool.self, forKey: .supportsSteer)) ?? false
         supportsQueue = (try? container.decodeIfPresent(Bool.self, forKey: .supportsQueue)) ?? true
+        supportsAccessMode = (try? container.decodeIfPresent(Bool.self, forKey: .supportsAccessMode)) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -140,6 +145,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         try container.encode(supportsImageAttachments, forKey: .supportsImageAttachments)
         try container.encode(supportsSteer, forKey: .supportsSteer)
         try container.encode(supportsQueue, forKey: .supportsQueue)
+        try container.encode(supportsAccessMode, forKey: .supportsAccessMode)
     }
 
     static let defaultCodex = ProviderCapabilities(
@@ -161,7 +167,8 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsSkillFileInjection: true,
         supportsImageAttachments: true,
         supportsSteer: true,
-        supportsQueue: true
+        supportsQueue: true,
+        supportsAccessMode: true
     )
 
     static let defaultOpenCode = ProviderCapabilities(
@@ -183,6 +190,7 @@ struct ProviderCapabilities: Codable, Hashable, Sendable {
         supportsSkillFileInjection: true,
         supportsImageAttachments: true,
         supportsSteer: false,
-        supportsQueue: true
+        supportsQueue: true,
+        supportsAccessMode: false
     )
 }

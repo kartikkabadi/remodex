@@ -28,6 +28,7 @@ const CAPABILITIES = [
   "supportsImageAttachments",
   "supportsSteer",
   "supportsQueue",
+  "supportsAccessMode",
 ];
 
 const CODEX_CAPABILITIES = {
@@ -50,6 +51,7 @@ const CODEX_CAPABILITIES = {
   supportsImageAttachments: true,
   supportsSteer: true,
   supportsQueue: true,
+  supportsAccessMode: true,
 };
 
 const OPENCODE_CAPABILITIES = {
@@ -77,6 +79,7 @@ const OPENCODE_CAPABILITIES = {
   supportsImageAttachments: true,
   supportsSteer: false,
   supportsQueue: true,
+  supportsAccessMode: false,
 };
 
 function resolveOpenCodeCatalogCapabilities(_env = process.env) {

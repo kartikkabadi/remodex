@@ -27,7 +27,7 @@ const {
 } = require("../src/provider-capabilities");
 
 test("CAPABILITIES includes skill and attachment flags", () => {
-  assert.equal(CAPABILITIES.length, 19);
+  assert.equal(CAPABILITIES.length, 20);
   assert.equal(CAPABILITIES[11], "supportsSlashCommandExecute");
   assert.equal(CAPABILITIES[14], "supportsStructuredSkillInput");
   assert.equal(CAPABILITIES[15], "supportsSkillFileInjection");

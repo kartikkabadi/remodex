@@ -946,7 +946,7 @@ From `resolveThreadOwnershipMismatch` (router:190) + `createJsonRpcErrorResponse
 
 **Routing:** `bridge-local` — `desktop-handler.js` delegates to `opencode-handoff.js`. macOS only.
 
-**Env gate:** Requires `REMODEX_OPENCODE_HANDOFF=1` (or `true`). When unset/`0`/`false`, returns `opencode_handoff_disabled` with no success payload.
+**Env gate:** `REMODEX_OPENCODE_HANDOFF` is optional. Handoff is enabled by default for operator bridge profiles and disabled for dev profiles. When explicitly set to `0`/`false`/`no`/`off`, returns `opencode_handoff_disabled` with no success payload.
 
 **Params:**
 ```json

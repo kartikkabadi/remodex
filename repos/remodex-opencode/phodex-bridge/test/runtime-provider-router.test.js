@@ -1357,6 +1357,7 @@ test("runtime/catalog clears reasonCode when OpenCode is enabled with agents", a
   assert.equal(opencodeRuntime.unavailableReason, null);
   assert.equal(opencodeRuntime.capabilities.supportsSteer, false);
   assert.equal(opencodeRuntime.capabilities.supportsQueue, true);
+  assert.equal(opencodeRuntime.capabilities.supportsAccessMode, false);
   assert.equal(opencodeRuntime.capabilities.supportsSkillAutocomplete, true);
   assert.equal(opencodeRuntime.capabilities.supportsStructuredSkillInput, false); // RP-SKILL-3: remains false (SDK lacks skills[] in prompt; gated)
 

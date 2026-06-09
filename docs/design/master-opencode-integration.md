@@ -43,9 +43,9 @@ Non-blocking doc alignment (PR 11b). **Do not treat unchecked Phase 0/1 boxes or
 
 | Item | State (2026-06-08) |
 |------|---------------------|
-| Capability flags | **19** in `provider-capabilities.js` — see ADR-002 |
+| Capability flags | **20** in `provider-capabilities.js` — see ADR-002 |
 | OpenCode push notifications | **Implemented** — `sendRuntimeApplicationMessage` feeds `pushNotificationTracker` for all providers (`bridge.js`) |
-| OpenCode desktop/TUI handoff | **Shipped** — catalog `supportsDesktopHandoff: true`; RPC gated by `REMODEX_OPENCODE_HANDOFF` on Mac |
+| OpenCode desktop/TUI handoff | **Shipped** — catalog `supportsDesktopHandoff: true`; enabled by default for operator profile |
 | iOS dynamic slash + skills | **Shipped** on `main` (execute-plan Themes B + device sign-off) |
 | TestFlight ship target | **iPhone + Mac** — iPad composer re-check (signoff addendum A–H) is **non-blocking** |
 | Live parity matrix | [`release-compatibility.md`](../operations/release-compatibility.md) supersedes § Parity Matrix v2 below where they differ |
@@ -222,7 +222,7 @@ sequenceDiagram
 | Thread ownership | `thread-ownership-store.js` | Durable `~/.remodex/thread-ownership.json` |
 | Session persistence | `opencode-session-store.js` | `sessionId`, `cwd`, `model`, `agent`, `title` |
 | **Restart rehydration** | `rehydrateThreadIfNeeded`, `opencode-restart-rehydrate.test.js` | **Done — not Phase 1 work** |
-| 19 capability flags | `provider-capabilities.js` | ADR-002 aligned 2026-06-08 (was 15/17 in older docs) |
+| 20 capability flags | `provider-capabilities.js` | ADR-002 aligned 2026-06-08 (was 15/17 in older docs) |
 | Merged `model/list`, `thread/list` | `runtime-provider-router.js` | Provider field on items |
 | `runtime/catalog` | router `buildOpenCodeRuntimeCatalog` | `unavailableReason`, agents |
 | `command/list`, `skills/list` | router + `opencode-client.js` | Bridge-only for slash today |
@@ -243,7 +243,7 @@ sequenceDiagram
 | Doc/capability parity honesty | ADR-002, `bridge-rpc.md`, matrix slash row | **Addressed** — ongoing drift tracked in ops docs |
 | iOS dynamic slash | Hardcoded `TurnComposerSlashCommand` enum | **Shipped** — `command/list` + V2 panel (execute-plan) |
 | Structured skills + flag | Client-only `supportsStructuredSkillInput` | **Shipped** — 19th flag set; structured input gated per catalog |
-| OpenCode desktop/TUI handoff | `supportsDesktopHandoff: false` | **Shipped** — catalog `true`; env `REMODEX_OPENCODE_HANDOFF` on Mac |
+| OpenCode desktop/TUI handoff | `supportsDesktopHandoff: false` | **Shipped** — catalog `true`; enabled by default for operator profile |
 | Device E2E sign-off | Matrix overstated cells | **Signed off** on iPhone + Mac |
 | Parity promotion rules | After PR3/4/5+device video | **Done** — PR8 catalog flip restored |
 
@@ -255,7 +255,7 @@ See **Phase 2** and **Parity Matrix v2** below.
 
 ## Capability Matrix
 
-**Source of truth:** `phodex-bridge/src/provider-capabilities.js` (`CAPABILITIES` array, **19 flags**). Table below is a **subset** of the full list — see ADR-002 for `supportsSlashCommandExecute`, `supportsSkillFileInjection`, `supportsImageAttachments`.
+**Source of truth:** `phodex-bridge/src/provider-capabilities.js` (`CAPABILITIES` array, **20 flags**). Table below is a **subset** of the full list — see ADR-002 for `supportsSlashCommandExecute`, `supportsSkillFileInjection`, `supportsImageAttachments`.
 
 | Flag | Codex default | OpenCode default | Per-feature status | Phase |
 |------|---------------|------------------|------------------|-------|
@@ -264,7 +264,7 @@ See **Phase 2** and **Parity Matrix v2** below.
 | `supportsFastMode` | true | false* | **enabled/greyed** per model | — |
 | `supportsPlanMode` | true | false | **n/a** (hidden) | — |
 | `supportsVoice` | true | false | **n/a** (hidden) | — |
-| `supportsDesktopHandoff` | true | true | **enabled** (catalog); RPC requires `REMODEX_OPENCODE_HANDOFF=1` on Mac | — |
+| `supportsDesktopHandoff` | true | true | **enabled** (catalog); enabled by default for operator profile | — |
 | `supportsWorktree` | true | false | **greyed**; git local | Phase 2 doc |
 | `supportsFork` | true | true | **enabled** | — |
 | `supportsApprovals` | true | true | **enabled** | — |
@@ -301,7 +301,7 @@ Owner: **bridge** | **ios** | **docs**
 | MCP settings row | enabled | **partial** | ios/docs | Flag true; MCP runs on Mac in OC process |
 | Queue | enabled | enabled | ios | Local queue |
 | Steer | enabled | greyed | ios | No OC SDK steer |
-| Desktop handoff | enabled | **enabled** | ios | Catalog `supportsDesktopHandoff: true`; Mac env `REMODEX_OPENCODE_HANDOFF=1` for RPC |
+| Desktop handoff | enabled | **enabled** | ios | Catalog `supportsDesktopHandoff: true`; enabled by default for operator profile |
 | Worktree | enabled | greyed | ios | Non-goal v1 |
 | Git/workspace | enabled | enabled | bridge | Bridge-local |
 | Streaming timeline | enabled | **partial** | bridge | Missing several SSE types |
@@ -350,7 +350,7 @@ Owner: **bridge** | **ios** | **docs**
 | P1-A | Docs-only PR (parity honesty) — can parallel all code PRs |
 | P1-B | iOS `command/list` for OpenCode provider |
 | P1-C | 16th flag `supportsStructuredSkillInput` + prompt mapping spike |
-| P1-D | `desktop/continueOpenCode` + `REMODEX_OPENCODE_HANDOFF=1` env gate |
+| P1-D | `desktop/continueOpenCode` + optional `REMODEX_OPENCODE_HANDOFF` env toggle |
 | P1-E | iOS provider-aware handoff UX |
 | P1-F | Device E2E video + matrix promotion (`supportsDesktopHandoff` flip only after TUI proof) |
 
@@ -496,7 +496,7 @@ flowchart TD
   A[desktop/continueOpenCode] --> B{owns opencode?}
   B -->|no| X[wrong_provider]
   B -->|yes| C[ensureStarted + sessionId]
-  C --> D{REMODEX_OPENCODE_HANDOFF=1?}
+  C --> D{REMODEX_OPENCODE_HANDOFF enabled?}
   D -->|no| Y[opencode_handoff_disabled]
   D -->|yes| E{Desktop.app installed?}
   E -->|yes| F[open -b ai.opencode.desktop*]
@@ -509,7 +509,7 @@ flowchart TD
 
 **Bundle IDs:** `ai.opencode.desktop`, `.dev`, `.beta` (from vendored desktop package).
 
-**Capability:** `supportsDesktopHandoff` is **`true`** in `OPENCODE_CAPABILITIES` after device sign-off (PR8). RPC still requires `REMODEX_OPENCODE_HANDOFF=1` on the Mac bridge.
+**Capability:** `supportsDesktopHandoff` is **`true`** in `OPENCODE_CAPABILITIES` after device sign-off (PR8). Enabled by default for operator bridge profile.
 
 **iOS UX today (code truth):** When the flag is false, the thread actions menu still lists “Hand off to Desktop” as a **disabled** row with subtitle “Not supported by this runtime” (`TurnToolbarContent.swift:128–136`) — parity row **greyed**, not hidden. **Optional (not default):** PR6 could remove the `else` branch to truly hide the row; plan and PR1 matrix use **greyed** unless that follow-up is explicitly scoped.
 
@@ -680,7 +680,7 @@ Add to `device-e2e-checklist.md`:
 | Stage | Audience | Flags |
 |-------|----------|-------|
 | Internal | Kartik TestFlight | Default OpenCode on |
-| Handoff QA | Internal | `REMODEX_OPENCODE_HANDOFF=1` on Mac |
+| Handoff QA | Internal | Default enabled for operator profile |
 | Catalog handoff | After TUI video | PR8 flips capability |
 | Production | App Store | Matrix all **enabled** rows proven |
 | Rollback | Operators | `REMODEX_DISABLE_OPENCODE=1` |
@@ -724,13 +724,13 @@ Add to `device-e2e-checklist.md`:
 ## Key Decisions
 
 1. **HTTP SDK transport** — Keep `opencode serve` + `@opencode-ai/sdk/v2`; ACP reference-only (ADR-004).
-2. **Capability-driven visibility** — 19 flags from bridge; UI never checks provider name for show/hide.
+2. **Capability-driven visibility** — 20 flags from bridge; UI never checks provider name for show/hide.
 3. **Provider id for orchestration only** — Slash list source, handoff RPC selection.
 4. **Rehydration is complete** — No Phase 1 PR; document in ADR-006 / Phase 0.
 5. **Phase 0 docs-before-release** — Parity honesty PR can merge before code; must precede external release.
 6. **OpenCode slash via `command/list`** — OpenCode threads only; **Codex keeps hardcoded enum** (no `command/list` on Codex threads — OQ#3 resolved default: no).
 7. **16th flag `supportsStructuredSkillInput`** — Do not overload `supportsSkillAutocomplete`.
-8. **Handoff env gate** — `REMODEX_OPENCODE_HANDOFF=1` required; catalog flag false until TUI E2E. While false, iOS shows handoff as **greyed** in the thread menu: disabled row + “Not supported by this runtime” (`TurnToolbarContent.swift:128–136`). Optional later: PR6 may switch to **hidden** by removing the `else` branch — not the default plan.
+8. **Handoff env gate** — optional `REMODEX_OPENCODE_HANDOFF` toggle; enabled by default for operator profile. While false, iOS shows handoff as **greyed** in the thread menu: disabled row + “Not supported by this runtime” (`TurnToolbarContent.swift:128–136`). Optional later: PR6 may switch to **hidden** by removing the `else` branch — not the default plan.
 9. **Handoff target selection (user decision)** — If OpenCode desktop app is installed → launch it (`open -b ai.opencode.desktop*`); if not → rely on TUI path. **`tui.selectSession` is mandatory** in every handoff attempt; desktop may return `sessionSelected: false` without deeplink. Matches §3 algorithm; Open Question #1 resolved.
 10. **Phase 2 priority: push then SSE** — User decision: **PR9** (push) then **PR10** (SSE/dpcode-aligned) before other Phase 2 PRs.
 11. **Push parity deferred to PR9** — Document background limitation until merged.

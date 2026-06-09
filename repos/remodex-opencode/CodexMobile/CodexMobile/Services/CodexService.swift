@@ -810,6 +810,7 @@ final class CodexService {
     static let notificationsPromptedDefaultsKey = "codex.notifications.prompted"
     static let keepMacAwakeWhileBridgeRunsDefaultsKey = "codex.keepMacAwakeWhileBridgeRuns"
     static let openCodeExternalDiscoveryDefaultsKey = "codex.openCodeExternalDiscoveryEnabled"
+    static let modelsErrorMessageByProviderDefaultsKey = "codex.modelsErrorMessageByProvider"
 
     init(
         encoder: JSONEncoder = JSONEncoder(),
@@ -913,6 +914,7 @@ final class CodexService {
         loadCurrentMacScopedDefaultsState()
         loadCurrentMacScopedLocalState()
         loadPersistedSlashCommandCache()
+        loadPersistedModelsErrorMessages()
         self.remoteNotificationDeviceToken = SecureStore.readString(for: CodexSecureKeys.pushDeviceToken)
         if let relayMacDeviceId,
            let trustedMac = trustedMacRegistry.records[relayMacDeviceId] {

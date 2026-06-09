@@ -109,7 +109,7 @@ struct TurnComposerRuntimeState: Equatable {
             unavailableReasonByProviderID: unavailableReasonByProviderID,
             reasonCodeByProviderID: reasonCodeByProviderID,
             showsBetaLabel: codex.showsBetaLabel(forProvider: currentProviderId),
-            showsComposerAccessMode: currentProviderId != "opencode"
+            showsComposerAccessMode: resolvedCapabilities.supportsAccessMode
         )
     }
 }

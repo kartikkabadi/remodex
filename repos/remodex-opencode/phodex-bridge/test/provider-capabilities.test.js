@@ -151,6 +151,7 @@ test("OpenCode catalog snapshot matches docs/contracts/bridge-rpc.md example (PR
     supportsImageAttachments: true,
     supportsSteer: false,
     supportsQueue: true,
+    supportsAccessMode: false,
   };
   assert.deepEqual(capabilities, expected);
 });

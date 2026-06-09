@@ -7,9 +7,9 @@ Before Kartik runs steps O0–O17 on device:
 | Check | Requirement |
 |-------|-------------|
 | Git `main` | Meta workspace `remodex:opencode` on `main` — working tree **clean** (single git root; no nested `.git` under `repos/remodex-opencode/`). Requires commit **`4546c7b` or later** for iOS simulator build (slash-command cache compile fix). |
-| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **778/778** green |
-| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **352/352** green (CI gate on `opencode-*` touches) |
-| Bridge coverage (optional) | `npm run test:coverage` — same re-run rule if **547/548** once. |
+| Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — **847/847** green |
+| OpenCode suite | `cd repos/remodex-opencode/phodex-bridge && npm run test:opencode` — **398/398** green (CI gate on `opencode-*` touches) |
+| Bridge coverage (optional) | `npm run test:coverage` — same re-run rule. |
 | iOS compile (simulator) | `cd repos/remodex-opencode/CodexMobile && xcodebuild -scheme CodexMobile -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO build` — **required** |
 | iOS unit tests (`CodexMobileTests`) | **Not gating** device E2E. Simulator **build** is required; `xcodebuild test` may show **~147 failures** on clean `main` (queue/steer tests) — do not block Kartik sign-off on XCTest green. |
 
@@ -17,8 +17,8 @@ Before Kartik runs steps O0–O17 on device:
 
 | Step | When |
 |------|------|
-| **O12** (toolbar “Continue on Desktop”) | **Unblocked** — catalog advertises `supportsDesktopHandoff: true`; verify on device with `REMODEX_OPENCODE_HANDOFF=1`. |
-| **O13**, **O16** (handoff RPC + env-off regression) | Can run **before** PR8 with `REMODEX_OPENCODE_HANDOFF=1` on Mac — validates bridge RPC and error taxonomy without catalog advertisement. |
+| **O12** (toolbar “Continue on Desktop”) | **Unblocked** — catalog advertises `supportsDesktopHandoff: true`; enabled by default for operator bridge profile. |
+| **O13**, **O16** (handoff RPC + env-off regression) | `REMODEX_OPENCODE_HANDOFF=0` on Mac disables handoff RPC (returns `opencode_handoff_disabled`). |
 | **O14–O15** | After O13; O15 anytime on Codex-only thread |
 
 **Environment (full checklist):**
@@ -57,7 +57,7 @@ Run this checklist **after** PR3 (slash), PR4 (skills), PR5/PR6 (handoff), and P
 |------|--------|------|
 | O0 | Start stack in **Terminal.app** | `./run-local-remodex.sh --hostname <LAN-IP>` or `./scripts/remodex-dev-pairing.sh <LAN-IP>` — relay stays up **≥10 min** |
 | O1 | OpenCode enabled (default) | Do **not** set `REMODEX_DISABLE_OPENCODE=1` |
-| O2 | Handoff env for production QA | `export REMODEX_OPENCODE_HANDOFF=1` before starting the bridge (required for `desktop/continueOpenCode`; catalog advertises handoff after PR8) |
+| O2 | Handoff env | Optional. Enabled by default for operator profile; set `REMODEX_OPENCODE_HANDOFF=0` to disable. |
 | O3 | Bridge tests | `cd repos/remodex-opencode/phodex-bridge && npm test` — all green |
 
 ## iPhone — catalog and session
@@ -136,8 +136,8 @@ When all steps pass, update [release-compatibility.md](release-compatibility.md)
 |------|--------|---------------------|
 | O0 | Bridge + relay ≥10 min | Terminal screenshot + `lsof` |
 | O1 | OpenCode enabled (no `REMODEX_DISABLE_OPENCODE`) | Settings/runtime catalog |
-| O2 | `REMODEX_OPENCODE_HANDOFF=1` on Mac | `launchctl`/`run-local-remodex` env |
-| O3 | 778/778 + 352/352 automated | CI log or local run |
+| O2 | Handoff env | Optional. Enabled by default for operator profile; set `REMODEX_OPENCODE_HANDOFF=0` to disable. |
+| O3 | 847/847 + 398/398 automated | CI log or local run |
 | O4 | `runtime/catalog` OpenCode enabled | Screenshot |
 | O5 | Model picker + All Models sheet | Find model beyond 120 cap |
 | O6 | Streaming + Stop mid-turn | Screen recording |
