@@ -96,9 +96,11 @@ enum ProviderLogo {
     static func image(provider: String, size: CGFloat = 20, catalogProviders: [OpenCodeCatalogProvider] = []) -> some View {
         if let assetName = assetName(for: provider, catalogProviders: catalogProviders) {
             Image(assetName)
+                .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size)
+                .foregroundStyle(.primary)
         } else {
             RemodexIcon.image(systemName: emergencySFSymbolName(for: provider), size: size)
         }
@@ -112,7 +114,7 @@ enum ProviderLogo {
     static func menuUIImage(provider: String, catalogProviders: [OpenCodeCatalogProvider] = []) -> UIImage? {
         if let assetName = assetName(for: provider, catalogProviders: catalogProviders) {
             guard let image = UIImage(named: assetName) else { return nil }
-            return resizedMenuImage(image).withRenderingMode(.alwaysOriginal)
+            return resizedMenuImage(image)
         }
         return RemodexIcon.menuUIImage(systemName: emergencySFSymbolName(for: provider))
     }
@@ -129,7 +131,7 @@ enum ProviderLogo {
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
         return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
-        }
+        }.withRenderingMode(.alwaysTemplate)
     }
 }
 

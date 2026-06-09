@@ -701,12 +701,12 @@ test("buildModelFromAny sets logoProviderId for OpenCode Zen upstream", () => {
   assert.equal(zenModel.upstreamProviderDisplayName, "OpenCode Zen");
 });
 
-test("buildModelFromAny omits logoProviderId for generic OpenCode upstream", () => {
+test("buildModelFromAny includes logoProviderId for generic OpenCode upstream", () => {
   const model = buildModelFromAny(
     { id: "free", name: "Free" },
     { id: "opencode", name: "OpenCode" },
   );
-  assert.equal(model.logoProviderId, undefined);
+  assert.equal(model.logoProviderId, "opencode");
 });
 
 test("subscribeToEvents resets attempt after first event", async () => {

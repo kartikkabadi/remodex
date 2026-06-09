@@ -12,6 +12,7 @@ const {
   buildProviderInventory,
   buildProviderLogoCatalog,
   resolveLogoProviderId,
+  stripVariantSuffixes,
   COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS,
   PROVIDER_LOGO_ID_ALIASES,
 } = require("../src/opencode-provider-inventory");
@@ -251,8 +252,8 @@ describe("buildProviderInventory", () => {
     assert.equal(resolveLogoProviderId("opencode", "OpenCode Zen"), "opencode-zen");
   });
 
-  test("OpenCode Zenith does not get logoProviderId", () => {
-    assert.equal(resolveLogoProviderId("opencode", "OpenCode Zenith"), undefined);
+  test("OpenCode Zenith gets opencode logoProviderId", () => {
+    assert.equal(resolveLogoProviderId("opencode", "OpenCode Zenith"), "opencode");
     const inventory = {
       connected: ["opencode"],
       all: [
@@ -267,11 +268,11 @@ describe("buildProviderInventory", () => {
     const row = rows.find((entry) => entry.id === "opencode");
     assert.ok(row);
     assert.equal(row.displayName, "OpenCode Zenith");
-    assert.equal(row.logoProviderId, undefined);
-    assert.equal(row.logoAssetId, undefined);
+    assert.equal(row.logoProviderId, "opencode");
+    assert.equal(row.logoAssetId, "provider-opencode-logo");
   });
 
-  test("generic opencode provider has no logoProviderId", () => {
+  test("generic opencode provider has opencode logoProviderId", () => {
     const inventory = {
       connected: ["opencode"],
       all: [
@@ -285,8 +286,8 @@ describe("buildProviderInventory", () => {
     const rows = buildProviderInventory(inventory, { credentialProviderIDs: [] });
     const row = rows.find((entry) => entry.id === "opencode");
     assert.ok(row);
-    assert.equal(row.logoProviderId, undefined);
-    assert.equal(row.logoAssetId, undefined);
+    assert.equal(row.logoProviderId, "opencode");
+    assert.equal(row.logoAssetId, "provider-opencode-logo");
   });
 
   test("anthropic inventory row gets logoAssetId from committed catalog", () => {
@@ -358,8 +359,8 @@ describe("buildProviderInventory", () => {
 });
 
 describe("resolveLogoProviderId — committed external assets", () => {
-  test("maps all 30 committed external providers to logoAssetId ids", () => {
-    assert.equal(COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.size, 30);
+  test("maps all 56 committed providers to logoAssetId ids", () => {
+    assert.equal(COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.size, 56);
     for (const logoProviderId of COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS) {
       assert.equal(
         resolveLogoProviderId(logoProviderId, ""),
@@ -392,7 +393,51 @@ describe("resolveLogoProviderId — committed external assets", () => {
   });
 
   test("unknown provider has no logoProviderId", () => {
-    assert.equal(resolveLogoProviderId("ollama", "Ollama"), undefined);
+    assert.equal(resolveLogoProviderId("abacus", "Abacus"), undefined);
+  });
+
+  test("variant suffix stripping maps regional/plan variants to parent logo", () => {
+    assert.equal(resolveLogoProviderId("alibaba-coding-plan-cn", ""), "alibaba");
+    assert.equal(resolveLogoProviderId("minimax-cn-coding-plan", ""), "minimax");
+    assert.equal(resolveLogoProviderId("zai-coding-plan", ""), "zai");
+    assert.equal(resolveLogoProviderId("siliconflow-cn", ""), "siliconflow");
+    assert.equal(resolveLogoProviderId("xiaomi-token-plan-cn", ""), "xiaomi");
+    assert.equal(resolveLogoProviderId("tencent-tokenhub", ""), "tencent");
+  });
+
+  test("explicit aliases resolve to committed logo assets", () => {
+    for (const [upstream, canonical] of Object.entries(PROVIDER_LOGO_ID_ALIASES)) {
+      const result = resolveLogoProviderId(upstream, "");
+      assert.equal(result, canonical, `alias ${upstream} -> ${canonical}`);
+      assert.ok(
+        COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(canonical),
+        `alias target ${canonical} must be committed`,
+      );
+    }
+  });
+});
+
+describe("stripVariantSuffixes", () => {
+  test("strips longest compound suffix first", () => {
+    assert.equal(stripVariantSuffixes("alibaba-coding-plan-cn"), "alibaba-coding-plan");
+    assert.equal(stripVariantSuffixes("minimax-cn-coding-plan"), "minimax");
+  });
+
+  test("strips single suffixes", () => {
+    assert.equal(stripVariantSuffixes("zai-coding-plan"), "zai");
+    assert.equal(stripVariantSuffixes("siliconflow-cn"), "siliconflow");
+    assert.equal(stripVariantSuffixes("xiaomi-token-plan-cn"), "xiaomi-token-plan");
+    assert.equal(stripVariantSuffixes("tencent-tokenhub"), "tencent");
+  });
+
+  test("returns id unchanged when no suffix matches", () => {
+    assert.equal(stripVariantSuffixes("anthropic"), "anthropic");
+    assert.equal(stripVariantSuffixes("openai"), "openai");
+  });
+
+  test("does not strip nested suffixes recursively", () => {
+    assert.equal(stripVariantSuffixes("foo-ai-ai"), "foo-ai");
+    assert.equal(stripVariantSuffixes("bar-cn-cn"), "bar-cn");
   });
 });
 

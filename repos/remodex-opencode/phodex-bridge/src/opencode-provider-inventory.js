@@ -199,7 +199,8 @@ function formatProviderDisplayNameFromId(id) {
     .join(" ");
 }
 
-// 30 external providers with committed Assets.xcassets imagesets (provider-{id}-logo).
+// 56 providers with committed Assets.xcassets imagesets (provider-{id}-logo).
+// Includes 52 external providers + 4 core providers (codex, opencode, opencode-go, opencode-zen).
 const COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS = new Set([
   "anthropic",
   "openai",
@@ -231,6 +232,32 @@ const COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS = new Set([
   "novita",
   "ovhcloud",
   "scaleway",
+  "zai",
+  "moonshot",
+  "xiaomi",
+  "siliconflow",
+  "tencent",
+  "ollama",
+  "stepfun",
+  "poe",
+  "venice",
+  "nvidia",
+  "digitalocean",
+  "vultr",
+  "sap-ai-core",
+  "requesty",
+  "friendli",
+  "helicone",
+  "kilo",
+  "upstage",
+  "inception",
+  "inference",
+  "llmgateway",
+  "vercel",
+  "codex",
+  "opencode",
+  "opencode-go",
+  "opencode-zen",
 ]);
 
 // Maps upstream OpenCode provider IDs to committed logo asset provider IDs.
@@ -240,25 +267,99 @@ const PROVIDER_LOGO_ID_ALIASES = {
   vertex: "google-vertex",
   "google-vertex-anthropic": "google-vertex",
   aws: "amazon",
+  gemini: "google",
+  zhipuai: "zai",
+  "zhipuai-coding-plan": "zai",
+  "zai-coding-plan": "zai",
+  togetherai: "together",
+  "fireworks-ai": "fireworks",
+  "novita-ai": "novita",
+  "perplexity-agent": "perplexity",
+  "azure-cognitive-services": "azure",
+  "github-models": "github",
+  moonshotai: "moonshot",
+  "moonshotai-cn": "moonshot",
+  "xiaomi-token-plan-cn": "xiaomi",
+  "xiaomi-token-plan-sgp": "xiaomi",
+  "xiaomi-token-plan-ams": "xiaomi",
+  "siliconflow-cn": "siliconflow",
+  "minimax-cn": "minimax",
+  "minimax-cn-coding-plan": "minimax",
+  "tencent-coding-plan": "tencent",
+  "tencent-tokenhub": "tencent",
+  "alibaba-coding-plan-cn": "alibaba",
+  zenmux: "opencode",
+  nova: "amazon",
+  v0: "vercel",
+  "ollama-cloud": "ollama",
 };
+
+// Validate alias targets at module load time so a bad alias fails tests immediately.
+for (const [alias, target] of Object.entries(PROVIDER_LOGO_ID_ALIASES)) {
+  if (!COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(target)) {
+    throw new Error(
+      `Alias "${alias}" -> "${target}" but "${target}" not in COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS`,
+    );
+  }
+}
+
+// Variant suffixes that indicate a regional or plan variant of a parent brand.
+// Sorted longest-first so compound suffixes (e.g. "-cn-coding-plan") strip before
+// their component parts (e.g. "-cn").
+const PROVIDER_LOGO_VARIANT_SUFFIXES = [
+  "-cn-coding-plan",
+  "-coding-plan",
+  "-token-plan",
+  "-workers-ai",
+  "-ai-gateway",
+  "-tokenhub",
+  "-models",
+  "-cloud",
+  "-agent",
+  "-sgp",
+  "-ams",
+  "-ai",
+  "-cn",
+];
+
+function stripVariantSuffixes(id) {
+  for (const suffix of PROVIDER_LOGO_VARIANT_SUFFIXES) {
+    if (id.endsWith(suffix)) {
+      return id.slice(0, -suffix.length);
+    }
+  }
+  return id;
+}
 
 function resolveLogoProviderId(id, displayName) {
   const canonical = canonicalProviderId(id);
+  if (!canonical) {
+    return undefined;
+  }
   if (canonical === "opencode-go") {
     return "opencode-go";
   }
   if (canonical === "opencode") {
     const normalized = readString(displayName).trim().toLowerCase();
-    if (normalized !== "opencode zen") {
-      return undefined;
+    if (normalized === "opencode zen") {
+      return "opencode-zen";
     }
-    return "opencode-zen";
+    // Fall through to committed set check for standard "opencode"
   }
 
   const alias = PROVIDER_LOGO_ID_ALIASES[canonical];
   if (alias) {
+    if (!COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(alias)) {
+      return undefined;
+    }
     return alias;
   }
+
+  const stripped = stripVariantSuffixes(canonical);
+  if (stripped !== canonical && COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(stripped)) {
+    return stripped;
+  }
+
   if (COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS.has(canonical)) {
     return canonical;
   }
@@ -512,6 +613,8 @@ module.exports = {
   resolveProviderListPayload,
   resolveLogoProviderId,
   buildProviderLogoCatalog,
+  stripVariantSuffixes,
   COMMITTED_EXTERNAL_LOGO_PROVIDER_IDS,
   PROVIDER_LOGO_ID_ALIASES,
+  PROVIDER_LOGO_VARIANT_SUFFIXES,
 };
